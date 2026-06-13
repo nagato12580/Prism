@@ -36,17 +36,24 @@ def db_session():
 def client(db_session):
     """FastAPI 测试客户端，db 依赖注入替换为内存 session。"""
     import os
+    prev_skip_engine = os.environ.get("SKIP_ENGINE")
     os.environ["SKIP_ENGINE"] = "1"
-    # create_app will be available after Task 8; import lazily
-    from backend.app.main import create_app
-    app = create_app()
+    try:
+        from backend.app.main import create_app
+        app = create_app()
 
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
+        def override_get_db():
+            try:
+                yield db_session
+            finally:
+                pass
 
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
-    app.dependency_overrides.clear()
+        app.dependency_overrides[get_db] = override_get_db
+        with TestClient(app) as test_client:
+            yield test_client
+        app.dependency_overrides.clear()
+    finally:
+        if prev_skip_engine is None:
+            os.environ.pop("SKIP_ENGINE", None)
+        else:
+            os.environ["SKIP_ENGINE"] = prev_skip_engine

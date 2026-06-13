@@ -26,6 +26,9 @@ def list_sessions(db: Session = Depends(get_db)):
 
 @router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageOut])
 def list_messages(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
     return db.query(ChatMessage).filter(ChatMessage.session_id == session_id)\
         .order_by(ChatMessage.created_at).all()
 

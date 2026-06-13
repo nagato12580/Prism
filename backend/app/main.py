@@ -38,6 +38,7 @@ def _stop_engine():
             _engine_proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             _engine_proc.kill()
+        _engine_proc = None
         print("[backend] Engine 已停止")
 
 
