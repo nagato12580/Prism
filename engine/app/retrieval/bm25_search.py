@@ -31,5 +31,8 @@ def bm25_search(query: str, top_k: int = 10) -> list[dict]:
                 })
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
