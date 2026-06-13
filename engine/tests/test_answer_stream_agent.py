@@ -27,3 +27,45 @@ def test_answer_stream_emits_error_when_runner_build_fails(monkeypatch):
     lines = list(answer.answer_stream("hello", []))
 
     assert json.loads(lines[0]) == {"type": "error", "data": "no model"}
+
+
+def test_judge_rag_treats_sufficient_without_answer_basis_as_malformed(
+    monkeypatch,
+):
+    monkeypatch.setattr(answer, "chat", lambda messages: '{"status":"sufficient"}')
+
+    result = answer._judge_rag("q", "q", [], [])
+
+    assert result.status == "insufficient"
+    assert result.missing == [
+        "The evidence judge returned malformed sufficient JSON."
+    ]
+
+
+def test_judge_rag_treats_invalid_json_as_insufficient(monkeypatch):
+    monkeypatch.setattr(answer, "chat", lambda messages: "not json")
+
+    result = answer._judge_rag("q", "q", [], [])
+
+    assert result.status == "insufficient"
+    assert "The evidence judge returned invalid JSON." in result.missing
+
+
+def test_judge_rag_accepts_valid_sufficient_output(monkeypatch):
+    monkeypatch.setattr(
+        answer,
+        "chat",
+        lambda messages: json.dumps(
+            {
+                "status": "sufficient",
+                "answer_basis": "The retrieved notes answer the question.",
+                "useful_chunk_ids": ["chunk-1"],
+            }
+        ),
+    )
+
+    result = answer._judge_rag("q", "q", [], [])
+
+    assert result.status == "sufficient"
+    assert result.answer_basis == "The retrieved notes answer the question."
+    assert result.useful_chunk_ids == ["chunk-1"]

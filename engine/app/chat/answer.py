@@ -90,10 +90,22 @@ def _judge_rag(
         )
 
     if payload.get("status") == "sufficient":
+        answer_basis = payload.get("answer_basis")
+        useful_chunk_ids = payload.get("useful_chunk_ids", [])
+        if (
+            not isinstance(answer_basis, str)
+            or not answer_basis.strip()
+            or not isinstance(useful_chunk_ids, list)
+        ):
+            return RagJudgeResult(
+                status="insufficient",
+                missing=["The evidence judge returned malformed sufficient JSON."],
+            )
+
         return RagJudgeResult(
             status="sufficient",
-            answer_basis=str(payload.get("answer_basis", "")),
-            useful_chunk_ids=_as_string_list(payload.get("useful_chunk_ids")),
+            answer_basis=answer_basis,
+            useful_chunk_ids=_as_string_list(useful_chunk_ids),
         )
 
     clarify = payload.get("clarify")
