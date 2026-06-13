@@ -42,16 +42,20 @@ export const knowledgeApi = {
     }),
   delete: (id: string) =>
     request<{ detail: string }>(`/knowledge/${id}`, { method: 'DELETE' }),
-  uploadFile: (file: File, category?: string) => {
+  uploadFile: async (file: File, category?: string): Promise<KnowledgeItem> => {
     const form = new FormData()
     form.append('file', file)
     if (category) form.append('category', category)
-    return fetch(`${BASE}/upload/file`, { method: 'POST', body: form }).then((r) => r.json())
+    const resp = await fetch(`${BASE}/upload/file`, { method: 'POST', body: form })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
   },
-  uploadUrl: (url: string, category?: string) => {
+  uploadUrl: async (url: string, category?: string): Promise<KnowledgeItem> => {
     const form = new FormData()
     form.append('url', url)
     if (category) form.append('category', category)
-    return fetch(`${BASE}/upload/url`, { method: 'POST', body: form }).then((r) => r.json())
+    const resp = await fetch(`${BASE}/upload/url`, { method: 'POST', body: form })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
   },
 }

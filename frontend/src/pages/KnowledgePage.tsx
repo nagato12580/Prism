@@ -9,6 +9,7 @@ export function KnowledgePage() {
   const [urlInput, setUrlInput] = useState('')
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
+  const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = async () => {
@@ -29,25 +30,45 @@ export function KnowledgePage() {
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    await knowledgeApi.uploadFile(file)
-    await load()
-    if (fileRef.current) fileRef.current.value = ''
+    setError(null)
+    try {
+      await knowledgeApi.uploadFile(file)
+      await load()
+    } catch (e) {
+      setError('文件上传失败: ' + (e as Error).message)
+    } finally {
+      if (fileRef.current) fileRef.current.value = ''
+    }
   }
 
   const handleUrl = async () => {
-    if (!urlInput) return
-    await knowledgeApi.uploadUrl(urlInput)
-    setUrlInput('')
-    await load()
+    if (!urlInput.trim()) return
+    if (!urlInput.startsWith('http://') && !urlInput.startsWith('https://')) {
+      setError('请输入有效的 URL（以 http:// 或 https:// 开头）')
+      return
+    }
+    setError(null)
+    try {
+      await knowledgeApi.uploadUrl(urlInput)
+      setUrlInput('')
+      await load()
+    } catch (e) {
+      setError('URL 导入失败: ' + (e as Error).message)
+    }
   }
 
   const handleCreate = async () => {
-    if (!newTitle) return
-    await knowledgeApi.create({ title: newTitle, content: newContent, source_type: 'manual' })
-    setNewTitle('')
-    setNewContent('')
-    setShowCreate(false)
-    await load()
+    if (!newTitle.trim()) return
+    setError(null)
+    try {
+      await knowledgeApi.create({ title: newTitle, content: newContent, source_type: 'manual' })
+      setNewTitle('')
+      setNewContent('')
+      setShowCreate(false)
+      await load()
+    } catch (e) {
+      setError('创建失败: ' + (e as Error).message)
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -87,6 +108,13 @@ export function KnowledgePage() {
           <LinkIcon size={16} /> 导入
         </button>
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+          {error}
+          <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
       {/* 新建笔记表单 */}
       {showCreate && (
