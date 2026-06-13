@@ -51,6 +51,19 @@ const conversationList = [
   },
 ]
 
+function normalizeClarifyOptions(value: unknown): ClarifyOption[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(
+      (option): option is ClarifyOption =>
+        typeof option === 'object' &&
+        option !== null &&
+        typeof (option as ClarifyOption).label === 'string' &&
+        typeof (option as ClarifyOption).value === 'string'
+    )
+    .slice(0, 3)
+}
+
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -67,6 +80,7 @@ export function ChatPage() {
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
   const endRef = useRef<HTMLDivElement>(null)
+  const pendingClarifyRef = useRef<string | null>(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -110,7 +124,7 @@ export function ChatPage() {
         } else if (msg.type === 'clarify') {
           setLastClarify({
             question: msg.data?.question ?? '我需要你补充一点信息。',
-            options: msg.data?.options ?? [],
+            options: normalizeClarifyOptions(msg.data?.options),
           })
         } else if (msg.type === 'sources') setLastSources(msg.data)
         else if (msg.type === 'token') appendToLast(msg.data)
@@ -165,6 +179,21 @@ export function ChatPage() {
       setSending(false)
     }
   }
+
+  const sendClarifyFollowup = (value: string) => {
+    if (sending) {
+      pendingClarifyRef.current = value
+      return
+    }
+    send(value)
+  }
+
+  useEffect(() => {
+    if (sending || !pendingClarifyRef.current) return
+    const value = pendingClarifyRef.current
+    pendingClarifyRef.current = null
+    send(value)
+  }, [sending])
 
   const startNewConversation = () => {
     setActiveConversation('current')
@@ -266,7 +295,7 @@ export function ChatPage() {
                       [msg.id]: !current[msg.id],
                     }))
                   }
-                  onClarifySelect={(value) => send(value)}
+                  onClarifySelect={sendClarifyFollowup}
                 />
               ))}
               <div ref={endRef} />
