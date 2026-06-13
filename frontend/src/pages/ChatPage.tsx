@@ -69,6 +69,10 @@ function normalizeClarifyQuestion(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : '我需要你补充一点信息。'
 }
 
+function safeString(value: unknown, fallback = '') {
+  return typeof value === 'string' ? value : fallback
+}
+
 function normalizeSources(value: unknown): Source[] {
   if (!Array.isArray(value)) return []
   return value
@@ -123,18 +127,18 @@ export function ChatPage() {
       try {
         const msg = JSON.parse(line)
         if (msg.type === 'agent_status') {
-          setLastAgentStatus(msg.data?.label ?? '')
+          setLastAgentStatus(safeString(msg.data?.label))
         } else if (msg.type === 'tool_call') {
           addLastToolRun({
             id: crypto.randomUUID(),
-            tool: msg.data?.tool ?? 'tool',
-            query: msg.data?.query ?? '',
+            tool: safeString(msg.data?.tool, 'tool'),
+            query: safeString(msg.data?.query),
             status: 'running',
           })
         } else if (msg.type === 'tool_result') {
-          finishLastToolRun(msg.data?.tool ?? 'tool', {
-            status: msg.data?.status === 'error' ? 'error' : 'success',
-            summary: msg.data?.summary ?? '',
+          finishLastToolRun(safeString(msg.data?.tool, 'tool'), {
+            status: safeString(msg.data?.status) === 'error' ? 'error' : 'success',
+            summary: safeString(msg.data?.summary),
             stats: msg.data?.stats,
             latencyMs: msg.data?.latency_ms,
           })
