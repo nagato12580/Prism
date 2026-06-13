@@ -91,3 +91,59 @@ def test_agentic_rag_returns_clarification_when_still_insufficient():
     assert result.missing == ["Need a directory scope"]
     assert result.clarify["question"] == "Which scope should I use?"
     assert result.iterations == 2
+
+
+def test_agentic_rag_preserves_missing_when_later_iteration_has_none():
+    calls = 0
+
+    def search(query: str, top_k: int):
+        return []
+
+    def load_chunks(chunk_ids: list[str]):
+        return {}
+
+    def judge(question: str, query: str, evidence: list[dict], missing: list[str]):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return RagJudgeResult(
+                status="insufficient",
+                missing=["Need scope"],
+                rewrite_query="narrower scope",
+            )
+        return RagJudgeResult(status="insufficient", missing=[])
+
+    result = AgenticRagRunner(search, load_chunks, judge, max_iterations=2, top_k=8).run(
+        "Summarize it"
+    )
+
+    assert result.status == "insufficient"
+    assert result.missing == ["Need scope"]
+
+
+def test_agentic_rag_deduplicates_chunk_hits_for_loading_and_sources():
+    loaded_chunk_ids = []
+
+    def search(query: str, top_k: int):
+        return [
+            {"chunk_id": "c1", "item_id": "i1", "score": 0.95},
+            {"chunk_id": "c1", "item_id": "i1-duplicate", "score": 0.9},
+        ]
+
+    def load_chunks(chunk_ids: list[str]):
+        loaded_chunk_ids.append(chunk_ids)
+        return {"c1": "Phase 2 uses LangChain function calling."}
+
+    def judge(question: str, query: str, evidence: list[dict], missing: list[str]):
+        return RagJudgeResult(
+            status="sufficient",
+            answer_basis="LangChain function calling is specified.",
+            useful_chunk_ids=["c1"],
+        )
+
+    result = AgenticRagRunner(search, load_chunks, judge, max_iterations=3, top_k=8).run(
+        "How is Phase 2 implemented?"
+    )
+
+    assert loaded_chunk_ids == [["c1"]]
+    assert result.sources == [{"chunk_id": "c1", "item_id": "i1", "score": 0.95}]

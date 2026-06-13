@@ -79,7 +79,7 @@ class AgenticRagRunner:
                     iterations=iteration,
                 )
 
-            missing = judgment.missing
+            missing = judgment.missing or missing
             clarify = judgment.clarify or clarify
             if judgment.rewrite_query and iteration < self.max_iterations:
                 query = judgment.rewrite_query
@@ -92,6 +92,7 @@ class AgenticRagRunner:
         )
 
     def _build_evidence(self, hits: list[SearchHit]) -> list[Evidence]:
+        hits = self._first_hits_by_chunk(hits)
         chunk_ids = [hit["chunk_id"] for hit in hits if "chunk_id" in hit]
         chunk_text_by_id = self.load_chunks(chunk_ids)
         return [
@@ -103,7 +104,23 @@ class AgenticRagRunner:
     def _useful_sources(
         hits: list[SearchHit], useful_chunk_ids: list[str]
     ) -> list[SearchHit]:
+        hits = AgenticRagRunner._first_hits_by_chunk(hits)
         useful = set(useful_chunk_ids)
         if not useful:
             return hits
         return [hit for hit in hits if hit.get("chunk_id") in useful]
+
+    @staticmethod
+    def _first_hits_by_chunk(hits: list[SearchHit]) -> list[SearchHit]:
+        seen_chunk_ids: set[str] = set()
+        unique_hits: list[SearchHit] = []
+        for hit in hits:
+            chunk_id = hit.get("chunk_id")
+            if chunk_id is None:
+                unique_hits.append(hit)
+                continue
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
+            unique_hits.append(hit)
+        return unique_hits
