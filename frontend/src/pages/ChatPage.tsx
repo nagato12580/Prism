@@ -17,6 +17,7 @@ import {
   type ClarifyOption,
   type ClarifyRequest,
   type Message,
+  type Source,
   type ToolRun,
 } from '@/app/chatStore'
 import { cn } from '@/lib/utils'
@@ -62,6 +63,22 @@ function normalizeClarifyOptions(value: unknown): ClarifyOption[] {
         typeof (option as ClarifyOption).value === 'string'
     )
     .slice(0, 3)
+}
+
+function normalizeClarifyQuestion(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : '我需要你补充一点信息。'
+}
+
+function normalizeSources(value: unknown): Source[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((source): source is Record<string, unknown> => typeof source === 'object' && source !== null)
+    .map((source) => ({
+      chunk_id: String(source.chunk_id ?? ''),
+      item_id: String(source.item_id ?? ''),
+      score: Number(source.score ?? 0),
+    }))
+    .filter((source) => source.chunk_id || source.item_id)
 }
 
 export function ChatPage() {
@@ -123,10 +140,10 @@ export function ChatPage() {
           })
         } else if (msg.type === 'clarify') {
           setLastClarify({
-            question: msg.data?.question ?? '我需要你补充一点信息。',
+            question: normalizeClarifyQuestion(msg.data?.question),
             options: normalizeClarifyOptions(msg.data?.options),
           })
-        } else if (msg.type === 'sources') setLastSources(msg.data)
+        } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data))
         else if (msg.type === 'token') appendToLast(msg.data)
         else if (msg.type === 'done') finishLast()
         else if (msg.type === 'error') {
