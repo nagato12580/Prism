@@ -48,3 +48,19 @@ def test_knowledge_search_records_sources_and_stats():
     assert ctx.citations == [{"chunk_id": "c1", "item_id": "i1", "score": 0.9}]
     assert ctx.stats_holder["knowledge_search"]["hit_count"] == 1
     assert ctx.stats_holder["knowledge_search"]["iterations"] == 1
+
+
+def test_knowledge_search_dedupes_shared_citations_across_calls():
+    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
+    tool = next(t for t in build_enabled_tools(ctx) if t.name == "knowledge_search")
+
+    first_text = tool.invoke({"query": "phase 2"})
+    second_text = tool.invoke({"query": "phase 2"})
+
+    assert json.loads(first_text)["sources"] == [
+        {"chunk_id": "c1", "item_id": "i1", "score": 0.9}
+    ]
+    assert json.loads(second_text)["sources"] == [
+        {"chunk_id": "c1", "item_id": "i1", "score": 0.9}
+    ]
+    assert ctx.citations == [{"chunk_id": "c1", "item_id": "i1", "score": 0.9}]

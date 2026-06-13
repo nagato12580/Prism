@@ -16,6 +16,24 @@ class KnowledgeSearchInput(BaseModel):
     query: str = Field(..., description="Question or search query for Prism knowledge.")
 
 
+def _citation_key(source: Any) -> tuple[str, str]:
+    if isinstance(source, dict) and source.get("chunk_id") is not None:
+        return ("chunk_id", str(source["chunk_id"]))
+    return (
+        "json",
+        json.dumps(source, ensure_ascii=False, sort_keys=True, default=str),
+    )
+
+
+def _append_unique_citations(citations: list[Any], sources: list[Any]) -> None:
+    seen = {_citation_key(citation) for citation in citations}
+    for source in sources:
+        key = _citation_key(source)
+        if key not in seen:
+            citations.append(source)
+            seen.add(key)
+
+
 def build(ctx: ToolContext) -> StructuredTool:
     def run(query: str) -> str:
         if ctx.rag_runner is None:
@@ -34,7 +52,7 @@ def build(ctx: ToolContext) -> StructuredTool:
 
         result = ctx.rag_runner.run(query)
         sources = list(getattr(result, "sources", []))
-        ctx.citations.extend(sources)
+        _append_unique_citations(ctx.citations, sources)
         ctx.stats_holder[KEY] = {
             "hit_count": len(sources),
             "iterations": getattr(result, "iterations", 0),
