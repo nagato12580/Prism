@@ -12,7 +12,13 @@ import {
   Plus,
   Send,
 } from 'lucide-react'
-import { useChatStore, type Message } from '@/app/chatStore'
+import {
+  useChatStore,
+  type ClarifyOption,
+  type ClarifyRequest,
+  type Message,
+  type ToolRun,
+} from '@/app/chatStore'
 import { cn } from '@/lib/utils'
 
 const starterPrompts = [
@@ -54,6 +60,10 @@ export function ChatPage() {
   const addMessage = useChatStore((s) => s.addMessage)
   const appendToLast = useChatStore((s) => s.appendToLast)
   const setLastSources = useChatStore((s) => s.setLastSources)
+  const setLastAgentStatus = useChatStore((s) => s.setLastAgentStatus)
+  const addLastToolRun = useChatStore((s) => s.addLastToolRun)
+  const finishLastToolRun = useChatStore((s) => s.finishLastToolRun)
+  const setLastClarify = useChatStore((s) => s.setLastClarify)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
   const endRef = useRef<HTMLDivElement>(null)
@@ -81,7 +91,28 @@ export function ChatPage() {
 
       try {
         const msg = JSON.parse(line)
-        if (msg.type === 'sources') setLastSources(msg.data)
+        if (msg.type === 'agent_status') {
+          setLastAgentStatus(msg.data?.label ?? '')
+        } else if (msg.type === 'tool_call') {
+          addLastToolRun({
+            id: crypto.randomUUID(),
+            tool: msg.data?.tool ?? 'tool',
+            query: msg.data?.query ?? '',
+            status: 'running',
+          })
+        } else if (msg.type === 'tool_result') {
+          finishLastToolRun(msg.data?.tool ?? 'tool', {
+            status: msg.data?.status === 'error' ? 'error' : 'success',
+            summary: msg.data?.summary ?? '',
+            stats: msg.data?.stats,
+            latencyMs: msg.data?.latency_ms,
+          })
+        } else if (msg.type === 'clarify') {
+          setLastClarify({
+            question: msg.data?.question ?? '我需要你补充一点信息。',
+            options: msg.data?.options ?? [],
+          })
+        } else if (msg.type === 'sources') setLastSources(msg.data)
         else if (msg.type === 'token') appendToLast(msg.data)
         else if (msg.type === 'done') finishLast()
         else if (msg.type === 'error') {
@@ -235,6 +266,7 @@ export function ChatPage() {
                       [msg.id]: !current[msg.id],
                     }))
                   }
+                  onClarifySelect={(value) => send(value)}
                 />
               ))}
               <div ref={endRef} />
@@ -329,12 +361,18 @@ function MessageBlock({
   msg,
   sourcesOpen,
   onToggleSources,
+  onClarifySelect,
 }: {
   msg: Message
   sourcesOpen: boolean
   onToggleSources: () => void
+  onClarifySelect: (value: string) => void
 }) {
   const isUser = msg.role === 'user'
+  const handleClarifySelect = (option: ClarifyOption) => {
+    const label = option.label.trim()
+    onClarifySelect(label ? `${msg.clarify?.question ?? ''}\n${label}`.trim() : option.value)
+  }
   const isError = !isUser && msg.content.includes('请求失败：')
 
   return (
@@ -352,7 +390,13 @@ function MessageBlock({
           {isUser ? (
             <p className="whitespace-pre-wrap text-left">{msg.content}</p>
           ) : (
-            <AssistantContent msg={msg} isError={isError} />
+            <>
+              {msg.toolRuns && msg.toolRuns.length > 0 && <ToolProcess runs={msg.toolRuns} />}
+              <AssistantContent msg={msg} isError={isError} />
+              {msg.clarify && (
+                <ClarifyCard clarify={msg.clarify} onSelect={handleClarifySelect} />
+              )}
+            </>
           )}
         </div>
 
@@ -413,7 +457,7 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
           className="h-2 w-2 rounded-full bg-[var(--prism-cyan)]"
           style={{ animation: 'prism-pulse 1s ease-in-out infinite' }}
         />
-        <span>正在检索知识库...</span>
+        <span className="min-w-0 break-words">{msg.agentStatus || '正在检索知识库...'}</span>
       </div>
     )
   }
@@ -429,6 +473,73 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
       )}
     </div>
   )
+}
+
+function ToolProcess({ runs }: { runs: ToolRun[] }) {
+  return (
+    <div className="mb-3 flex flex-wrap gap-2 text-xs">
+      {runs.map((run) => (
+        <span
+          key={run.id}
+          className={cn(
+            'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium',
+            run.status === 'running' && 'border-blue-100 bg-blue-50 text-blue-700',
+            run.status === 'success' && 'border-emerald-100 bg-emerald-50 text-emerald-700',
+            run.status === 'error' && 'border-red-100 bg-red-50 text-red-700'
+          )}
+          title={run.summary || run.query}
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+          <span className="max-w-28 truncate sm:max-w-36">{toolLabel(run.tool)}</span>
+          {run.status === 'running' && <span className="shrink-0">运行中</span>}
+          {run.summary && (
+            <span className="min-w-0 max-w-40 truncate text-slate-500 sm:max-w-56">
+              {run.summary}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function ClarifyCard({
+  clarify,
+  onSelect,
+}: {
+  clarify: ClarifyRequest
+  onSelect: (option: ClarifyOption) => void
+}) {
+  return (
+    <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2.5 text-left">
+      <p className="text-sm font-medium leading-6 text-amber-950">{clarify.question}</p>
+      {clarify.options.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {clarify.options.map((option) => (
+            <button
+              key={`${option.value}-${option.label}`}
+              type="button"
+              onClick={() => onSelect(option)}
+              className="max-w-full rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:border-amber-300 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            >
+              <span className="block max-w-full truncate">{option.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function toolLabel(tool: string) {
+  const labels: Record<string, string> = {
+    retrieve: '检索',
+    search: '搜索',
+    rerank: '重排',
+    synthesize: '生成',
+    tool: '工具',
+  }
+  return labels[tool] ?? tool
 }
 
 function formatScore(score: number) {
