@@ -61,6 +61,30 @@ def _call_value(tool_call: Any, key: str, default: Any = None) -> Any:
     return getattr(tool_call, key, default)
 
 
+def _payload_clarify(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]] | None:
+    clarify = payload if payload.get("status") == "clarify" else payload.get("clarify")
+    if not isinstance(clarify, dict):
+        return None
+
+    question = clarify.get("question")
+    options = clarify.get("options")
+    if not isinstance(question, str) or not isinstance(options, list):
+        return None
+
+    validated_options: list[dict[str, str]] = []
+    for option in options:
+        if not isinstance(option, dict):
+            return None
+        if not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in option.items()
+        ):
+            return None
+        validated_options.append(dict(option))
+
+    return question, validated_options
+
+
 class LangChainAgentRunner:
     def __init__(
         self,
@@ -122,11 +146,10 @@ class LangChainAgentRunner:
                     if sources:
                         yield sources_event(sources)
 
-                    if payload.get("status") == "clarify":
-                        yield clarify_event(
-                            str(payload.get("question", "I need more information.")),
-                            list(payload.get("options") or []),
-                        )
+                    clarify = _payload_clarify(payload)
+                    if clarify is not None:
+                        question, options = clarify
+                        yield clarify_event(question, options)
                         yield done_event()
                         return
 

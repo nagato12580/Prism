@@ -110,6 +110,119 @@ def test_runner_emits_clarify_and_stops():
     ]
 
 
+class FakeInsufficientClarifyTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "insufficient",
+                "summary": "Knowledge base evidence is insufficient.",
+                "clarify": {
+                    "question": "Which scope should I use?",
+                    "options": [
+                        {
+                            "label": "Current knowledge base",
+                            "value": "scope:knowledge",
+                        }
+                    ],
+                },
+            }
+        )
+
+
+class FakeInsufficientClarifyModel:
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        return FakeToolCall(
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "name": "knowledge_search",
+                    "args": {"query": "phase 2"},
+                }
+            ]
+        )
+
+
+def test_runner_emits_nested_clarify_from_insufficient_tool_payload_and_stops():
+    runner = LangChainAgentRunner(
+        model=FakeInsufficientClarifyModel(),
+        tools=[FakeInsufficientClarifyTool()],
+    )
+
+    lines = list(runner.stream("What scope?", []))
+
+    assert event_types(lines) == [
+        "agent_status",
+        "tool_call",
+        "tool_result",
+        "clarify",
+        "done",
+    ]
+    clarify_data = json.loads(lines[-2])["data"]
+    assert clarify_data == {
+        "question": "Which scope should I use?",
+        "options": [{"label": "Current knowledge base", "value": "scope:knowledge"}],
+    }
+    assert not any(json.loads(line)["type"] == "token" for line in lines)
+
+
+class FakeMalformedClarifyTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "insufficient",
+                "summary": "Knowledge base evidence is insufficient.",
+                "clarify": {"question": ["Which scope?"], "options": "knowledge"},
+            }
+        )
+
+
+class FakeContinueAfterMalformedClarifyModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "knowledge_search",
+                        "args": {"query": "phase 2"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="Final answer")
+
+
+def test_runner_ignores_malformed_nested_clarify_and_continues():
+    runner = LangChainAgentRunner(
+        model=FakeContinueAfterMalformedClarifyModel(),
+        tools=[FakeMalformedClarifyTool()],
+    )
+
+    lines = list(runner.stream("What scope?", []))
+
+    assert event_types(lines) == [
+        "agent_status",
+        "tool_call",
+        "tool_result",
+        "token",
+        "done",
+    ]
+    assert json.loads(lines[-2])["data"] == "Final answer"
+
+
 class FakeStructuredFinalModel:
     def invoke(self, messages):
         return FakeToolCall(
