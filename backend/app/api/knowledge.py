@@ -1,5 +1,6 @@
 # prism/backend/app/api/knowledge.py
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import cast, String
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -42,7 +43,7 @@ def list_items(
     if source_type:
         query = query.filter(KnowledgeItem.source_type == source_type)
     if tag:
-        query = query.filter(KnowledgeItem.tags.contains(tag))
+        query = query.filter(cast(KnowledgeItem.tags, String).contains(f'"{tag}"'))
     return query.order_by(KnowledgeItem.created_at.desc()).all()
 
 
