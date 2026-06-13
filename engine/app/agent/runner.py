@@ -36,9 +36,23 @@ def _message_content(message: Any) -> str:
     content = getattr(message, "content", "")
     if isinstance(content, str):
         return content
-    if content is None:
+    if not isinstance(content, list):
         return ""
-    return str(content)
+
+    visible_text: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            visible_text.append(block)
+        elif isinstance(block, dict):
+            text = block.get("text")
+            if block.get("type") == "text" and isinstance(text, str):
+                visible_text.append(text)
+        else:
+            block_type = getattr(block, "type", None)
+            text = getattr(block, "text", None)
+            if block_type in (None, "text") and isinstance(text, str):
+                visible_text.append(text)
+    return "".join(visible_text)
 
 
 def _call_value(tool_call: Any, key: str, default: Any = None) -> Any:

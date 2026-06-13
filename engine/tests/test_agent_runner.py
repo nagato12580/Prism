@@ -108,3 +108,41 @@ def test_runner_emits_clarify_and_stops():
         "clarify",
         "done",
     ]
+
+
+class FakeStructuredFinalModel:
+    def invoke(self, messages):
+        return FakeToolCall(
+            content=[
+                {"type": "reasoning", "text": "private chain of thought"},
+                {"type": "text", "text": "Visible answer"},
+            ]
+        )
+
+
+def test_runner_streams_only_visible_text_from_structured_final_content():
+    runner = LangChainAgentRunner(model=FakeStructuredFinalModel(), tools=[])
+
+    lines = list(runner.stream("How?", []))
+
+    assert event_types(lines) == ["agent_status", "token", "done"]
+    token_data = json.loads(lines[1])["data"]
+    assert token_data == "Visible answer"
+    assert "private chain of thought" not in token_data
+
+
+class FakeReasoningOnlyModel:
+    def invoke(self, messages):
+        return FakeToolCall(
+            content=[
+                {"type": "reasoning", "text": "private chain of thought"},
+            ]
+        )
+
+
+def test_runner_skips_token_when_structured_final_content_has_no_visible_text():
+    runner = LangChainAgentRunner(model=FakeReasoningOnlyModel(), tools=[])
+
+    lines = list(runner.stream("How?", []))
+
+    assert event_types(lines) == ["agent_status", "done"]
