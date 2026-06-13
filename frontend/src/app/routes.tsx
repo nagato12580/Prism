@@ -1,14 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { MainLayout } from '@/layouts/MainLayout'
-
-// Placeholder pages until Task 10 and 11 create them
-function ChatPage() {
-  return <div className="p-4 text-gray-500">对话页面（Task 11 实现）</div>
-}
-
-function KnowledgePage() {
-  return <div className="p-4 text-gray-500">知识库页面（Task 10 实现）</div>
-}
+import { ChatPage } from '@/pages/ChatPage'
+import { KnowledgePage } from '@/pages/KnowledgePage'
 
 export const router = createBrowserRouter([
   {
