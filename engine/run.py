@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from engine.app.config import settings
 from engine.app.milvus_client import connect, ensure_collection
 from engine.app.api.ingest import router as ingest_router
+from engine.app.api.chat import router as chat_router
 
 
 def create_app():
@@ -15,6 +16,7 @@ def create_app():
 
     prefixed = APIRouter(prefix="/api/v1")
     prefixed.include_router(ingest_router)
+    prefixed.include_router(chat_router)
     app.include_router(prefixed)
 
     @app.get("/health")

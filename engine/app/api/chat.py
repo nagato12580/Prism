@@ -1,0 +1,21 @@
+# prism/engine/app/api/chat.py
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional
+from ..chat.answer import answer_stream
+
+router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+class ChatRequest(BaseModel):
+    query: str
+    history: Optional[list[dict]] = None
+
+
+@router.post("/answer")
+def chat_answer(req: ChatRequest):
+    def stream():
+        for line in answer_stream(req.query, req.history):
+            yield line
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
