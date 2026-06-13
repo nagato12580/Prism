@@ -1,67 +1,132 @@
-# prism/engine/app/chat/answer.py
-"""基础 RAG 问答：检索 → 拼接上下文 → LLM 流式生成。Phase 2 升级为 Agentic。"""
 import json
+from typing import Any
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from ..agent.events import error_event
+from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult
+from ..agent.runner import LangChainAgentRunner, create_chat_model
+from ..agent.tools import ToolContext, build_enabled_tools
 from ..config import settings
+from ..llm.client import chat
 from ..retrieval.hybrid import hybrid_search
-from ..llm.client import chat_stream
+
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 _Session = sessionmaker(bind=_engine)
 
-SYSTEM_PROMPT = """你是 Prism 个人知识助手。基于用户的个人知识库回答问题。
-规则：
-1. 只使用提供的参考资料回答，不要编造。
-2. 如果资料不足，明确说明并建议用户补充知识。
-3. 回答用中文，条理清晰。"""
-
 
 def _load_chunks(chunk_ids: list[str]) -> dict[str, str]:
-    """加载 chunk 文本，返回 {chunk_id: text}。"""
     from backend.app.models.knowledge_item import KnowledgeChunk
+
     db = _Session()
     try:
         chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(chunk_ids)).all()
-        return {c.id: c.chunk_text for c in chunks}
+        return {chunk.id: chunk.chunk_text for chunk in chunks}
     finally:
         db.close()
 
 
-def answer_stream(query: str, history: list[dict] = None):
-    """基础 RAG 问答流式生成。yield NDJSON 行。
+def _as_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
-    输出格式：
-    - {"type": "sources", "data": [{chunk_id, item_id, score}]}
-    - {"type": "token", "data": "token文本"}
-    - {"type": "done"}
-    """
-    history = history or []
+
+def _judge_rag(
+    question: str,
+    query: str,
+    evidence: list[dict[str, Any]],
+    missing: list[str],
+) -> RagJudgeResult:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You judge whether retrieved Prism knowledge evidence is enough to "
+                "answer the user's question. Return JSON only, with no markdown."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "search_query": query,
+                    "evidence": evidence,
+                    "previous_missing": missing,
+                    "required_json_shape": {
+                        "status": "sufficient or insufficient",
+                        "answer_basis": "grounded answer basis when sufficient",
+                        "useful_chunk_ids": ["chunk ids used when sufficient"],
+                        "missing": ["what evidence is missing when insufficient"],
+                        "rewrite_query": "better retrieval query when useful",
+                        "clarify": {
+                            "question": "optional clarification question",
+                            "options": [
+                                {"label": "option label", "value": "option value"}
+                            ],
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
     try:
-        # 1. 检索
-        results = hybrid_search(query, top_k=8)
-        chunk_map = _load_chunks([r["chunk_id"] for r in results]) if results else {}
+        payload = json.loads(chat(messages))
+    except Exception:
+        return RagJudgeResult(
+            status="insufficient",
+            missing=["The evidence judge returned invalid JSON."],
+        )
 
-        # 2. 发送来源
-        yield json.dumps({"type": "sources", "data": results}, ensure_ascii=False) + "\n"
+    if not isinstance(payload, dict):
+        return RagJudgeResult(
+            status="insufficient",
+            missing=["The evidence judge returned invalid JSON."],
+        )
 
-        # 3. 构建上下文
-        context_parts = []
-        for i, r in enumerate(results):
-            text = chunk_map.get(r["chunk_id"], "")
-            if text:
-                context_parts.append(f"[{i + 1}] {text}")
-        context = "\n\n".join(context_parts) if context_parts else "（无相关资料）"
+    if payload.get("status") == "sufficient":
+        return RagJudgeResult(
+            status="sufficient",
+            answer_basis=str(payload.get("answer_basis", "")),
+            useful_chunk_ids=_as_string_list(payload.get("useful_chunk_ids")),
+        )
 
-        # 4. LLM 流式生成
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "system", "content": f"参考资料：\n{context}"},
-        ] + history + [{"role": "user", "content": query}]
+    clarify = payload.get("clarify")
+    return RagJudgeResult(
+        status="insufficient",
+        missing=_as_string_list(payload.get("missing")),
+        rewrite_query=str(payload.get("rewrite_query") or ""),
+        clarify=clarify if isinstance(clarify, dict) else None,
+    )
 
-        for token in chat_stream(messages):
-            yield json.dumps({"type": "token", "data": token}, ensure_ascii=False) + "\n"
 
-        yield json.dumps({"type": "done"}) + "\n"
-    except Exception as e:
-        yield json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False) + "\n"
+def build_agent_runner() -> LangChainAgentRunner:
+    rag_runner = AgenticRagRunner(
+        search=lambda query, top_k: hybrid_search(query, top_k=top_k),
+        load_chunks=_load_chunks,
+        judge=_judge_rag,
+        max_iterations=3,
+        top_k=8,
+    )
+    ctx = ToolContext(
+        rag_runner=rag_runner,
+        citations=[],
+        stats_holder={},
+        clarify_holder={},
+    )
+    tools = build_enabled_tools(ctx)
+    model = create_chat_model(settings)
+    return LangChainAgentRunner(model=model, tools=tools)
+
+
+def answer_stream(query: str, history: list[dict] | None = None):
+    try:
+        runner = build_agent_runner()
+        yield from runner.stream(query, history or [])
+    except Exception as exc:
+        yield error_event(str(exc))
