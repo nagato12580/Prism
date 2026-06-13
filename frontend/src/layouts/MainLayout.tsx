@@ -1,34 +1,121 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BookOpen, Menu, MessageSquare, Sparkles, X } from 'lucide-react'
+import {
+  BookOpen,
+  CircleUserRound,
+  Moon,
+  Menu,
+  MessageSquare,
+  Search,
+  Sun,
+  X,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
-  { to: '/chat', label: '对话', description: '知识问答', icon: MessageSquare },
-  { to: '/knowledge', label: '知识库', description: '资料工作台', icon: BookOpen },
+  { to: '/chat', label: '对话', icon: MessageSquare },
+  { to: '/knowledge', label: '知识库', icon: BookOpen },
 ]
 
 const mobileNavId = 'prism-mobile-navigation'
 
-function Brand() {
+function Brand({ isDark = false }: { isDark?: boolean }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="prism-mark flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white">
-        <Sparkles size={20} />
+    <div className="flex h-14 items-center gap-3 px-3">
+      <div
+        className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-black tracking-tight shadow-[0_0_24px_rgba(59,130,246,0.25)]',
+          isDark ? 'bg-white text-slate-950' : 'bg-slate-950 text-white'
+        )}
+      >
+        PR
       </div>
       <div className="min-w-0">
-        <div className="text-base font-semibold tracking-normal text-white">Prism</div>
-        <div className="truncate text-xs text-slate-400">Personal knowledge lab</div>
+        <div className={cn('truncate text-[15px] font-semibold tracking-normal', isDark ? 'text-white' : 'text-slate-950')}>
+          棱镜 Prism
+        </div>
+        <div className="truncate text-[11px] text-slate-500">Personal knowledge lab</div>
       </div>
     </div>
   )
 }
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDark?: boolean }) {
   const location = useLocation()
 
   return (
-    <nav className="mt-8 flex flex-col gap-2">
+    <nav className="mt-5 space-y-6 px-2">
+      <div className="px-2 text-[11px] font-medium text-slate-500">工作台</div>
+      <div className="space-y-1">
+        <NavItem
+          to="/chat"
+          label="对话"
+          icon={MessageSquare}
+          active={
+            location.pathname === '/chat' ||
+            location.pathname.startsWith('/chat/') ||
+            location.pathname === '/'
+          }
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+      </div>
+
+      <div className="px-2 text-[11px] font-medium text-slate-500">知识与记忆</div>
+      <div className="space-y-1">
+        <NavItem
+          to="/knowledge"
+          label="知识库"
+          icon={BookOpen}
+          active={location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+      </div>
+    </nav>
+  )
+}
+
+function NavItem({
+  to,
+  label,
+  icon: Icon,
+  active,
+  isDark = false,
+  onNavigate,
+}: {
+  to: string
+  label: string
+  icon: typeof MessageSquare
+  active: boolean
+  isDark?: boolean
+  onNavigate?: () => void
+}) {
+  return (
+    <NavLink
+      to={to}
+      aria-current={active ? 'page' : undefined}
+      onClick={onNavigate}
+      className={cn(
+        'group flex h-10 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80',
+        active
+          ? 'bg-[var(--prism-blue)] text-white shadow-[0_10px_24px_-16px_rgba(37,99,235,0.9)]'
+          : isDark
+            ? 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
+            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950'
+      )}
+    >
+      <Icon size={16} className="shrink-0" />
+      <span>{label}</span>
+    </NavLink>
+  )
+}
+
+function CompactNav({ onNavigate, isDark = false }: { onNavigate?: () => void; isDark?: boolean }) {
+  const location = useLocation()
+
+  return (
+    <nav className="mt-5 space-y-1 px-2">
       {navItems.map((item) => {
         const Icon = item.icon
         const active =
@@ -43,19 +130,16 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             aria-current={active ? 'page' : undefined}
             onClick={onNavigate}
             className={cn(
-              'group flex items-center gap-3 rounded-xl border px-3 py-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80',
+              'group flex h-10 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80',
               active
-                ? 'border-cyan-400/30 bg-white/10 text-white shadow-[inset_3px_0_0_var(--prism-cyan)]'
-                : 'border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.06] hover:text-white'
+                ? 'bg-[var(--prism-blue)] text-white'
+                : isDark
+                  ? 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950'
             )}
           >
             <Icon size={18} className="shrink-0" />
-            <span className="min-w-0">
-              <span className="block font-medium">{item.label}</span>
-              <span className="block truncate text-xs text-slate-500 group-hover:text-slate-400">
-                {item.description}
-              </span>
-            </span>
+            <span>{item.label}</span>
           </NavLink>
         )
       })}
@@ -65,16 +149,24 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 
 export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const isDark = theme === 'dark'
 
   return (
-    <div className="fixed inset-0 flex overflow-hidden bg-[var(--prism-surface)]">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-white/10 bg-[var(--prism-ink)] px-4 py-5 lg:flex">
-        <Brand />
-        <NavList />
-        <div className="mt-auto rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-6 text-slate-400">
-          <div className="mb-1 font-medium text-slate-200">Prism Lab</div>
-          <div>把资料、检索和回答收束在一个清晰的工作台里。</div>
-        </div>
+    <div
+      className={cn(
+        'fixed inset-0 flex overflow-hidden transition-colors',
+        isDark ? 'bg-[#070917] text-slate-100' : 'bg-[#f4f7fb] text-slate-950'
+      )}
+    >
+      <aside
+        className={cn(
+          'hidden w-[220px] shrink-0 flex-col border-r transition-colors lg:flex',
+          isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-[#f8fbff]'
+        )}
+      >
+        <Brand isDark={isDark} />
+        <NavList isDark={isDark} />
       </aside>
 
       {mobileOpen ? (
@@ -88,10 +180,13 @@ export function MainLayout() {
           />
           <aside
             id={mobileNavId}
-            className="relative flex h-full w-72 max-w-[86vw] flex-col bg-[var(--prism-ink)] px-4 py-5 shadow-2xl"
+            className={cn(
+              'relative flex h-full w-72 max-w-[86vw] flex-col border-r py-2 shadow-2xl',
+              isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-white'
+            )}
           >
             <div className="flex items-center justify-between gap-4">
-              <Brand />
+              <Brand isDark={isDark} />
               <button
                 type="button"
                 aria-label="关闭导航"
@@ -101,13 +196,20 @@ export function MainLayout() {
                 <X size={18} />
               </button>
             </div>
-            <NavList onNavigate={() => setMobileOpen(false)} />
+            <CompactNav isDark={isDark} onNavigate={() => setMobileOpen(false)} />
           </aside>
         </div>
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--prism-line)] bg-white/80 px-4 backdrop-blur lg:px-6">
+        <header
+          className={cn(
+            'flex h-14 shrink-0 items-center gap-3 border-b px-4 backdrop-blur transition-colors lg:px-5',
+            isDark
+              ? 'border-white/[0.07] bg-[#0a0d1c]/95'
+              : 'border-slate-200 bg-white/92'
+          )}
+        >
           <button
             type="button"
             aria-label="打开导航"
@@ -118,13 +220,70 @@ export function MainLayout() {
           >
             <Menu size={18} />
           </button>
-          <div className="hidden text-sm text-slate-500 lg:block">Phase 1 · Prism Lab</div>
-          <div className="ml-auto rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-            RAG workspace
+
+          <div className="relative hidden w-full max-w-[440px] lg:block">
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              aria-label="全局搜索"
+              placeholder="搜索文档、知识、对话..."
+              className={cn(
+                'h-8 w-full rounded-md border px-9 text-xs outline-none transition',
+                isDark
+                  ? 'border-white/[0.08] bg-white/[0.07] text-slate-200 placeholder:text-slate-500 focus:border-blue-400/60 focus:bg-white/[0.1]'
+                  : 'border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:border-blue-300 focus:bg-white'
+              )}
+            />
+          </div>
+
+          <div className="ml-auto flex items-center gap-3">
+            <button
+              type="button"
+              aria-label={isDark ? '切换为亮色主题' : '切换为暗色主题'}
+              onClick={() => setTheme(isDark ? 'light' : 'dark')}
+              className={cn(
+                'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium transition',
+                isDark
+                  ? 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
+                  : 'border-slate-200 bg-white text-slate-600 shadow-sm hover:border-blue-200 hover:text-blue-600'
+              )}
+            >
+              {isDark ? <Sun size={15} /> : <Moon size={15} />}
+              <span className="hidden sm:inline">{isDark ? '亮色' : '暗色'}</span>
+            </button>
+            <div
+              className={cn(
+                'hidden items-center gap-2 text-xs sm:flex',
+                isDark ? 'text-slate-300' : 'text-slate-700'
+              )}
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--prism-blue)] text-[11px] font-semibold text-white">
+                A
+              </span>
+              <span>admin@example.com</span>
+            </div>
+            <CircleUserRound size={20} className="text-slate-400 sm:hidden" />
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-auto p-4 lg:p-6">
-          <Outlet />
+
+        <main
+          className={cn(
+            'min-h-0 flex-1 overflow-auto p-4 transition-colors lg:p-6',
+            isDark
+              ? 'bg-[radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.18),transparent_36rem),#070917]'
+              : 'bg-[#f4f7fb]'
+          )}
+        >
+          <div
+            className={cn(
+              'mx-auto min-h-full max-w-[1520px] rounded-2xl border p-3 shadow-[0_24px_80px_-56px_rgba(15,23,42,0.35)] backdrop-blur lg:p-4',
+              isDark ? 'border-white/[0.07] bg-[#0d1024]/88' : 'border-slate-200 bg-white'
+            )}
+          >
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

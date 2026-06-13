@@ -7,9 +7,10 @@ import {
   ArrowRight,
   BookOpen,
   ChevronDown,
+  Clock3,
+  MessageSquarePlus,
+  Plus,
   Send,
-  Sparkles,
-  Trash2,
 } from 'lucide-react'
 import { useChatStore, type Message } from '@/app/chatStore'
 import { cn } from '@/lib/utils'
@@ -20,10 +21,35 @@ const starterPrompts = [
   '哪些资料可以回答这个问题？',
 ]
 
+const conversationList = [
+  {
+    id: 'current',
+    title: '当前对话',
+    summary: '基于知识库进行可追溯问答',
+    status: '进行中',
+    time: '刚刚',
+  },
+  {
+    id: 'brief',
+    title: '资料核心观点总结',
+    summary: '整理上传资料里的重点结论',
+    status: '已保存',
+    time: '今天',
+  },
+  {
+    id: 'todo',
+    title: '行动清单',
+    summary: '把知识库内容转成待办步骤',
+    status: '草稿',
+    time: '昨天',
+  },
+]
+
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
+  const [activeConversation, setActiveConversation] = useState('current')
   const messages = useChatStore((s) => s.messages)
   const addMessage = useChatStore((s) => s.addMessage)
   const appendToLast = useChatStore((s) => s.appendToLast)
@@ -109,36 +135,88 @@ export function ChatPage() {
     }
   }
 
-  const clearConversation = () => {
-    clear()
+  const startNewConversation = () => {
+    setActiveConversation('current')
     setExpandedSources({})
+    clear()
   }
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col">
-      <header className="mb-4 flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--prism-blue)]">
-            <span className="prism-mark flex h-7 w-7 items-center justify-center rounded-lg text-white">
-              <Sparkles size={15} />
-            </span>
-            Prism Lab
+    <div className="grid h-full min-h-0 w-full gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className="flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white shadow-[0_18px_48px_-40px_rgba(15,23,42,0.35)]">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 px-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-950">会话</h2>
+            <p className="mt-0.5 text-xs text-slate-400">多轮问答状态</p>
           </div>
-          <h1 className="text-2xl font-semibold tracking-normal text-slate-950">对话</h1>
-          <p className="mt-1 text-sm text-slate-500">基于你的知识库进行可追溯问答。</p>
-        </div>
-
-        {messages.length > 0 && (
           <button
             type="button"
-            onClick={clearConversation}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-red-200 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]"
+            aria-label="新建对话"
+            onClick={startNewConversation}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--prism-blue)] text-white shadow-sm transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]"
           >
-            <Trash2 size={16} />
-            清空对话
+            <Plus size={16} />
           </button>
-        )}
-      </header>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className="space-y-2">
+            {conversationList.map((conversation) => {
+              const active = activeConversation === conversation.id
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  onClick={() => setActiveConversation(conversation.id)}
+                  className={cn(
+                    'w-full rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]',
+                    active
+                      ? 'border-blue-200 bg-blue-50 shadow-sm'
+                      : 'border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white'
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <div
+                      className={cn(
+                        'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                        active ? 'bg-[var(--prism-blue)] text-white' : 'bg-white text-slate-400'
+                      )}
+                    >
+                      <MessageSquarePlus size={15} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-slate-950">
+                        {conversation.title}
+                      </div>
+                      <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                        {conversation.summary}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
+                    <span
+                      className={cn(
+                        'rounded-full px-2 py-0.5 font-medium',
+                        conversation.status === '进行中'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : conversation.status === '草稿'
+                            ? 'bg-amber-50 text-amber-700'
+                            : 'bg-slate-100 text-slate-500'
+                      )}
+                    >
+                      {conversation.status}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-slate-400">
+                      <Clock3 size={12} />
+                      {conversation.time}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </aside>
 
       <section className="prism-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
