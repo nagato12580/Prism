@@ -8,3 +8,8 @@ dist/
 *.egg-info/
 .pytest_cache/
 uploads/
+*.log
+*.db
+*.sqlite3
+htmlcov/
+.coverage
