@@ -8,6 +8,8 @@ const navItems = [
   { to: '/knowledge', label: '知识库', description: '资料工作台', icon: BookOpen },
 ]
 
+const mobileNavId = 'prism-mobile-navigation'
+
 function Brand() {
   return (
     <div className="flex items-center gap-3">
@@ -29,21 +31,23 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="mt-8 flex flex-col gap-2">
       {navItems.map((item) => {
         const Icon = item.icon
-        const isRootChat = item.to === '/chat' && location.pathname === '/'
+        const active =
+          location.pathname === item.to ||
+          location.pathname.startsWith(`${item.to}/`) ||
+          (item.to === '/chat' && location.pathname === '/')
 
         return (
           <NavLink
             key={item.to}
             to={item.to}
+            aria-current={active ? 'page' : undefined}
             onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
-                'group flex items-center gap-3 rounded-xl border px-3 py-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80',
-                isActive || isRootChat
-                  ? 'border-cyan-400/30 bg-white/10 text-white shadow-[inset_3px_0_0_var(--prism-cyan)]'
-                  : 'border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.06] hover:text-white'
-              )
-            }
+            className={cn(
+              'group flex items-center gap-3 rounded-xl border px-3 py-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80',
+              active
+                ? 'border-cyan-400/30 bg-white/10 text-white shadow-[inset_3px_0_0_var(--prism-cyan)]'
+                : 'border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.06] hover:text-white'
+            )}
           >
             <Icon size={18} className="shrink-0" />
             <span className="min-w-0">
@@ -76,14 +80,20 @@ export function MainLayout() {
       {mobileOpen ? (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
-            aria-label="关闭导航"
+            type="button"
+            aria-hidden="true"
+            tabIndex={-1}
             className="absolute inset-0 bg-slate-950/50"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="relative flex h-full w-72 max-w-[86vw] flex-col bg-[var(--prism-ink)] px-4 py-5 shadow-2xl">
+          <aside
+            id={mobileNavId}
+            className="relative flex h-full w-72 max-w-[86vw] flex-col bg-[var(--prism-ink)] px-4 py-5 shadow-2xl"
+          >
             <div className="flex items-center justify-between gap-4">
               <Brand />
               <button
+                type="button"
                 aria-label="关闭导航"
                 className="rounded-lg p-2 text-slate-300 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80"
                 onClick={() => setMobileOpen(false)}
@@ -99,7 +109,10 @@ export function MainLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--prism-line)] bg-white/80 px-4 backdrop-blur lg:px-6">
           <button
+            type="button"
             aria-label="打开导航"
+            aria-controls={mobileNavId}
+            aria-expanded={mobileOpen}
             className="rounded-lg border border-[var(--prism-line)] bg-white p-2 text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-[var(--prism-blue)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] lg:hidden"
             onClick={() => setMobileOpen(true)}
           >
