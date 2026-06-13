@@ -14,3 +14,4 @@ uploads/
 htmlcov/
 .coverage
 .superpowers/
+.worktrees/
