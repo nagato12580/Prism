@@ -37,29 +37,31 @@ def answer_stream(query: str, history: list[dict] = None):
     - {"type": "done"}
     """
     history = history or []
+    try:
+        # 1. 检索
+        results = hybrid_search(query, top_k=8)
+        chunk_map = _load_chunks([r["chunk_id"] for r in results]) if results else {}
 
-    # 1. 检索
-    results = hybrid_search(query, top_k=8)
-    chunk_map = _load_chunks([r["chunk_id"] for r in results]) if results else {}
+        # 2. 发送来源
+        yield json.dumps({"type": "sources", "data": results}, ensure_ascii=False) + "\n"
 
-    # 2. 发送来源
-    yield json.dumps({"type": "sources", "data": results}, ensure_ascii=False) + "\n"
+        # 3. 构建上下文
+        context_parts = []
+        for i, r in enumerate(results):
+            text = chunk_map.get(r["chunk_id"], "")
+            if text:
+                context_parts.append(f"[{i + 1}] {text}")
+        context = "\n\n".join(context_parts) if context_parts else "（无相关资料）"
 
-    # 3. 构建上下文
-    context_parts = []
-    for i, r in enumerate(results):
-        text = chunk_map.get(r["chunk_id"], "")
-        if text:
-            context_parts.append(f"[{i + 1}] {text}")
-    context = "\n\n".join(context_parts) if context_parts else "（无相关资料）"
+        # 4. LLM 流式生成
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": f"参考资料：\n{context}"},
+        ] + history + [{"role": "user", "content": query}]
 
-    # 4. LLM 流式生成
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": f"参考资料：\n{context}"},
-    ] + history + [{"role": "user", "content": query}]
+        for token in chat_stream(messages):
+            yield json.dumps({"type": "token", "data": token}, ensure_ascii=False) + "\n"
 
-    for token in chat_stream(messages):
-        yield json.dumps({"type": "token", "data": token}, ensure_ascii=False) + "\n"
-
-    yield json.dumps({"type": "done"}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+    except Exception as e:
+        yield json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False) + "\n"
