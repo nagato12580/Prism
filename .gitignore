@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.uvicorn.pid
+node_modules/
+dist/
+.venv/
+*.egg-info/
+.pytest_cache/
+uploads/
