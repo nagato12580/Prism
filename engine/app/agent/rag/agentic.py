@@ -26,6 +26,13 @@ DEFAULT_CLARIFY: ClarifyRequest = {
 }
 
 
+def default_clarify_request() -> ClarifyRequest:
+    return {
+        "question": DEFAULT_CLARIFY["question"],
+        "options": [option.copy() for option in DEFAULT_CLARIFY["options"]],
+    }
+
+
 @dataclass(slots=True)
 class RagJudgeResult:
     status: RagStatus
@@ -42,7 +49,7 @@ class AgenticRagResult:
     summary: str = ""
     sources: list[SearchHit] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
-    clarify: ClarifyRequest = field(default_factory=lambda: DEFAULT_CLARIFY.copy())
+    clarify: ClarifyRequest = field(default_factory=default_clarify_request)
     iterations: int = 0
 
 
@@ -88,7 +95,7 @@ class AgenticRagRunner:
         return AgenticRagResult(
             status="insufficient",
             missing=missing,
-            clarify=clarify or DEFAULT_CLARIFY.copy(),
+            clarify=clarify or default_clarify_request(),
             iterations=self.max_iterations,
         )
 

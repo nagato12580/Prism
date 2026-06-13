@@ -149,6 +149,35 @@ def test_agentic_rag_uses_default_clarification_when_judge_provides_none():
     }
 
 
+def test_agentic_rag_default_clarification_options_are_not_shared():
+    def search(query: str, top_k: int):
+        return []
+
+    def load_chunks(chunk_ids: list[str]):
+        return {}
+
+    def judge(question: str, query: str, evidence: list[dict], missing: list[str]):
+        return RagJudgeResult(
+            status="insufficient",
+            missing=["Need scope"],
+        )
+
+    runner = AgenticRagRunner(search, load_chunks, judge, max_iterations=1, top_k=8)
+
+    result = runner.run("Summarize it")
+    result.clarify["options"].append(
+        {"label": "Mutated option", "value": "scope:mutated"}
+    )
+
+    next_result = runner.run("Summarize it")
+
+    assert next_result.clarify["options"] == [
+        {"label": "Current knowledge base", "value": "scope:knowledge"},
+        {"label": "Specific directory", "value": "scope:directory"},
+        {"label": "Allow web supplement", "value": "scope:web"},
+    ]
+
+
 def test_agentic_rag_deduplicates_chunk_hits_for_loading_and_sources():
     loaded_chunk_ids = []
 
