@@ -17,10 +17,11 @@ JudgeFn: TypeAlias = Callable[
 
 
 DEFAULT_CLARIFY: ClarifyRequest = {
-    "question": "What would you like me to focus on?",
+    "question": "I need one more detail to answer accurately. What should I use as the scope?",
     "options": [
         {"label": "Current knowledge base", "value": "scope:knowledge"},
-        {"label": "Provide more detail", "value": "scope:clarify"},
+        {"label": "Specific directory", "value": "scope:directory"},
+        {"label": "Allow web supplement", "value": "scope:web"},
     ],
 }
 

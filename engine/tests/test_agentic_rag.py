@@ -121,6 +121,34 @@ def test_agentic_rag_preserves_missing_when_later_iteration_has_none():
     assert result.missing == ["Need scope"]
 
 
+def test_agentic_rag_uses_default_clarification_when_judge_provides_none():
+    def search(query: str, top_k: int):
+        return []
+
+    def load_chunks(chunk_ids: list[str]):
+        return {}
+
+    def judge(question: str, query: str, evidence: list[dict], missing: list[str]):
+        return RagJudgeResult(
+            status="insufficient",
+            missing=["Need scope"],
+        )
+
+    result = AgenticRagRunner(search, load_chunks, judge, max_iterations=1, top_k=8).run(
+        "Summarize it"
+    )
+
+    assert result.status == "insufficient"
+    assert result.clarify == {
+        "question": "I need one more detail to answer accurately. What should I use as the scope?",
+        "options": [
+            {"label": "Current knowledge base", "value": "scope:knowledge"},
+            {"label": "Specific directory", "value": "scope:directory"},
+            {"label": "Allow web supplement", "value": "scope:web"},
+        ],
+    }
+
+
 def test_agentic_rag_deduplicates_chunk_hits_for_loading_and_sources():
     loaded_chunk_ids = []
 
