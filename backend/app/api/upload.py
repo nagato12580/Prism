@@ -25,6 +25,9 @@ async def upload_file(
 ):
     # 保存文件
     ext = Path(file.filename).suffix
+    ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".md", ".txt", ".markdown"}
+    if ext.lower() not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
     saved_name = f"{uuid.uuid4().hex}{ext}"
     saved_path = UPLOAD_DIR / saved_name
     content_bytes = await file.read()
@@ -104,11 +107,14 @@ def _trigger_ingestion(item_id: str):
     try:
         import threading
         def _call():
-            httpx.post(
-                f"http://{settings.ENGINE_HOST}:{settings.ENGINE_PORT}/api/v1/ingest",
-                json={"item_id": item_id},
-                timeout=120,
-            )
+            try:
+                httpx.post(
+                    f"http://{settings.ENGINE_HOST}:{settings.ENGINE_PORT}/api/v1/ingest",
+                    json={"item_id": item_id},
+                    timeout=30,
+                )
+            except Exception as exc:
+                print(f"[upload] 摄入触发失败 item_id={item_id}: {exc}")
         threading.Thread(target=_call, daemon=True).start()
     except Exception as e:
         print(f"[upload] 摄入触发失败: {e}")

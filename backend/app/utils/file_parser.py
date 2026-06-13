@@ -20,11 +20,8 @@ def extract_text(file_path: str) -> str:
 
 def _extract_pdf(file_path: str) -> str:
     import fitz  # PyMuPDF
-    doc = fitz.open(file_path)
-    text_parts = []
-    for page in doc:
-        text_parts.append(page.get_text())
-    doc.close()
+    with fitz.open(file_path) as doc:
+        text_parts = [page.get_text() for page in doc]
     return "\n".join(text_parts)
 
 
@@ -37,14 +34,16 @@ def _extract_docx(file_path: str) -> str:
 def _extract_xlsx(file_path: str) -> str:
     from openpyxl import load_workbook
     wb = load_workbook(file_path, read_only=True, data_only=True)
-    text_parts = []
-    for sheet in wb.worksheets:
-        text_parts.append(f"## 工作表: {sheet.title}")
-        for row in sheet.iter_rows(values_only=True):
-            cells = [str(c) if c is not None else "" for c in row]
-            if any(cells):
-                text_parts.append(" | ".join(cells))
-    wb.close()
+    try:
+        text_parts = []
+        for sheet in wb.worksheets:
+            text_parts.append(f"## 工作表: {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                if any(cells):
+                    text_parts.append(" | ".join(cells))
+    finally:
+        wb.close()
     return "\n".join(text_parts)
 
 
