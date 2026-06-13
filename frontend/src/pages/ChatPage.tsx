@@ -58,7 +58,10 @@ export function ChatPage() {
         if (msg.type === 'sources') setLastSources(msg.data)
         else if (msg.type === 'token') appendToLast(msg.data)
         else if (msg.type === 'done') finishLast()
-        else if (msg.type === 'error') appendToLast(`\n\n请求失败：${msg.data}`)
+        else if (msg.type === 'error') {
+          appendToLast(`\n\n请求失败：${msg.data}`)
+          finishLast()
+        }
       } catch {
         appendToLast('收到了一段无法解析的流式响应。')
       }
@@ -254,7 +257,7 @@ function MessageBlock({
   onToggleSources: () => void
 }) {
   const isUser = msg.role === 'user'
-  const isError = !isUser && msg.content.trim().startsWith('请求失败：')
+  const isError = !isUser && msg.content.includes('请求失败：')
 
   return (
     <div className={cn('flex min-w-0', isUser ? 'justify-end' : 'justify-start')}>
@@ -302,7 +305,7 @@ function MessageBlock({
                       <dt className="text-slate-400">item id</dt>
                       <dd className="min-w-0 break-all font-mono">{source.item_id}</dd>
                       <dt className="text-slate-400">score</dt>
-                      <dd className="min-w-0 break-all font-mono">{source.score}</dd>
+                      <dd className="min-w-0 break-all font-mono">{formatScore(source.score)}</dd>
                     </dl>
                   </div>
                 ))}
@@ -338,7 +341,7 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
   }
 
   return (
-    <div className="markdown-body min-w-0 text-left">
+    <div className="markdown-body min-w-0 max-w-full overflow-x-auto text-left">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
       {msg.streaming && (
         <span
@@ -348,4 +351,10 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
       )}
     </div>
   )
+}
+
+function formatScore(score: number) {
+  const numericScore = Number(score)
+  if (!Number.isFinite(numericScore)) return String(score)
+  return numericScore.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
 }
