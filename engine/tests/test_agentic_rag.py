@@ -25,6 +25,14 @@ def test_agentic_rag_returns_sufficient_evidence_without_rewrite():
     assert result.status == "sufficient"
     assert result.summary == "LangChain function calling is specified."
     assert result.sources == [{"chunk_id": "c1", "item_id": "i1", "score": 0.95}]
+    assert result.evidence == [
+        {
+            "chunk_id": "c1",
+            "item_id": "i1",
+            "score": 0.95,
+            "text": "Phase 2 uses LangChain function calling.",
+        }
+    ]
     assert searches == [("How is Phase 2 implemented?", 8)]
 
 
@@ -91,6 +99,35 @@ def test_agentic_rag_returns_clarification_when_still_insufficient():
     assert result.missing == ["Need a directory scope"]
     assert result.clarify["question"] == "Which scope should I use?"
     assert result.iterations == 2
+    assert result.evidence == []
+
+
+def test_agentic_rag_returns_last_evidence_when_insufficient():
+    def search(query: str, top_k: int):
+        return [{"chunk_id": "c3", "item_id": "i3", "score": 0.72}]
+
+    def load_chunks(chunk_ids: list[str]):
+        return {"c3": "The retrieved chunk does not fully answer the question."}
+
+    def judge(question: str, query: str, evidence: list[dict], missing: list[str]):
+        return RagJudgeResult(
+            status="insufficient",
+            missing=["Need a more specific target"],
+        )
+
+    result = AgenticRagRunner(search, load_chunks, judge, max_iterations=1, top_k=8).run(
+        "Summarize the selected target"
+    )
+
+    assert result.status == "insufficient"
+    assert result.evidence == [
+        {
+            "chunk_id": "c3",
+            "item_id": "i3",
+            "score": 0.72,
+            "text": "The retrieved chunk does not fully answer the question.",
+        }
+    ]
 
 
 def test_agentic_rag_preserves_missing_when_later_iteration_has_none():

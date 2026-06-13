@@ -47,6 +47,7 @@ class RagJudgeResult:
 class AgenticRagResult:
     status: RagStatus
     summary: str = ""
+    evidence: list[Evidence] = field(default_factory=list)
     sources: list[SearchHit] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     clarify: ClarifyRequest = field(default_factory=default_clarify_request)
@@ -73,16 +74,19 @@ class AgenticRagRunner:
         query = question
         missing: list[str] = []
         clarify: ClarifyRequest | None = None
+        last_evidence: list[Evidence] = []
 
         for iteration in range(1, self.max_iterations + 1):
             hits = self.search(query, self.top_k)
             evidence = self._build_evidence(hits)
+            last_evidence = evidence
             judgment = self.judge(question, query, evidence, missing)
 
             if judgment.status == "sufficient":
                 return AgenticRagResult(
                     status="sufficient",
                     summary=judgment.answer_basis,
+                    evidence=evidence,
                     sources=self._useful_sources(hits, judgment.useful_chunk_ids),
                     iterations=iteration,
                 )
@@ -94,6 +98,7 @@ class AgenticRagRunner:
 
         return AgenticRagResult(
             status="insufficient",
+            evidence=last_evidence,
             missing=missing,
             clarify=clarify or default_clarify_request(),
             iterations=self.max_iterations,

@@ -1,3 +1,5 @@
+import json
+
 from engine.app.agent.rag.agentic import AgenticRagResult
 from engine.app.agent.tools.base import BUILTIN_REGISTRY, ToolContext, build_enabled_tools
 import engine.app.agent.tools.knowledge  # noqa: F401
@@ -11,6 +13,7 @@ class FakeRagRunner:
         return AgenticRagResult(
             status="sufficient",
             summary=f"evidence for {query}",
+            evidence=[{"chunk_id": "c1", "text": "hello"}],
             sources=[{"chunk_id": "c1", "item_id": "i1", "score": 0.9}],
             iterations=1,
         )
@@ -38,8 +41,10 @@ def test_knowledge_search_records_sources_and_stats():
     tool = next(t for t in build_enabled_tools(ctx) if t.name == "knowledge_search")
 
     text = tool.invoke({"query": "phase 2"})
+    payload = json.loads(text)
 
-    assert "evidence for phase 2" in text
+    assert payload["summary"] == "evidence for phase 2"
+    assert payload["evidence"] == [{"chunk_id": "c1", "text": "hello"}]
     assert ctx.citations == [{"chunk_id": "c1", "item_id": "i1", "score": 0.9}]
     assert ctx.stats_holder["knowledge_search"]["hit_count"] == 1
     assert ctx.stats_holder["knowledge_search"]["iterations"] == 1

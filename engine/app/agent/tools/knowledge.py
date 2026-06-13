@@ -45,7 +45,7 @@ def build(ctx: ToolContext) -> StructuredTool:
             "missing": getattr(result, "missing", []),
             "clarify": getattr(result, "clarify", None),
             "sources": sources,
-            "evidence": getattr(result, "evidence", []),
+            "evidence": result.evidence,
         }
         return json.dumps(payload, ensure_ascii=False)
 
