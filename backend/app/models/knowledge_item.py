@@ -53,5 +53,5 @@ class KnowledgeFile(Base):
     file_type = Column(String(20), comment="文件类型")
     file_size = Column(Integer, default=0, comment="文件大小(字节)")
     parse_status = Column(String(20), default="pending", comment="pending/parsing/done/failed")
-    item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="SET NULL"), comment="关联知识条目")
+    item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="SET NULL"), nullable=True, comment="关联知识条目")
     created_at = Column(DateTime, default=datetime.utcnow)

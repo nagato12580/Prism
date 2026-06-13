@@ -12,7 +12,8 @@ def auto_migrate(Base, engine) -> None:
     for table_name, table_obj in Base.metadata.tables.items():
         if table_name not in existing_tables:
             print(f"[auto_migrate] 创建表: {table_name}")
-            table_obj.create(bind=engine)
+            with engine.begin() as conn:
+                table_obj.create(conn)
             continue
 
         # 表已存在，检查缺失的列
@@ -27,10 +28,16 @@ def auto_migrate(Base, engine) -> None:
                     f"ADD COLUMN `{col.name}` {col_type}{default}"
                 )
                 if col.comment:
-                    alter_sql += f" COMMENT '{col.comment}'"
+                    safe_comment = col.comment.replace("'", "''")
+                    alter_sql += f" COMMENT '{safe_comment}'"
                 with engine.connect() as conn:
-                    conn.execute(text(alter_sql))
-                    conn.commit()
+                    try:
+                        conn.execute(text(alter_sql))
+                        conn.commit()
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"[auto_migrate] Failed to add column {table_name}.{col.name}: {e}"
+                        ) from e
 
 
 def _infer_default(col):
