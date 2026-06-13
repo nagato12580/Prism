@@ -58,7 +58,7 @@ export function ChatPage() {
         if (msg.type === 'sources') setLastSources(msg.data)
         else if (msg.type === 'token') appendToLast(msg.data)
         else if (msg.type === 'done') finishLast()
-        else if (msg.type === 'error') appendToLast(`\n\n回答失败：${msg.data}`)
+        else if (msg.type === 'error') appendToLast(`\n\n请求失败：${msg.data}`)
       } catch {
         appendToLast('收到了一段无法解析的流式响应。')
       }
@@ -296,7 +296,6 @@ function MessageBlock({
                     key={`${source.chunk_id}-${source.item_id}-${index}`}
                     className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2 text-xs text-slate-600 shadow-sm"
                   >
-                    <div className="mb-1 font-semibold text-slate-800">来源 {index + 1}</div>
                     <dl className="grid gap-1 sm:grid-cols-[4.5rem_1fr]">
                       <dt className="text-slate-400">chunk id</dt>
                       <dd className="min-w-0 break-all font-mono">{source.chunk_id}</dd>
