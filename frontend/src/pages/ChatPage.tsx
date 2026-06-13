@@ -1,36 +1,68 @@
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Send } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  BookOpen,
+  ChevronDown,
+  Send,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
 import { useChatStore, type Message } from '@/app/chatStore'
+import { cn } from '@/lib/utils'
+
+const starterPrompts = [
+  '总结我上传资料里的核心观点',
+  '基于知识库帮我列一个行动清单',
+  '哪些资料可以回答这个问题？',
+]
 
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
   const messages = useChatStore((s) => s.messages)
   const addMessage = useChatStore((s) => s.addMessage)
   const appendToLast = useChatStore((s) => s.appendToLast)
   const setLastSources = useChatStore((s) => s.setLastSources)
   const finishLast = useChatStore((s) => s.finishLast)
+  const clear = useChatStore((s) => s.clear)
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
 
-  const send = async () => {
-    if (!input.trim() || sending) return
-    const query = input.trim()
+  const send = async (value = input) => {
+    if (!value.trim() || sending) return
+
+    const query = value.trim()
     setInput('')
     setSending(true)
 
-    // Build history from non-streaming messages
     const history = messages
       .filter((m) => !m.streaming)
       .map((m) => ({ role: m.role, content: m.content }))
 
     addMessage({ id: crypto.randomUUID(), role: 'user', content: query })
     addMessage({ id: crypto.randomUUID(), role: 'assistant', content: '', streaming: true })
+
+    const handleStreamLine = (line: string) => {
+      if (!line.trim()) return
+
+      try {
+        const msg = JSON.parse(line)
+        if (msg.type === 'sources') setLastSources(msg.data)
+        else if (msg.type === 'token') appendToLast(msg.data)
+        else if (msg.type === 'done') finishLast()
+        else if (msg.type === 'error') appendToLast(`\n\n回答失败：${msg.data}`)
+      } catch {
+        appendToLast('收到了一段无法解析的流式响应。')
+      }
+    }
 
     try {
       const resp = await fetch('/api/v1/chat/answer', {
@@ -44,111 +76,277 @@ export function ChatPage() {
       }
 
       const reader = resp.body?.getReader()
+      if (!reader) {
+        throw new Error('响应没有可读取的内容流')
+      }
+
       const decoder = new TextDecoder()
       let buffer = ''
 
-      while (reader) {
+      while (true) {
         const { done, value } = await reader.read()
         if (done) break
+
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const msg = JSON.parse(line)
-            if (msg.type === 'sources') setLastSources(msg.data)
-            else if (msg.type === 'token') appendToLast(msg.data)
-            else if (msg.type === 'done') finishLast()
-            else if (msg.type === 'error') appendToLast(`\n\n⚠️ 错误: ${msg.data}`)
-          } catch {
-            // ignore parse errors
-          }
+          handleStreamLine(line)
         }
       }
+
+      buffer += decoder.decode()
+      handleStreamLine(buffer)
       finishLast()
     } catch (e) {
-      appendToLast('⚠️ 请求失败: ' + (e as Error).message)
+      appendToLast('请求失败：' + (e as Error).message)
       finishLast()
     } finally {
       setSending(false)
     }
   }
 
-  return (
-    <div className="flex flex-col h-full max-w-3xl mx-auto">
-      {/* Message area */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
-        {messages.length === 0 && (
-          <div className="text-center text-gray-400 py-20">
-            <p className="text-4xl mb-4">🔮</p>
-            <p>我是你的个人知识助手 Prism</p>
-            <p className="text-sm mt-2">先到知识库上传一些资料，然后在这里提问吧</p>
-          </div>
-        )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
-        ))}
-        <div ref={endRef} />
-      </div>
+  const clearConversation = () => {
+    clear()
+    setExpandedSources({})
+  }
 
-      {/* Input area */}
-      <div className="flex gap-2 border-t border-gray-200 pt-4">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
-          placeholder="输入消息..."
-          disabled={sending}
-          className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-50"
-        />
-        <button
-          onClick={send}
-          disabled={sending || !input.trim()}
-          className="px-4 py-2.5 bg-primary text-white rounded-xl hover:opacity-90 disabled:opacity-50"
+  return (
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col">
+      <header className="mb-4 flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--prism-blue)]">
+            <span className="prism-mark flex h-7 w-7 items-center justify-center rounded-lg text-white">
+              <Sparkles size={15} />
+            </span>
+            Prism Lab
+          </div>
+          <h1 className="text-2xl font-semibold tracking-normal text-slate-950">对话</h1>
+          <p className="mt-1 text-sm text-slate-500">基于你的知识库进行可追溯问答。</p>
+        </div>
+
+        {messages.length > 0 && (
+          <button
+            type="button"
+            onClick={clearConversation}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-red-200 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]"
+          >
+            <Trash2 size={16} />
+            清空对话
+          </button>
+        )}
+      </header>
+
+      <section className="prism-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
+          {messages.length === 0 ? (
+            <EmptyState onStarterPrompt={send} disabled={sending} />
+          ) : (
+            <div className="space-y-5">
+              {messages.map((msg) => (
+                <MessageBlock
+                  key={msg.id}
+                  msg={msg}
+                  sourcesOpen={!!expandedSources[msg.id]}
+                  onToggleSources={() =>
+                    setExpandedSources((current) => ({
+                      ...current,
+                      [msg.id]: !current[msg.id],
+                    }))
+                  }
+                />
+              ))}
+              <div ref={endRef} />
+            </div>
+          )}
+        </div>
+
+        <form
+          className="shrink-0 border-t border-[var(--prism-line)] bg-white/90 p-3 sm:p-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            send()
+          }}
         >
-          <Send size={18} />
-        </button>
+          <div className="flex min-w-0 gap-2 rounded-xl border border-[var(--prism-line)] bg-white p-2 shadow-[0_14px_34px_-28px_rgba(16,24,40,0.6)] focus-within:border-blue-200 focus-within:ring-2 focus-within:ring-cyan-100">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send()
+                }
+              }}
+              placeholder="输入问题，Prism 会检索知识库后回答"
+              disabled={sending}
+              rows={2}
+              className="max-h-36 min-h-[3rem] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              aria-label="发送"
+              disabled={sending || !input.trim()}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)] text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300"
+            >
+              <Send size={18} />
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function EmptyState({
+  onStarterPrompt,
+  disabled,
+}: {
+  onStarterPrompt: (value: string) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="flex min-h-full items-center justify-center py-10">
+      <div className="w-full max-w-2xl text-center">
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-[0_20px_50px_-28px_rgba(21,94,239,0.9)]">
+          <BookOpen size={24} />
+        </div>
+        <h2 className="text-balance text-2xl font-semibold tracking-normal text-slate-950">
+          Prism 知识问答工作台
+        </h2>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-500">
+          先上传资料，再让 Prism 从你的知识库里检索、组织并给出可追溯回答。
+        </p>
+
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {starterPrompts.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onStarterPrompt(prompt)}
+              disabled={disabled}
+              className="max-w-full rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-[var(--prism-blue)] transition hover:border-blue-200 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:opacity-50"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
+        <Link
+          to="/knowledge"
+          className="mt-7 inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-[var(--prism-blue)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]"
+        >
+          去知识库添加资料
+          <ArrowRight size={16} />
+        </Link>
       </div>
     </div>
   )
 }
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBlock({
+  msg,
+  sourcesOpen,
+  onToggleSources,
+}: {
+  msg: Message
+  sourcesOpen: boolean
+  onToggleSources: () => void
+}) {
   const isUser = msg.role === 'user'
+  const isError = !isUser && msg.content.trim().startsWith('请求失败：')
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${
-          isUser
-            ? 'bg-primary text-white rounded-br-md'
-            : 'bg-white border border-gray-200 rounded-bl-md'
-        }`}
-      >
-        {msg.content ? (
-          isUser ? (
-            <p className="whitespace-pre-wrap">{msg.content}</p>
+    <div className={cn('flex min-w-0', isUser ? 'justify-end' : 'justify-start')}>
+      <div className={cn('min-w-0 max-w-[92%] sm:max-w-[78%]', isUser ? 'text-right' : 'text-left')}>
+        <div
+          className={cn(
+            'min-w-0 break-words rounded-2xl px-4 py-3 text-sm leading-6',
+            isUser
+              ? 'rounded-br-md bg-[var(--prism-blue)] text-white shadow-sm'
+              : 'rounded-bl-md border border-[var(--prism-line)] bg-white text-slate-800 shadow-[0_16px_34px_-30px_rgba(16,24,40,0.7)]',
+            isError && 'border-red-200 bg-red-50 text-red-700',
+          )}
+        >
+          {isUser ? (
+            <p className="whitespace-pre-wrap text-left">{msg.content}</p>
           ) : (
-            <div className="prose prose-sm max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-            </div>
-          )
-        ) : (
-          <span className="text-gray-400">思考中...</span>
-        )}
-        {msg.streaming && (
-          <span className="inline-block w-2 h-4 bg-gray-400 ml-1 animate-pulse" />
-        )}
-        {msg.sources && msg.sources.length > 0 && !msg.streaming && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {msg.sources.map((s, i) => (
-              <span key={i} className="text-xs px-1.5 py-0.5 bg-blue-50 text-primary rounded">
-                📎 {i + 1}
-              </span>
-            ))}
+            <AssistantContent msg={msg} isError={isError} />
+          )}
+        </div>
+
+        {!isUser && msg.sources && msg.sources.length > 0 && !msg.streaming && (
+          <div className="mt-2 text-left">
+            <button
+              type="button"
+              onClick={onToggleSources}
+              className="inline-flex items-center gap-1.5 rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-cyan-200 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]"
+            >
+              来源 {msg.sources.length}
+              <ChevronDown
+                size={14}
+                className={cn('transition-transform', sourcesOpen && 'rotate-180')}
+              />
+            </button>
+
+            {sourcesOpen && (
+              <div className="mt-2 grid gap-2">
+                {msg.sources.map((source, index) => (
+                  <div
+                    key={`${source.chunk_id}-${source.item_id}-${index}`}
+                    className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2 text-xs text-slate-600 shadow-sm"
+                  >
+                    <div className="mb-1 font-semibold text-slate-800">来源 {index + 1}</div>
+                    <dl className="grid gap-1 sm:grid-cols-[4.5rem_1fr]">
+                      <dt className="text-slate-400">chunk id</dt>
+                      <dd className="min-w-0 break-all font-mono">{source.chunk_id}</dd>
+                      <dt className="text-slate-400">item id</dt>
+                      <dd className="min-w-0 break-all font-mono">{source.item_id}</dd>
+                      <dt className="text-slate-400">score</dt>
+                      <dd className="min-w-0 break-all font-mono">{source.score}</dd>
+                    </dl>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) {
+  if (isError) {
+    return (
+      <div className="flex min-w-0 items-start gap-2 text-left">
+        <AlertTriangle className="mt-0.5 shrink-0" size={17} />
+        <p className="min-w-0 whitespace-pre-wrap break-words">{msg.content}</p>
+      </div>
+    )
+  }
+
+  if (!msg.content && msg.streaming) {
+    return (
+      <div className="flex items-center gap-2 text-slate-500">
+        <span
+          className="h-2 w-2 rounded-full bg-[var(--prism-cyan)]"
+          style={{ animation: 'prism-pulse 1s ease-in-out infinite' }}
+        />
+        <span>正在检索知识库...</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="markdown-body min-w-0 text-left">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+      {msg.streaming && (
+        <span
+          className="ml-1 inline-block h-2 w-2 rounded-full bg-[var(--prism-cyan)] align-middle"
+          style={{ animation: 'prism-pulse 1s ease-in-out infinite' }}
+        />
+      )}
     </div>
   )
 }
