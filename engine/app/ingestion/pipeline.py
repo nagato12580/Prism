@@ -50,5 +50,8 @@ def ingest_item(item_id: str) -> int:
         item.summary = item.content[:200]
         db.commit()
         return len(chunks)
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

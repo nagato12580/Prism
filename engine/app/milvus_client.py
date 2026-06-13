@@ -36,7 +36,12 @@ def ensure_collection():
 def insert_vectors(chunk_id: str, item_id: str, embedding: list[float]):
     """插入一条向量。"""
     coll = ensure_collection()
-    coll.insert([[chunk_id], [embedding], [chunk_id], [item_id]])
+    coll.insert({
+        "id":        [chunk_id],
+        "embedding": [embedding],
+        "chunk_id":  [chunk_id],
+        "item_id":   [item_id],
+    })
 
 
 def search_vectors(query_embedding: list[float], top_k: int = 10) -> list[dict]:
