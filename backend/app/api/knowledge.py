@@ -1,6 +1,7 @@
 # prism/backend/app/api/knowledge.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import cast, String, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -61,6 +62,27 @@ def _ensure_topic_name_unique(name: str, db: Session, *, exclude_topic_id: Optio
         )
 
 
+def _is_duplicate_topic_name_integrity_error(exc: IntegrityError) -> bool:
+    message = str(exc)
+    return (
+        "uq_knowledge_topic_user_name" in message
+        or "UNIQUE constraint failed: knowledge_topic.user_id, knowledge_topic.name" in message
+    )
+
+
+def _commit_topic_change(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_duplicate_topic_name_integrity_error(exc):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "duplicate_topic_name", "message": "Topic name already exists"},
+            ) from exc
+        raise
+
+
 @router.post("", response_model=KnowledgeItemOut)
 def create_item(payload: KnowledgeItemCreate, db: Session = Depends(get_db)):
     item = KnowledgeItem(
@@ -105,7 +127,7 @@ def create_topic(payload: KnowledgeTopicCreate, db: Session = Depends(get_db)):
         description=payload.description,
     )
     db.add(topic)
-    db.commit()
+    _commit_topic_change(db)
     db.refresh(topic)
     return _topic_out(topic, 0)
 
@@ -145,11 +167,12 @@ def update_topic(topic_id: str, payload: KnowledgeTopicUpdate, db: Session = Dep
     topic = _get_topic_or_404(topic_id, db)
     data = payload.model_dump(exclude_unset=True)
     if "name" in data and data["name"] is not None:
-        topic.name = _normalize_topic_name(data["name"])
-        _ensure_topic_name_unique(topic.name, db, exclude_topic_id=topic.id)
+        candidate_name = _normalize_topic_name(data["name"])
+        _ensure_topic_name_unique(candidate_name, db, exclude_topic_id=topic.id)
+        topic.name = candidate_name
     if "description" in data:
         topic.description = data["description"]
-    db.commit()
+    _commit_topic_change(db)
     db.refresh(topic)
     count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id).count()
     return _topic_out(topic, count)

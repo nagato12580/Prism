@@ -2,6 +2,7 @@
 
 from backend.app.utils.media_type import infer_media_type, supported_accept_extensions
 from backend.app.models import KnowledgeFile
+from sqlalchemy.exc import IntegrityError
 
 
 def test_create_and_get_item(client):
@@ -177,3 +178,38 @@ def test_delete_non_empty_topic_conflict(client, db_session):
 
     assert delete.status_code == 409
     assert delete.json()["detail"]["code"] == "topic_not_empty"
+
+
+def test_create_topic_commit_duplicate_race_is_conflict(client, db_session, monkeypatch):
+    def raise_duplicate_commit():
+        raise IntegrityError(
+            "INSERT INTO knowledge_topic",
+            {},
+            Exception("UNIQUE constraint failed: knowledge_topic.user_id, knowledge_topic.name"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", raise_duplicate_commit)
+
+    create = client.post("/api/v1/knowledge/topics", json={"name": "Race"})
+
+    assert create.status_code == 409
+    assert create.json()["detail"]["code"] == "duplicate_topic_name"
+
+
+def test_update_topic_commit_duplicate_race_is_conflict(client, db_session, monkeypatch):
+    create = client.post("/api/v1/knowledge/topics", json={"name": "Original"})
+    topic_id = create.json()["id"]
+
+    def raise_duplicate_commit():
+        raise IntegrityError(
+            "UPDATE knowledge_topic",
+            {},
+            Exception("Duplicate entry 'default-user-Race' for key 'uq_knowledge_topic_user_name'"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", raise_duplicate_commit)
+
+    update = client.put(f"/api/v1/knowledge/topics/{topic_id}", json={"name": "Race"})
+
+    assert update.status_code == 409
+    assert update.json()["detail"]["code"] == "duplicate_topic_name"
