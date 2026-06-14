@@ -1,9 +1,11 @@
 # prism/backend/app/models/knowledge_item.py
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, Float, Boolean, DateTime, ForeignKey
+
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON, CHAR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, synonym, validates
+
 from ..database import Base
 
 
@@ -11,19 +13,35 @@ def _uuid():
     return str(uuid.uuid4())
 
 
+class KnowledgeTopic(Base):
+    __tablename__ = "knowledge_topic"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_knowledge_topic_user_name"),
+    )
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    user_id = Column(CHAR(36), default="default-user", nullable=False, comment="User id")
+    name = Column(String(255), nullable=False, comment="Topic name")
+    description = Column(Text, comment="Topic description")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    resources = relationship("KnowledgeFile", back_populates="topic", cascade="all, delete-orphan")
+
+
 class KnowledgeItem(Base):
     __tablename__ = "knowledge_item"
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
-    title = Column(String(255), nullable=False, comment="标题")
-    content = Column(Text, comment="Markdown 内容")
-    summary = Column(Text, comment="AI 生成摘要")
+    title = Column(String(255), nullable=False, comment="Title")
+    content = Column(Text, comment="Markdown content")
+    summary = Column(Text, comment="AI generated summary")
     source_type = Column(String(20), default="manual", comment="file/url/chat/manual")
-    source_ref = Column(String(500), comment="原始文件路径/URL/对话ID")
-    tags = Column(JSON, comment="标签数组")
-    category = Column(String(255), comment="分类路径")
+    source_ref = Column(String(500), comment="Original file path, URL, or chat ID")
+    tags = Column(JSON, comment="Tag list")
+    category = Column(String(255), comment="Category path")
     status = Column(String(20), default="published", comment="draft/published/archived")
-    user_id = Column(CHAR(36), default="default-user", comment="用户ID(预留多用户)")
+    user_id = Column(CHAR(36), default="default-user", comment="User id")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -35,10 +53,10 @@ class KnowledgeChunk(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="CASCADE"), nullable=False)
-    chunk_text = Column(Text, nullable=False, comment="分块后文本")
-    chunk_index = Column(Integer, default=0, comment="块序号")
-    embedding_id = Column(String(100), comment="Milvus 向量 ID")
-    extra_meta = Column(JSON, comment="页码/位置等元数据")
+    chunk_text = Column(Text, nullable=False, comment="Chunk text")
+    chunk_index = Column(Integer, default=0, comment="Chunk index")
+    embedding_id = Column(String(100), comment="Milvus vector ID")
+    extra_meta = Column(JSON, comment="Page, position, and other metadata")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     item = relationship("KnowledgeItem", back_populates="chunks")
@@ -46,12 +64,43 @@ class KnowledgeChunk(Base):
 
 class KnowledgeFile(Base):
     __tablename__ = "knowledge_file"
+    __table_args__ = (
+        UniqueConstraint("user_id", "topic_id", "md5", name="uq_knowledge_file_user_topic_md5"),
+    )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
-    original_name = Column(String(255), nullable=False, comment="原始文件名")
-    file_path = Column(String(500), nullable=False, comment="存储路径")
-    file_type = Column(String(20), comment="文件类型")
-    file_size = Column(Integer, default=0, comment="文件大小(字节)")
-    parse_status = Column(String(20), default="pending", comment="pending/parsing/done/failed")
-    item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="SET NULL"), nullable=True, comment="关联知识条目")
+    user_id = Column(CHAR(36), default="default-user", nullable=False, comment="User id")
+    topic_id = Column(CHAR(36), ForeignKey("knowledge_topic.id", ondelete="CASCADE"), nullable=True)
+    item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String(255), nullable=False, default="", comment="Resource title")
+    original_filename = Column("original_name", String(255), nullable=False, default="", comment="Original filename")
+    media_type = Column(String(20), nullable=False, default="document", comment="document/image/audio/video")
+    mime_type = Column(String(100), comment="MIME type")
+    file_ext = Column("file_type", String(20), nullable=False, default="", comment="File extension")
+    file_size = Column(Integer, default=0, comment="File size in bytes")
+    md5 = Column(String(32), nullable=False, default="", comment="File MD5")
+    storage_path = Column("file_path", String(500), nullable=False, default="", comment="Stored file path")
+    processing_status = Column("parse_status", String(20), default="pending", comment="pending/processing/completed/failed/metadata_only")
+    description = Column(Text, comment="Resource description")
+    tags = Column(JSON, comment="Tags")
+    source_type = Column(String(20), default="upload", comment="upload")
+    page_count = Column(Integer, nullable=True, comment="Document page count")
+    content_text = Column(Text, comment="Parsed text")
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    last_modified_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    error_message = Column(Text, comment="Processing error")
+
+    topic = relationship("KnowledgeTopic", back_populates="resources")
+    item = relationship("KnowledgeItem")
+    original_name = synonym("original_filename")
+    file_path = synonym("storage_path")
+    file_type = synonym("file_ext")
+    parse_status = synonym("processing_status")
+
+    @validates("processing_status")
+    def _normalize_processing_status(self, key, value):
+        if value == "done":
+            return "completed"
+        return value
