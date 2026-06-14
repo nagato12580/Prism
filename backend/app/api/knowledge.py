@@ -14,6 +14,7 @@ from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
     KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut, KnowledgeResourceOut,
+    KnowledgeResourceUpdate,
 )
 from ..utils.file_parser import count_pages, extract_text
 from ..utils.media_type import infer_media_type
@@ -358,6 +359,37 @@ def delete_resource(resource_id: str, db: Session = Depends(get_db)):
     db.commit()
     storage_path.unlink(missing_ok=True)
     return {"detail": "deleted"}
+
+
+@router.put("/resources/{resource_id}", response_model=KnowledgeResourceOut)
+def update_resource(resource_id: str, payload: KnowledgeResourceUpdate, db: Session = Depends(get_db)):
+    resource = db.query(KnowledgeFile).filter(
+        KnowledgeFile.id == resource_id,
+        KnowledgeFile.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "Resource not found"},
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    if "title" in data:
+        title = (data["title"] or "").strip()
+        if not title:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_resource_title", "message": "Resource title cannot be empty"},
+            )
+        resource.title = title
+        if resource.item_id:
+            item = db.query(KnowledgeItem).filter(KnowledgeItem.id == resource.item_id).first()
+            if item:
+                item.title = title
+
+    db.commit()
+    db.refresh(resource)
+    return resource
 
 
 @router.get("/{item_id}", response_model=KnowledgeItemOut)

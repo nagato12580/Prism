@@ -299,6 +299,44 @@ def test_upload_image_audio_video_as_metadata_only(client):
         assert resource["item_id"] is None
 
 
+def test_update_resource_title_updates_linked_item(client, monkeypatch):
+    topic = _create_topic(client)
+    monkeypatch.setattr("backend.app.api.knowledge._trigger_ingestion", lambda item_id: None)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+
+    response = client.put(
+        f"/api/v1/knowledge/resources/{resource['id']}",
+        json={"title": "Renamed notes"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Renamed notes"
+    item = client.get(f"/api/v1/knowledge/{resource['item_id']}")
+    assert item.status_code == 200
+    assert item.json()["title"] == "Renamed notes"
+
+
+def test_update_resource_title_rejects_blank(client):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("photo.png", b"image", "image/png")},
+    )
+    resource = upload.json()
+
+    response = client.put(
+        f"/api/v1/knowledge/resources/{resource['id']}",
+        json={"title": "   "},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_resource_title"
+
+
 def test_list_resources_filter_by_media_type(client):
     topic = _create_topic(client)
     client.post(

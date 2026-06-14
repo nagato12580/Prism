@@ -118,6 +118,11 @@ export const knowledgeApi = {
     if (options?.tags?.length) form.append('tags', options.tags.join(','))
     return uploadRequest<KnowledgeResource>(`/knowledge/topics/${topicId}/resources`, form)
   },
+  updateResource: (id: string, data: Partial<Pick<KnowledgeResource, 'title'>>) =>
+    request<KnowledgeResource>(`/knowledge/resources/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   deleteResource: (id: string) =>
     request<{ detail: string }>(`/knowledge/resources/${id}`, { method: 'DELETE' }),
   uploadFile: async (file: File, category?: string): Promise<KnowledgeItem> => {

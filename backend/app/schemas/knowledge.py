@@ -77,6 +77,10 @@ class KnowledgeTopicOut(BaseModel):
         from_attributes = True
 
 
+class KnowledgeResourceUpdate(BaseModel):
+    title: Optional[str] = Field(None, max_length=255)
+
+
 class KnowledgeResourceOut(BaseModel):
     id: str
     user_id: str
