@@ -1,0 +1,91 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 工作台
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 知识与记忆
+      - link "知识库" [ref=e19] [cursor=pointer]:
+        - /url: /knowledge
+        - img [ref=e20]
+        - generic [ref=e23]: 知识库
+  - generic [ref=e24]:
+    - banner [ref=e25]:
+      - generic [ref=e26]:
+        - img
+        - textbox "全局搜索" [ref=e27]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e28]:
+        - button "切换为暗色主题" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+          - generic [ref=e32]: 暗色
+        - generic [ref=e33]:
+          - generic [ref=e34]: A
+          - generic [ref=e35]: admin@example.com
+    - main [ref=e36]:
+      - generic [ref=e38]:
+        - complementary [ref=e39]:
+          - generic [ref=e40]:
+            - generic [ref=e41]:
+              - heading "会话" [level=2] [ref=e42]
+              - paragraph [ref=e43]: 多轮问答状态
+            - button "新建对话" [ref=e44] [cursor=pointer]:
+              - img [ref=e45]
+          - generic [ref=e47]:
+            - button "当前对话 基于知识库进行可追溯问答 进行中 刚刚" [ref=e48] [cursor=pointer]:
+              - generic [ref=e49]:
+                - img [ref=e51]
+                - generic [ref=e53]:
+                  - generic [ref=e54]: 当前对话
+                  - generic [ref=e55]: 基于知识库进行可追溯问答
+              - generic [ref=e56]:
+                - generic [ref=e57]: 进行中
+                - generic [ref=e58]:
+                  - img [ref=e59]
+                  - text: 刚刚
+            - button "资料核心观点总结 整理上传资料里的重点结论 已保存 今天" [ref=e62] [cursor=pointer]:
+              - generic [ref=e63]:
+                - img [ref=e65]
+                - generic [ref=e67]:
+                  - generic [ref=e68]: 资料核心观点总结
+                  - generic [ref=e69]: 整理上传资料里的重点结论
+              - generic [ref=e70]:
+                - generic [ref=e71]: 已保存
+                - generic [ref=e72]:
+                  - img [ref=e73]
+                  - text: 今天
+            - button "行动清单 把知识库内容转成待办步骤 草稿 昨天" [ref=e76] [cursor=pointer]:
+              - generic [ref=e77]:
+                - img [ref=e79]
+                - generic [ref=e81]:
+                  - generic [ref=e82]: 行动清单
+                  - generic [ref=e83]: 把知识库内容转成待办步骤
+              - generic [ref=e84]:
+                - generic [ref=e85]: 草稿
+                - generic [ref=e86]:
+                  - img [ref=e87]
+                  - text: 昨天
+        - generic [ref=e90]:
+          - generic [ref=e93]:
+            - img [ref=e95]
+            - heading "Prism 知识问答工作台" [level=2] [ref=e98]
+            - paragraph [ref=e99]: 先上传资料，再让 Prism 从你的知识库里检索、组织并给出可追溯回答。
+            - generic [ref=e100]:
+              - button "总结我上传资料里的核心观点" [ref=e101] [cursor=pointer]
+              - button "基于知识库帮我列一个行动清单" [ref=e102] [cursor=pointer]
+              - button "哪些资料可以回答这个问题？" [ref=e103] [cursor=pointer]
+            - link "去知识库添加资料" [ref=e104] [cursor=pointer]:
+              - /url: /knowledge
+              - text: 去知识库添加资料
+              - img [ref=e105]
+          - generic [ref=e108]:
+            - textbox "输入问题，Prism 会检索知识库后回答" [ref=e109]
+            - button "发送" [disabled] [ref=e110]:
+              - img [ref=e111]

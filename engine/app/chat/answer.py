@@ -10,6 +10,7 @@ from ..agent.runner import LangChainAgentRunner, create_chat_model
 from ..agent.tools import ToolContext, build_enabled_tools
 from ..config import settings
 from ..llm.client import chat
+from ..observability import logger, quoted
 from ..retrieval.hybrid import hybrid_search
 
 
@@ -137,8 +138,20 @@ def build_agent_runner() -> LangChainAgentRunner:
 
 
 def answer_stream(query: str, history: list[dict] | None = None):
+    history = history or []
+    logger.info(
+        "[chat] request_start query=%s history_messages=%s",
+        quoted(query),
+        len(history),
+    )
     try:
         runner = build_agent_runner()
-        yield from runner.stream(query, history or [])
+        logger.info("[chat] runner_ready")
+        yield from runner.stream(query, history)
+        logger.info("[chat] stream_complete")
     except Exception as exc:
+        logger.exception(
+            "[chat] request_error error=%s",
+            quoted(str(exc), limit=300),
+        )
         yield error_event(str(exc))

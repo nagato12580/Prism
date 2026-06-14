@@ -1,4 +1,5 @@
 import json
+import logging
 
 from engine.app.chat import answer
 
@@ -18,6 +19,23 @@ def test_answer_stream_delegates_to_agent_runner(monkeypatch):
     assert json.loads(lines[1]) == {"type": "done"}
 
 
+def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
+    monkeypatch.setattr(answer, "build_agent_runner", lambda: FakeRunner())
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        list(answer.answer_stream("hello", [{"role": "user", "content": "old"}]))
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "[chat] request_start" in message
+        and 'query="hello"' in message
+        and "history_messages=1" in message
+        for message in messages
+    )
+    assert any("[chat] runner_ready" in message for message in messages)
+    assert any("[chat] stream_complete" in message for message in messages)
+
+
 def test_answer_stream_emits_error_when_runner_build_fails(monkeypatch):
     def fail():
         raise RuntimeError("no model")
@@ -27,6 +45,22 @@ def test_answer_stream_emits_error_when_runner_build_fails(monkeypatch):
     lines = list(answer.answer_stream("hello", []))
 
     assert json.loads(lines[0]) == {"type": "error", "data": "no model"}
+
+
+def test_answer_stream_logs_runner_build_error(monkeypatch, caplog):
+    def fail():
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(answer, "build_agent_runner", fail)
+
+    with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
+        list(answer.answer_stream("hello", []))
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "[chat] request_error" in message and 'error="no model"' in message
+        for message in messages
+    )
 
 
 def test_judge_rag_treats_sufficient_without_answer_basis_as_malformed(

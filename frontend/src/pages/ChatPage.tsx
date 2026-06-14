@@ -85,6 +85,14 @@ function normalizeSources(value: unknown): Source[] {
     .filter((source) => source.chunk_id || source.item_id)
 }
 
+function historyContent(message: Message) {
+  if (message.role === 'assistant' && message.clarify) {
+    const options = message.clarify.options.map((option) => option.label).filter(Boolean).join('\n')
+    return [message.content, message.clarify.question, options].filter(Boolean).join('\n')
+  }
+  return message.content
+}
+
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -116,7 +124,7 @@ export function ChatPage() {
 
     const history = messages
       .filter((m) => !m.streaming)
-      .map((m) => ({ role: m.role, content: m.content }))
+      .map((m) => ({ role: m.role, content: historyContent(m) }))
 
     addMessage({ id: crypto.randomUUID(), role: 'user', content: query })
     addMessage({ id: crypto.randomUUID(), role: 'assistant', content: '', streaming: true })
@@ -240,7 +248,10 @@ export function ChatPage() {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div
+          data-scroll-region="conversation-list"
+          className="min-h-0 flex-1 overflow-y-auto p-3"
+        >
           <div className="space-y-2">
             {conversationList.map((conversation) => {
               const active = activeConversation === conversation.id
@@ -300,7 +311,10 @@ export function ChatPage() {
       </aside>
 
       <section className="prism-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
+        <div
+          data-scroll-region="message-list"
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8"
+        >
           {messages.length === 0 ? (
             <EmptyState onStarterPrompt={send} disabled={sending} />
           ) : (
@@ -420,8 +434,7 @@ function MessageBlock({
 }) {
   const isUser = msg.role === 'user'
   const handleClarifySelect = (option: ClarifyOption) => {
-    const label = option.label.trim()
-    onClarifySelect(label ? `${msg.clarify?.question ?? ''}\n${label}`.trim() : option.value)
+    onClarifySelect(option.label.trim() || option.value)
   }
   const isError = !isUser && msg.content.includes('请求失败：')
 
@@ -507,7 +520,7 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
           className="h-2 w-2 rounded-full bg-[var(--prism-cyan)]"
           style={{ animation: 'prism-pulse 1s ease-in-out infinite' }}
         />
-        <span className="min-w-0 break-words">{msg.agentStatus || '正在检索知识库...'}</span>
+        <span className="min-w-0 break-words">{agentStatusLabel(msg.agentStatus) || '正在处理...'}</span>
       </div>
     )
   }
@@ -583,6 +596,9 @@ function ClarifyCard({
 
 function toolLabel(tool: string) {
   const labels: Record<string, string> = {
+    chat: '闲聊',
+    knowledge_search: '检索知识库',
+    clarify_user: '补充信息',
     retrieve: '检索',
     search: '搜索',
     rerank: '重排',
@@ -590,6 +606,10 @@ function toolLabel(tool: string) {
     tool: '工具',
   }
   return labels[tool] ?? tool
+}
+
+function agentStatusLabel(status: string | undefined) {
+  return status ? toolLabel(status) : ''
 }
 
 function formatScore(score: number) {

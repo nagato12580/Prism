@@ -151,6 +151,11 @@ export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const isDark = theme === 'dark'
+  const location = useLocation()
+  const isChatRoute =
+    location.pathname === '/' ||
+    location.pathname === '/chat' ||
+    location.pathname.startsWith('/chat/')
 
   return (
     <div
@@ -270,7 +275,8 @@ export function MainLayout() {
 
         <main
           className={cn(
-            'min-h-0 flex-1 overflow-auto p-4 transition-colors lg:p-6',
+            'min-h-0 flex-1 p-4 transition-colors lg:p-6',
+            isChatRoute ? 'overflow-hidden' : 'overflow-auto',
             isDark
               ? 'bg-[radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.18),transparent_36rem),#070917]'
               : 'bg-[#f4f7fb]'
@@ -278,7 +284,9 @@ export function MainLayout() {
         >
           <div
             className={cn(
-              'mx-auto min-h-full max-w-[1520px] rounded-2xl border p-3 shadow-[0_24px_80px_-56px_rgba(15,23,42,0.35)] backdrop-blur lg:p-4',
+              'mx-auto max-w-[1520px] rounded-2xl border p-3 shadow-[0_24px_80px_-56px_rgba(15,23,42,0.35)] backdrop-blur lg:p-4',
+              isChatRoute && 'flex h-full min-h-0 flex-col overflow-hidden',
+              !isChatRoute && 'min-h-full',
               isDark ? 'border-white/[0.07] bg-[#0d1024]/88' : 'border-slate-200 bg-white'
             )}
           >
