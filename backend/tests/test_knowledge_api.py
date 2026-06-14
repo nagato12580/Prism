@@ -97,3 +97,44 @@ def test_unknown_extension_with_unlisted_video_mime_rejected():
         assert "Unsupported file type" in str(exc)
     else:
         raise AssertionError("unlisted video MIME types must be rejected")
+
+
+def test_create_list_update_topic(client):
+    create = client.post("/api/v1/knowledge/topics", json={
+        "name": "Product Docs",
+        "description": "Launch docs",
+    })
+    assert create.status_code == 200
+    topic = create.json()
+    assert topic["name"] == "Product Docs"
+    assert topic["description"] == "Launch docs"
+    assert topic["resource_count"] == 0
+
+    listing = client.get("/api/v1/knowledge/topics")
+    assert listing.status_code == 200
+    assert [item["name"] for item in listing.json()] == ["Product Docs"]
+
+    update = client.put(f"/api/v1/knowledge/topics/{topic['id']}", json={
+        "name": "Product Handbook",
+        "description": "Updated",
+    })
+    assert update.status_code == 200
+    assert update.json()["name"] == "Product Handbook"
+
+
+def test_duplicate_topic_name_is_conflict(client):
+    first = client.post("/api/v1/knowledge/topics", json={"name": "Research"})
+    second = client.post("/api/v1/knowledge/topics", json={"name": "Research"})
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "duplicate_topic_name"
+
+
+def test_delete_empty_topic(client):
+    create = client.post("/api/v1/knowledge/topics", json={"name": "Empty"})
+    topic_id = create.json()["id"]
+
+    delete = client.delete(f"/api/v1/knowledge/topics/{topic_id}")
+    assert delete.status_code == 200
+    assert delete.json()["detail"] == "deleted"
