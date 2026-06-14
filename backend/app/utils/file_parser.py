@@ -17,7 +17,7 @@ def extract_text(file_path: str) -> str:
         return _extract_xlsx(file_path)
     if ext in (".md", ".txt", ".markdown"):
         return Path(file_path).read_text(encoding="utf-8")
-    raise ValueError(f"Unsupported file type: {ext}")
+    raise ValueError(f"不支持的文件类型: {ext}")
 
 
 def _extract_pdf(file_path: str) -> str:

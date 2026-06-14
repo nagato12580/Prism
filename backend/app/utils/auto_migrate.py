@@ -1,6 +1,11 @@
 # prism/backend/app/utils/auto_migrate.py
-from sqlalchemy import inspect, text
+from sqlalchemy import UniqueConstraint, inspect, text
 from sqlalchemy.types import Integer, Boolean, Float, String
+
+KNOWN_UNIQUE_CONSTRAINTS = {
+    "uq_knowledge_topic_user_name",
+    "uq_knowledge_file_user_topic_md5",
+}
 
 
 def auto_migrate(Base, engine) -> None:
@@ -38,6 +43,35 @@ def auto_migrate(Base, engine) -> None:
                         raise RuntimeError(
                             f"[auto_migrate] Failed to add column {table_name}.{col.name}: {e}"
                         ) from e
+
+        existing_unique_names = {
+            item.get("name")
+            for item in inspector.get_unique_constraints(table_name)
+            if item.get("name")
+        }
+        for constraint in table_obj.constraints:
+            if not isinstance(constraint, UniqueConstraint):
+                continue
+            if constraint.name not in KNOWN_UNIQUE_CONSTRAINTS:
+                continue
+            if constraint.name in existing_unique_names:
+                continue
+            columns = [f"`{column.name}`" for column in constraint.columns]
+            if not columns:
+                continue
+            alter_sql = (
+                f"ALTER TABLE `{table_name}` "
+                f"ADD CONSTRAINT `{constraint.name}` UNIQUE ({', '.join(columns)})"
+            )
+            print(f"[auto_migrate] 添加唯一约束 {table_name}.{constraint.name}")
+            with engine.connect() as conn:
+                try:
+                    conn.execute(text(alter_sql))
+                    conn.commit()
+                except Exception as e:
+                    raise RuntimeError(
+                        f"[auto_migrate] Failed to add unique constraint {table_name}.{constraint.name}: {e}"
+                    ) from e
 
 
 def _infer_default(col):

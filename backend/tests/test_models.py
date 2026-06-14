@@ -2,7 +2,9 @@
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from backend.app.database import Base
 from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeTopic, KnowledgeChunk, ChatSession, ChatMessage
+from backend.app.utils import auto_migrate as auto_migrate_module
 
 
 def test_create_knowledge_item_with_chunk(db_session):
@@ -161,3 +163,52 @@ def test_knowledge_file_done_status_normalizes_to_completed(db_session):
     assert loaded["new-done-md5"].processing_status == "completed"
     assert loaded["new-done-md5"].parse_status == "completed"
     assert loaded["pending-md5"].processing_status == "pending"
+
+
+def test_knowledge_file_model_has_named_unique_constraint():
+    constraints = {constraint.name for constraint in KnowledgeFile.__table__.constraints}
+    assert "uq_knowledge_file_user_topic_md5" in constraints
+
+
+def test_knowledge_topic_model_has_named_unique_constraint():
+    constraints = {constraint.name for constraint in KnowledgeTopic.__table__.constraints}
+    assert "uq_knowledge_topic_user_name" in constraints
+
+
+def test_auto_migrate_adds_missing_topic_resource_unique_constraints(monkeypatch):
+    executed_sql = []
+
+    class FakeInspector:
+        def get_table_names(self):
+            return list(Base.metadata.tables)
+
+        def get_columns(self, table_name):
+            table = Base.metadata.tables[table_name]
+            return [{"name": column.name} for column in table.columns]
+
+        def get_unique_constraints(self, table_name):
+            return []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, statement):
+            executed_sql.append(str(statement))
+
+        def commit(self):
+            pass
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(auto_migrate_module, "inspect", lambda engine: FakeInspector())
+
+    auto_migrate_module.auto_migrate(Base, FakeEngine())
+
+    assert any("ADD CONSTRAINT `uq_knowledge_topic_user_name`" in sql for sql in executed_sql)
+    assert any("ADD CONSTRAINT `uq_knowledge_file_user_topic_md5`" in sql for sql in executed_sql)
