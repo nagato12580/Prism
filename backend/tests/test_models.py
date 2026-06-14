@@ -101,3 +101,63 @@ def test_duplicate_resource_md5_is_rejected_per_user_topic(db_session):
 
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_knowledge_file_legacy_attrs_map_to_new_attrs(db_session):
+    resource = KnowledgeFile(
+        title="Legacy Upload",
+        original_name="legacy.txt",
+        file_path="uploads/legacy.txt",
+        file_type=".txt",
+        file_size=6,
+        md5="legacy-md5",
+        parse_status="completed",
+    )
+    db_session.add(resource)
+    db_session.commit()
+
+    loaded = db_session.query(KnowledgeFile).filter_by(md5="legacy-md5").one()
+    assert loaded.original_filename == "legacy.txt"
+    assert loaded.storage_path == "uploads/legacy.txt"
+    assert loaded.file_ext == ".txt"
+    assert loaded.processing_status == "completed"
+    assert loaded.original_name == "legacy.txt"
+    assert loaded.file_path == "uploads/legacy.txt"
+    assert loaded.file_type == ".txt"
+    assert loaded.parse_status == "completed"
+
+
+def test_knowledge_file_done_status_normalizes_to_completed(db_session):
+    legacy_status = KnowledgeFile(
+        title="Legacy Done",
+        original_filename="legacy-done.txt",
+        file_ext=".txt",
+        md5="legacy-done-md5",
+        storage_path="uploads/legacy-done.txt",
+        parse_status="done",
+    )
+    new_status = KnowledgeFile(
+        title="New Done",
+        original_filename="new-done.txt",
+        file_ext=".txt",
+        md5="new-done-md5",
+        storage_path="uploads/new-done.txt",
+        processing_status="done",
+    )
+    pending = KnowledgeFile(
+        title="Pending",
+        original_filename="pending.txt",
+        file_ext=".txt",
+        md5="pending-md5",
+        storage_path="uploads/pending.txt",
+        processing_status="pending",
+    )
+    db_session.add_all([legacy_status, new_status, pending])
+    db_session.commit()
+
+    loaded = {item.md5: item for item in db_session.query(KnowledgeFile).all()}
+    assert loaded["legacy-done-md5"].processing_status == "completed"
+    assert loaded["legacy-done-md5"].parse_status == "completed"
+    assert loaded["new-done-md5"].processing_status == "completed"
+    assert loaded["new-done-md5"].parse_status == "completed"
+    assert loaded["pending-md5"].processing_status == "pending"

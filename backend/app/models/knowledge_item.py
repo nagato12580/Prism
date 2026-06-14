@@ -2,9 +2,9 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Text, Integer, Float, Boolean, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON, CHAR
-from sqlalchemy.orm import relationship, synonym
+from sqlalchemy.orm import relationship, synonym, validates
 
 from ..database import Base
 
@@ -98,3 +98,9 @@ class KnowledgeFile(Base):
     file_path = synonym("storage_path")
     file_type = synonym("file_ext")
     parse_status = synonym("processing_status")
+
+    @validates("processing_status")
+    def _normalize_processing_status(self, key, value):
+        if value == "done":
+            return "completed"
+        return value
