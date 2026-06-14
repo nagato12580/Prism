@@ -255,3 +255,10 @@ def test_auto_migrate_adds_missing_columns_without_string_compile_error(monkeypa
     auto_migrate_module.auto_migrate(Base, FakeEngine())
 
     assert any("ADD COLUMN `name`" in sql for sql in executed_sql)
+
+
+def test_auto_migrate_does_not_add_default_to_text_columns():
+    from backend.app.models.knowledge_item import KnowledgeFile
+    description_column = KnowledgeFile.__table__.columns["description"]
+
+    assert auto_migrate_module._infer_default(description_column) == ""

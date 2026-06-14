@@ -1,5 +1,6 @@
 # prism/backend/app/utils/auto_migrate.py
 from sqlalchemy import UniqueConstraint, inspect, text
+from sqlalchemy.sql.sqltypes import Text
 from sqlalchemy.types import Boolean, Float, Integer, String
 
 KNOWN_UNIQUE_CONSTRAINTS = {
@@ -80,6 +81,6 @@ def _infer_default(col):
         return " DEFAULT 0"
     if isinstance(col_type, Float):
         return " DEFAULT 0"
-    if isinstance(col_type, String):
+    if isinstance(col_type, String) and not isinstance(col_type, Text):
         return " DEFAULT ''"
     return ""
