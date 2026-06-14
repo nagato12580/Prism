@@ -18,13 +18,40 @@ _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=
 _Session = sessionmaker(bind=_engine)
 
 
-def _load_chunks(chunk_ids: list[str]) -> dict[str, str]:
-    from backend.app.models.knowledge_item import KnowledgeChunk
+def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
+    """加载 chunk 文本和所属文档名。
+
+    Returns: {chunk_id: {"text": str, "doc_name": str}}
+    """
+    from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem, KnowledgeFile
 
     db = _Session()
     try:
         chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(chunk_ids)).all()
-        return {chunk.id: chunk.chunk_text for chunk in chunks}
+        if not chunks:
+            return {}
+
+        # 批量取 item 信息
+        item_ids = {chunk.item_id for chunk in chunks}
+        items = {
+            row[0]: row[1]
+            for row in db.query(KnowledgeItem.id, KnowledgeItem.title)
+            .filter(KnowledgeItem.id.in_(item_ids))
+            .all()
+        }
+        # 批量取 doc_name（优先 knowledge_file 的 title/original_filename）
+        files = {
+            row[0]: row[1] or row[2] or ""
+            for row in db.query(KnowledgeFile.item_id, KnowledgeFile.title, KnowledgeFile.original_filename)
+            .filter(KnowledgeFile.item_id.in_(item_ids))
+            .all()
+        }
+
+        result = {}
+        for chunk in chunks:
+            doc_name = files.get(chunk.item_id) or items.get(chunk.item_id, "")
+            result[chunk.id] = {"text": chunk.chunk_text, "doc_name": doc_name}
+        return result
     finally:
         db.close()
 
@@ -118,9 +145,50 @@ def _judge_rag(
     )
 
 
-def build_agent_runner() -> LangChainAgentRunner:
+def _resolve_allowed_item_ids(topic_id: str | None) -> set[str] | None:
+    """从 knowledge_file 表查出 topic 下所有 item_id，用于向量检索后置过滤。"""
+    if not topic_id:
+        return None
+    from backend.app.models.knowledge_item import KnowledgeFile
+
+    db = _Session()
+    try:
+        item_ids = (
+            db.query(KnowledgeFile.item_id)
+            .filter(
+                KnowledgeFile.topic_id == topic_id,
+                KnowledgeFile.item_id.isnot(None),
+            )
+            .all()
+        )
+        return {row[0] for row in item_ids if row[0]}
+    finally:
+        db.close()
+
+
+def build_agent_runner(
+    topic_id: str | None = None,
+    source_types: list[str] | None = None,
+) -> LangChainAgentRunner:
+    """构造 Agent Runner，注入带过滤的搜索闭包。
+
+    搜索闭包会捕获 topic_id / source_types / allowed_item_ids，
+    RAG runner 调用 search(query, top_k) 时自动限定检索范围。
+    """
+    allowed_item_ids = _resolve_allowed_item_ids(topic_id)
+    topic_ids = [topic_id] if topic_id else None
+
+    def _scoped_search(query: str, top_k: int) -> list[dict]:
+        return hybrid_search(
+            query,
+            top_k=top_k,
+            topic_ids=topic_ids,
+            source_types=source_types,
+            allowed_item_ids=allowed_item_ids,
+        )
+
     rag_runner = AgenticRagRunner(
-        search=lambda query, top_k: hybrid_search(query, top_k=top_k),
+        search=_scoped_search,
         load_chunks=_load_chunks,
         judge=_judge_rag,
         max_iterations=3,
@@ -137,15 +205,22 @@ def build_agent_runner() -> LangChainAgentRunner:
     return LangChainAgentRunner(model=model, tools=tools)
 
 
-def answer_stream(query: str, history: list[dict] | None = None):
+def answer_stream(
+    query: str,
+    history: list[dict] | None = None,
+    topic_id: str | None = None,
+    source_types: list[str] | None = None,
+):
     history = history or []
     logger.info(
-        "[chat] request_start query=%s history_messages=%s",
+        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s",
         quoted(query),
         len(history),
+        topic_id,
+        source_types,
     )
     try:
-        runner = build_agent_runner()
+        runner = build_agent_runner(topic_id=topic_id, source_types=source_types)
         logger.info("[chat] runner_ready")
         yield from runner.stream(query, history)
         logger.info("[chat] stream_complete")

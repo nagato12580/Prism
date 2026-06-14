@@ -10,7 +10,7 @@ Evidence: TypeAlias = dict[str, Any]
 ClarifyOption: TypeAlias = dict[str, str]
 ClarifyRequest: TypeAlias = dict[str, Any]
 SearchFn: TypeAlias = Callable[[str, int], list[SearchHit]]
-LoadChunksFn: TypeAlias = Callable[[list[str]], dict[str, str]]
+LoadChunksFn: TypeAlias = Callable[[list[str]], dict[str, dict[str, str]]]
 JudgeFn: TypeAlias = Callable[
     [str, str, list[Evidence], list[str]], "RagJudgeResult"
 ]
@@ -107,21 +107,34 @@ class AgenticRagRunner:
     def _build_evidence(self, hits: list[SearchHit]) -> list[Evidence]:
         hits = self._first_hits_by_chunk(hits)
         chunk_ids = [hit["chunk_id"] for hit in hits if "chunk_id" in hit]
-        chunk_text_by_id = self.load_chunks(chunk_ids)
+        chunk_details = self.load_chunks(chunk_ids)
         return [
-            {**hit, "text": chunk_text_by_id.get(hit.get("chunk_id"), "")}
+            {
+                **hit,
+                "text": chunk_details.get(hit.get("chunk_id"), {}).get("text", ""),
+                "doc_name": chunk_details.get(hit.get("chunk_id"), {}).get("doc_name", ""),
+            }
             for hit in hits
         ]
 
-    @staticmethod
     def _useful_sources(
-        hits: list[SearchHit], useful_chunk_ids: list[str]
+        self, hits: list[SearchHit], useful_chunk_ids: list[str]
     ) -> list[SearchHit]:
-        hits = AgenticRagRunner._first_hits_by_chunk(hits)
+        hits = self._first_hits_by_chunk(hits)
+        chunk_ids = [hit["chunk_id"] for hit in hits if "chunk_id" in hit]
+        chunk_details = self.load_chunks(chunk_ids)
+        enriched = [
+            {
+                **hit,
+                "text": chunk_details.get(hit.get("chunk_id"), {}).get("text", ""),
+                "doc_name": chunk_details.get(hit.get("chunk_id"), {}).get("doc_name", ""),
+            }
+            for hit in hits
+        ]
         useful = set(useful_chunk_ids)
         if not useful:
-            return hits
-        return [hit for hit in hits if hit.get("chunk_id") in useful]
+            return enriched
+        return [hit for hit in enriched if hit.get("chunk_id") in useful]
 
     @staticmethod
     def _first_hits_by_chunk(hits: list[SearchHit]) -> list[SearchHit]:

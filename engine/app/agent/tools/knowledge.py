@@ -52,6 +52,9 @@ def build(ctx: ToolContext) -> StructuredTool:
 
         result = ctx.rag_runner.run(query)
         sources = list(getattr(result, "sources", []))
+        # 如果 sources 为空（insufficient 场景），用 evidence 补充
+        if not sources:
+            sources = list(getattr(result, "evidence", []))
         _append_unique_citations(ctx.citations, sources)
         ctx.stats_holder[KEY] = {
             "hit_count": len(sources),

@@ -4,6 +4,7 @@ from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from engine.app.config import settings
 from engine.app.milvus_client import connect, ensure_collection
+from engine.app.es_client import ensure_index
 from engine.app.api.ingest import router as ingest_router
 from engine.app.api.chat import router as chat_router
 
@@ -28,6 +29,11 @@ def create_app():
         connect()
         ensure_collection()
         print("[engine] Milvus 已连接")
+        try:
+            ensure_index()
+            print("[engine] ES 索引已就绪")
+        except Exception as e:
+            print(f"[engine] ES 初始化失败（检索将回退到 MySQL BM25）: {e}")
 
     return app
 

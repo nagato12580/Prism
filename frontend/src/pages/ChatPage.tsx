@@ -8,18 +8,29 @@ import {
   BookOpen,
   ChevronDown,
   Clock3,
+  FileText,
+  Image,
+  Layers,
+  Library,
+  Loader2,
   MessageSquarePlus,
+  Music,
   Plus,
   Send,
+  Video,
+  X,
 } from 'lucide-react'
 import {
   useChatStore,
+  SOURCE_TYPE_OPTIONS,
   type ClarifyOption,
   type ClarifyRequest,
   type Message,
   type Source,
   type ToolRun,
 } from '@/app/chatStore'
+import type { ResourceMediaType } from '@/app/api'
+import { knowledgeApi, type KnowledgeTopic } from '@/app/api'
 import { cn } from '@/lib/utils'
 
 const starterPrompts = [
@@ -27,6 +38,16 @@ const starterPrompts = [
   '基于知识库帮我列一个行动清单',
   '哪些资料可以回答这个问题？',
 ]
+
+const sourceTypeIcon = (type: ResourceMediaType) => {
+  const icons: Record<ResourceMediaType, ReturnType<typeof FileText>> = {
+    document: <FileText size={14} />,
+    image: <Image size={14} />,
+    audio: <Music size={14} />,
+    video: <Video size={14} />,
+  }
+  return icons[type] ?? <FileText size={14} />
+}
 
 const conversationList = [
   {
@@ -99,6 +120,8 @@ export function ChatPage() {
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
   const [activeConversation, setActiveConversation] = useState('current')
   const messages = useChatStore((s) => s.messages)
+  const selectedTopicId = useChatStore((s) => s.selectedTopicId)
+  const selectedTopicName = useChatStore((s) => s.selectedTopicName)
   const addMessage = useChatStore((s) => s.addMessage)
   const appendToLast = useChatStore((s) => s.appendToLast)
   const setLastSources = useChatStore((s) => s.setLastSources)
@@ -108,12 +131,74 @@ export function ChatPage() {
   const setLastClarify = useChatStore((s) => s.setLastClarify)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
+  const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
+  const clearSelectedTopic = useChatStore((s) => s.clearSelectedTopic)
+  const selectedSourceTypes = useChatStore((s) => s.selectedSourceTypes)
+  const toggleSourceType = useChatStore((s) => s.toggleSourceType)
+  const clearSelectedSourceTypes = useChatStore((s) => s.clearSelectedSourceTypes)
+  const [showTopicPicker, setShowTopicPicker] = useState(false)
+  const [showSourcePicker, setShowSourcePicker] = useState(false)
+  const [topics, setTopics] = useState<KnowledgeTopic[]>([])
+  const [loadingTopics, setLoadingTopics] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const pendingClarifyRef = useRef<string | null>(null)
+  const topicPickerRef = useRef<HTMLDivElement>(null)
+  const sourcePickerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
+
+  // 点击外部关闭 topic picker
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (topicPickerRef.current && !topicPickerRef.current.contains(e.target as Node)) {
+        setShowTopicPicker(false)
+      }
+    }
+    if (showTopicPicker) {
+      document.addEventListener('mousedown', handleClick)
+      return () => document.removeEventListener('mousedown', handleClick)
+    }
+  }, [showTopicPicker])
+
+  // 点击外部关闭 source picker
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (sourcePickerRef.current && !sourcePickerRef.current.contains(e.target as Node)) {
+        setShowSourcePicker(false)
+      }
+    }
+    if (showSourcePicker) {
+      document.addEventListener('mousedown', handleClick)
+      return () => document.removeEventListener('mousedown', handleClick)
+    }
+  }, [showSourcePicker])
+
+  const loadTopics = async () => {
+    setLoadingTopics(true)
+    try {
+      setTopics(await knowledgeApi.listTopics())
+    } catch {
+      // 静默失败
+    } finally {
+      setLoadingTopics(false)
+    }
+  }
+
+  const handleOpenTopicPicker = () => {
+    if (!showTopicPicker) {
+      if (topics.length === 0) loadTopics()
+      setShowTopicPicker(true)
+    } else {
+      setShowTopicPicker(false)
+    }
+  }
+
+  const handleSelectTopic = (topic: KnowledgeTopic) => {
+    setSelectedTopic(topic.id, topic.name)
+    setShowTopicPicker(false)
+  }
 
   const send = async (value = input) => {
     if (!value.trim() || sending) return
@@ -171,7 +256,12 @@ export function ChatPage() {
       const resp = await fetch('/api/v1/chat/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, history }),
+        body: JSON.stringify({
+          query,
+          history,
+          topic_id: selectedTopicId || undefined,
+          source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
+        }),
       })
 
       if (!resp.ok) {
@@ -228,6 +318,8 @@ export function ChatPage() {
     setActiveConversation('current')
     setExpandedSources({})
     clear()
+    clearSelectedTopic()
+    clearSelectedSourceTypes()
   }
 
   return (
@@ -338,14 +430,15 @@ export function ChatPage() {
           )}
         </div>
 
+        {/* 输入区域：输入框 + 内嵌工具栏 */}
         <form
-          className="shrink-0 border-t border-[var(--prism-line)] bg-white/90 p-3 sm:p-4"
+          className="shrink-0 bg-white/90 p-3 sm:p-4"
           onSubmit={(e) => {
             e.preventDefault()
             send()
           }}
         >
-          <div className="flex min-w-0 gap-2 rounded-xl border border-[var(--prism-line)] bg-white p-2 shadow-[0_14px_34px_-28px_rgba(16,24,40,0.6)] focus-within:border-blue-200 focus-within:ring-2 focus-within:ring-cyan-100">
+          <div className="flex flex-col rounded-xl border border-[var(--prism-line)] bg-white shadow-[0_14px_34px_-28px_rgba(16,24,40,0.6)] focus-within:border-blue-200 focus-within:ring-2 focus-within:ring-cyan-100">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -358,16 +451,156 @@ export function ChatPage() {
               placeholder="输入问题，Prism 会检索知识库后回答"
               disabled={sending}
               rows={2}
-              className="max-h-36 min-h-[3rem] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
+              className="max-h-36 min-h-[3rem] resize-none border-0 bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
             />
-            <button
-              type="submit"
-              aria-label="发送"
-              disabled={sending || !input.trim()}
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)] text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300"
-            >
-              <Send size={18} />
-            </button>
+            <div className="flex items-center gap-2 border-t border-slate-100 px-2 py-1.5">
+              {/* 知识库选择 */}
+              <div className="relative" ref={topicPickerRef}>
+                <button
+                  type="button"
+                  onClick={handleOpenTopicPicker}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
+                    selectedTopicId
+                      ? 'border-blue-200 bg-blue-50 text-[var(--prism-blue)]'
+                      : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-[var(--prism-blue)]',
+                  )}
+                >
+                  <Library size={12} />
+                  {selectedTopicId ? selectedTopicName : '知识库'}
+                  <ChevronDown size={10} className={cn('transition', showTopicPicker && 'rotate-180')} />
+                </button>
+
+                {showTopicPicker && (
+                  <div className="absolute bottom-full left-0 z-30 mb-1 w-44 rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)]">
+                    {loadingTopics ? (
+                      <div className="flex items-center gap-2 px-2 py-3 text-[11px] text-slate-400">
+                        <Loader2 size={12} className="animate-spin" />
+                        加载中...
+                      </div>
+                    ) : topics.length === 0 ? (
+                      <p className="px-2 py-3 text-[11px] text-slate-400">暂无知识库</p>
+                    ) : (
+                      <div className="max-h-44 overflow-y-auto">
+                        {topics.map((topic) => (
+                          <button
+                            key={topic.id}
+                            type="button"
+                            onClick={() => handleSelectTopic(topic)}
+                            className={cn(
+                              'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition',
+                              selectedTopicId === topic.id
+                                ? 'bg-blue-50 text-[var(--prism-blue)]'
+                                : 'text-slate-600 hover:bg-slate-50',
+                            )}
+                          >
+                            <BookOpen size={12} className="shrink-0 text-slate-400" />
+                            <span className="min-w-0 flex-1 truncate">{topic.name}</span>
+                            <span className="shrink-0 text-[10px] text-slate-400">{topic.resource_count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 数据来源类型多选 */}
+              <div className="relative" ref={sourcePickerRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowSourcePicker((v) => !v)}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
+                    selectedSourceTypes.length > 0
+                      ? 'border-violet-200 bg-violet-50 text-violet-700'
+                      : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-violet-700',
+                  )}
+                >
+                  <Layers size={12} />
+                  {selectedSourceTypes.length > 0
+                    ? selectedSourceTypes.map((t) => SOURCE_TYPE_OPTIONS.find((o) => o.value === t)?.label).join('/')
+                    : '数据类型'}
+                  <ChevronDown size={10} className={cn('transition', showSourcePicker && 'rotate-180')} />
+                </button>
+
+                {showSourcePicker && (
+                  <div className="absolute bottom-full left-0 z-30 mb-1 w-44 rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)]">
+                    <p className="px-2 pb-1 pt-0.5 text-[10px] text-slate-400">可多选，未选则全部</p>
+                    <div className="space-y-0.5">
+                      {SOURCE_TYPE_OPTIONS.map((option) => {
+                        const checked = selectedSourceTypes.includes(option.value)
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => toggleSourceType(option.value)}
+                            className={cn(
+                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition',
+                              checked
+                                ? 'bg-violet-50 text-violet-800'
+                                : 'text-slate-600 hover:bg-slate-50',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border transition',
+                                checked
+                                  ? 'border-violet-400 bg-violet-500 text-white'
+                                  : 'border-slate-300 bg-white',
+                              )}
+                            >
+                              {checked && (
+                                <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+                                  <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              )}
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              {sourceTypeIcon(option.value)}
+                              {option.label}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {selectedSourceTypes.length > 0 && (
+                      <div className="mt-1 border-t border-slate-100 pt-1">
+                        <button
+                          type="button"
+                          onClick={clearSelectedSourceTypes}
+                          className="w-full rounded-md px-2 py-1 text-left text-[10px] text-slate-400 transition hover:bg-slate-50 hover:text-slate-500"
+                        >
+                          清除
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 右侧间距 + 清除按钮 */}
+              <div className="flex-1" />
+              {(selectedTopicId || selectedSourceTypes.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => { clearSelectedTopic(); clearSelectedSourceTypes() }}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:text-slate-600"
+                >
+                  清除筛选
+                </button>
+              )}
+
+              {/* 发送按钮 */}
+              <button
+                type="submit"
+                aria-label="发送"
+                disabled={sending || !input.trim()}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)] text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300"
+              >
+                <Send size={16} />
+              </button>
+            </div>
           </div>
         </form>
       </section>
@@ -482,16 +715,21 @@ function MessageBlock({
                 {msg.sources.map((source, index) => (
                   <div
                     key={`${source.chunk_id}-${source.item_id}-${index}`}
-                    className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2 text-xs text-slate-600 shadow-sm"
+                    className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-xs text-slate-600 shadow-sm"
                   >
-                    <dl className="grid gap-1 sm:grid-cols-[4.5rem_1fr]">
-                      <dt className="text-slate-400">chunk id</dt>
-                      <dd className="min-w-0 break-all font-mono">{source.chunk_id}</dd>
-                      <dt className="text-slate-400">item id</dt>
-                      <dd className="min-w-0 break-all font-mono">{source.item_id}</dd>
-                      <dt className="text-slate-400">score</dt>
-                      <dd className="min-w-0 break-all font-mono">{formatScore(source.score)}</dd>
-                    </dl>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate font-semibold text-slate-800">
+                        {source.doc_name || source.item_id}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
+                        相关度 {formatScore(source.score)}
+                      </span>
+                    </div>
+                    {source.text && (
+                      <p className="line-clamp-3 leading-5 text-slate-500">
+                        {source.text.slice(0, 300)}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

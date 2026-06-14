@@ -1,10 +1,21 @@
 import { create } from 'zustand'
+import type { ResourceMediaType } from './api'
 
 export interface Source {
   chunk_id: string
   item_id: string
   score: number
+  doc_name?: string
+  text?: string
 }
+
+/** 数据来源类型，与后端 source_type 对齐 */
+export const SOURCE_TYPE_OPTIONS: { value: ResourceMediaType; label: string }[] = [
+  { value: 'document', label: '文档' },
+  { value: 'image', label: '图片' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+]
 
 export type ToolRunStatus = 'running' | 'success' | 'error'
 
@@ -41,6 +52,9 @@ export interface Message {
 
 interface ChatState {
   messages: Message[]
+  selectedTopicId: string | null
+  selectedTopicName: string | null
+  selectedSourceTypes: ResourceMediaType[]
   addMessage: (msg: Message) => void
   appendToLast: (text: string) => void
   setLastSources: (sources: Source[]) => void
@@ -50,10 +64,18 @@ interface ChatState {
   setLastClarify: (clarify: ClarifyRequest) => void
   finishLast: () => void
   clear: () => void
+  setSelectedTopic: (topicId: string, topicName: string) => void
+  clearSelectedTopic: () => void
+  toggleSourceType: (type: ResourceMediaType) => void
+  setSelectedSourceTypes: (types: ResourceMediaType[]) => void
+  clearSelectedSourceTypes: () => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
+  selectedTopicId: null,
+  selectedTopicName: null,
+  selectedSourceTypes: [],
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   appendToLast: (text) =>
     set((s) => {
@@ -123,4 +145,17 @@ export const useChatStore = create<ChatState>((set) => ({
       return { messages: msgs }
     }),
   clear: () => set({ messages: [] }),
+  setSelectedTopic: (topicId, topicName) => set({ selectedTopicId: topicId, selectedTopicName: topicName }),
+  clearSelectedTopic: () => set({ selectedTopicId: null, selectedTopicName: null }),
+  toggleSourceType: (type) =>
+    set((s) => {
+      const exists = s.selectedSourceTypes.includes(type)
+      return {
+        selectedSourceTypes: exists
+          ? s.selectedSourceTypes.filter((t) => t !== type)
+          : [...s.selectedSourceTypes, type],
+      }
+    }),
+  setSelectedSourceTypes: (types) => set({ selectedSourceTypes: types }),
+  clearSelectedSourceTypes: () => set({ selectedSourceTypes: [] }),
 }))
