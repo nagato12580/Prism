@@ -1,6 +1,7 @@
 # prism/backend/tests/test_knowledge_api.py
 
 from backend.app.utils.media_type import infer_media_type, supported_accept_extensions
+from backend.app.models import KnowledgeFile
 
 
 def test_create_and_get_item(client):
@@ -138,3 +139,41 @@ def test_delete_empty_topic(client):
     delete = client.delete(f"/api/v1/knowledge/topics/{topic_id}")
     assert delete.status_code == 200
     assert delete.json()["detail"] == "deleted"
+
+
+def test_create_topic_rejects_whitespace_only_name(client):
+    create = client.post("/api/v1/knowledge/topics", json={"name": "   "})
+
+    assert create.status_code == 422
+
+
+def test_update_topic_rejects_whitespace_only_name(client):
+    create = client.post("/api/v1/knowledge/topics", json={"name": "Valid"})
+    topic_id = create.json()["id"]
+
+    update = client.put(f"/api/v1/knowledge/topics/{topic_id}", json={"name": "   "})
+
+    assert update.status_code == 422
+
+
+def test_delete_non_empty_topic_conflict(client, db_session):
+    create = client.post("/api/v1/knowledge/topics", json={"name": "Filled"})
+    topic_id = create.json()["id"]
+
+    db_session.add(KnowledgeFile(
+        user_id="default-user",
+        topic_id=topic_id,
+        title="Doc",
+        original_filename="doc.pdf",
+        media_type="document",
+        file_ext=".pdf",
+        file_size=10,
+        md5="abc123",
+        storage_path="/tmp/doc.pdf",
+    ))
+    db_session.commit()
+
+    delete = client.delete(f"/api/v1/knowledge/topics/{topic_id}")
+
+    assert delete.status_code == 409
+    assert delete.json()["detail"]["code"] == "topic_not_empty"

@@ -1,7 +1,6 @@
 # prism/backend/app/api/knowledge.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import cast, String, func
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -9,7 +8,7 @@ from ..database import get_db
 from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
-    KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut, KnowledgeResourceOut,
+    KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut,
 )
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -36,6 +35,30 @@ def _get_topic_or_404(topic_id: str, db: Session) -> KnowledgeTopic:
     if not topic:
         raise HTTPException(status_code=404, detail={"code": "topic_not_found", "message": "Topic not found"})
     return topic
+
+
+def _normalize_topic_name(raw_name: str) -> str:
+    name = raw_name.strip()
+    if not name:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_topic_name", "message": "Topic name cannot be empty"},
+        )
+    return name
+
+
+def _ensure_topic_name_unique(name: str, db: Session, *, exclude_topic_id: Optional[str] = None) -> None:
+    query = db.query(KnowledgeTopic).filter(
+        KnowledgeTopic.user_id == DEFAULT_USER_ID,
+        KnowledgeTopic.name == name,
+    )
+    if exclude_topic_id is not None:
+        query = query.filter(KnowledgeTopic.id != exclude_topic_id)
+    if query.first():
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "duplicate_topic_name", "message": "Topic name already exists"},
+        )
 
 
 @router.post("", response_model=KnowledgeItemOut)
@@ -74,31 +97,36 @@ def list_items(
 
 @router.post("/topics", response_model=KnowledgeTopicOut)
 def create_topic(payload: KnowledgeTopicCreate, db: Session = Depends(get_db)):
+    name = _normalize_topic_name(payload.name)
+    _ensure_topic_name_unique(name, db)
     topic = KnowledgeTopic(
         user_id=DEFAULT_USER_ID,
-        name=payload.name.strip(),
+        name=name,
         description=payload.description,
     )
     db.add(topic)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "duplicate_topic_name", "message": "Topic name already exists"},
-        )
+    db.commit()
     db.refresh(topic)
     return _topic_out(topic, 0)
 
 
 @router.get("/topics", response_model=list[KnowledgeTopicOut])
 def list_topics(db: Session = Depends(get_db)):
+    resource_counts = (
+        db.query(
+            KnowledgeFile.topic_id.label("topic_id"),
+            func.count(KnowledgeFile.id).label("resource_count"),
+        )
+        .group_by(KnowledgeFile.topic_id)
+        .subquery()
+    )
     rows = (
-        db.query(KnowledgeTopic, func.count(KnowledgeFile.id))
-        .outerjoin(KnowledgeFile, KnowledgeFile.topic_id == KnowledgeTopic.id)
+        db.query(
+            KnowledgeTopic,
+            func.coalesce(resource_counts.c.resource_count, 0),
+        )
+        .outerjoin(resource_counts, resource_counts.c.topic_id == KnowledgeTopic.id)
         .filter(KnowledgeTopic.user_id == DEFAULT_USER_ID)
-        .group_by(KnowledgeTopic.id)
         .order_by(KnowledgeTopic.updated_at.desc())
         .all()
     )
@@ -117,17 +145,11 @@ def update_topic(topic_id: str, payload: KnowledgeTopicUpdate, db: Session = Dep
     topic = _get_topic_or_404(topic_id, db)
     data = payload.model_dump(exclude_unset=True)
     if "name" in data and data["name"] is not None:
-        topic.name = data["name"].strip()
+        topic.name = _normalize_topic_name(data["name"])
+        _ensure_topic_name_unique(topic.name, db, exclude_topic_id=topic.id)
     if "description" in data:
         topic.description = data["description"]
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "duplicate_topic_name", "message": "Topic name already exists"},
-        )
+    db.commit()
     db.refresh(topic)
     count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id).count()
     return _topic_out(topic, count)
