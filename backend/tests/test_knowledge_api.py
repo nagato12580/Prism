@@ -1,5 +1,7 @@
 # prism/backend/tests/test_knowledge_api.py
 
+from backend.app.utils.media_type import infer_media_type, supported_accept_extensions
+
 
 def test_create_and_get_item(client):
     resp = client.post("/api/v1/knowledge", json={
@@ -49,3 +51,27 @@ def test_update_and_delete_item(client):
 def test_get_nonexistent_item_404(client):
     resp = client.get("/api/v1/knowledge/nonexistent-id")
     assert resp.status_code == 404
+
+
+def test_infer_media_type_by_extension_and_mime():
+    assert infer_media_type("notes.md", "text/markdown") == "document"
+    assert infer_media_type("photo.webp", "image/webp") == "image"
+    assert infer_media_type("call.m4a", "audio/mp4") == "audio"
+    assert infer_media_type("demo.webm", "video/webm") == "video"
+
+
+def test_unsupported_media_type_rejected():
+    try:
+        infer_media_type("archive.zip", "application/zip")
+    except ValueError as exc:
+        assert "Unsupported file type" in str(exc)
+    else:
+        raise AssertionError("zip files must be rejected")
+
+
+def test_supported_accept_extensions_contains_all_resource_types():
+    extensions = supported_accept_extensions()
+    assert ".pdf" in extensions
+    assert ".png" in extensions
+    assert ".mp3" in extensions
+    assert ".mp4" in extensions
