@@ -101,15 +101,19 @@ def _resource_title(filename: str) -> str:
     return Path(filename or "resource").stem or "resource"
 
 
-def _save_upload(file: UploadFile, topic_id: str) -> tuple[Path, bytes, str]:
+def _read_upload(file: UploadFile) -> tuple[bytes, str]:
     content = file.file.read()
     md5 = hashlib.md5(content).hexdigest()
-    ext = Path(file.filename or "").suffix.lower()
+    return content, md5
+
+
+def _save_upload(content: bytes, filename: str | None, topic_id: str, md5: str) -> Path:
+    ext = Path(filename or "").suffix.lower()
     topic_dir = UPLOAD_DIR / DEFAULT_USER_ID / topic_id
     topic_dir.mkdir(parents=True, exist_ok=True)
     saved_path = topic_dir / f"{md5}{ext}"
     saved_path.write_bytes(content)
-    return saved_path, content, md5
+    return saved_path
 
 
 @router.post("", response_model=KnowledgeItemOut)
@@ -238,19 +242,19 @@ async def upload_topic_resource(
             detail={"code": "unsupported_file_type", "message": str(exc)},
         ) from exc
 
-    saved_path, content, md5 = _save_upload(file, topic.id)
+    content, md5 = _read_upload(file)
     duplicate = db.query(KnowledgeFile).filter(
         KnowledgeFile.user_id == DEFAULT_USER_ID,
         KnowledgeFile.topic_id == topic.id,
         KnowledgeFile.md5 == md5,
     ).first()
     if duplicate:
-        saved_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=409,
             detail={"code": "duplicate_resource_in_topic", "message": "Resource already exists in this topic"},
         )
 
+    saved_path = _save_upload(content, file.filename, topic.id, md5)
     resource = KnowledgeFile(
         user_id=DEFAULT_USER_ID,
         topic_id=topic.id,

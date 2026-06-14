@@ -1,4 +1,5 @@
 # prism/backend/tests/test_knowledge_api.py
+from pathlib import Path
 
 from backend.app.utils.media_type import infer_media_type, supported_accept_extensions
 from backend.app.models import KnowledgeFile
@@ -257,6 +258,25 @@ def test_duplicate_resource_in_same_topic_is_conflict(client):
     assert first.status_code == 200
     assert second.status_code == 409
     assert second.json()["detail"]["code"] == "duplicate_resource_in_topic"
+
+
+def test_duplicate_resource_does_not_delete_existing_file(client, db_session):
+    topic = _create_topic(client)
+    first = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("same.txt", b"same", "text/plain")},
+    )
+    resource = db_session.query(KnowledgeFile).filter_by(id=first.json()["id"]).one()
+    stored_path = Path(resource.storage_path)
+
+    second = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("same.txt", b"same", "text/plain")},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert stored_path.exists()
 
 
 def test_upload_image_audio_video_as_metadata_only(client):
