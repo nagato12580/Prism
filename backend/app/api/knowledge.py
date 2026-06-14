@@ -1,19 +1,27 @@
 # prism/backend/app/api/knowledge.py
-from fastapi import APIRouter, Depends, HTTPException, Query
+import hashlib
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import cast, String, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from typing import Optional
 
+from .upload import _trigger_ingestion
 from ..database import get_db
 from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
-    KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut,
+    KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut, KnowledgeResourceOut,
 )
+from ..utils.file_parser import count_pages, extract_text
+from ..utils.media_type import infer_media_type
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 DEFAULT_USER_ID = "default-user"
+UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _topic_out(topic: KnowledgeTopic, resource_count: int = 0) -> KnowledgeTopicOut:
@@ -81,6 +89,27 @@ def _commit_topic_change(db: Session) -> None:
                 detail={"code": "duplicate_topic_name", "message": "Topic name already exists"},
             ) from exc
         raise
+
+
+def _parse_tags(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _resource_title(filename: str) -> str:
+    return Path(filename or "resource").stem or "resource"
+
+
+def _save_upload(file: UploadFile, topic_id: str) -> tuple[Path, bytes, str]:
+    content = file.file.read()
+    md5 = hashlib.md5(content).hexdigest()
+    ext = Path(file.filename or "").suffix.lower()
+    topic_dir = UPLOAD_DIR / DEFAULT_USER_ID / topic_id
+    topic_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = topic_dir / f"{md5}{ext}"
+    saved_path.write_bytes(content)
+    return saved_path, content, md5
 
 
 @router.post("", response_model=KnowledgeItemOut)
@@ -189,6 +218,141 @@ def delete_topic(topic_id: str, db: Session = Depends(get_db)):
         )
     db.delete(topic)
     db.commit()
+    return {"detail": "deleted"}
+
+
+@router.post("/topics/{topic_id}/resources", response_model=KnowledgeResourceOut)
+async def upload_topic_resource(
+    topic_id: str,
+    file: UploadFile = File(...),
+    description: str | None = Form(None),
+    tags: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    topic = _get_topic_or_404(topic_id, db)
+    try:
+        media_type = infer_media_type(file.filename or "", file.content_type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "unsupported_file_type", "message": str(exc)},
+        ) from exc
+
+    saved_path, content, md5 = _save_upload(file, topic.id)
+    duplicate = db.query(KnowledgeFile).filter(
+        KnowledgeFile.user_id == DEFAULT_USER_ID,
+        KnowledgeFile.topic_id == topic.id,
+        KnowledgeFile.md5 == md5,
+    ).first()
+    if duplicate:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "duplicate_resource_in_topic", "message": "Resource already exists in this topic"},
+        )
+
+    resource = KnowledgeFile(
+        user_id=DEFAULT_USER_ID,
+        topic_id=topic.id,
+        title=_resource_title(file.filename or ""),
+        original_filename=file.filename or "resource",
+        media_type=media_type,
+        mime_type=file.content_type,
+        file_ext=Path(file.filename or "").suffix.lower(),
+        file_size=len(content),
+        md5=md5,
+        storage_path=str(saved_path),
+        processing_status="metadata_only" if media_type != "document" else "processing",
+        description=description,
+        tags=_parse_tags(tags),
+        source_type="upload",
+    )
+    db.add(resource)
+    db.flush()
+
+    if media_type == "document":
+        try:
+            text = extract_text(str(saved_path))
+            resource.content_text = text
+            resource.page_count = count_pages(str(saved_path))
+            item = KnowledgeItem(
+                title=resource.title,
+                content=text,
+                source_type="file",
+                source_ref=str(saved_path),
+                tags=resource.tags or [],
+                category=topic.name,
+                user_id=DEFAULT_USER_ID,
+            )
+            db.add(item)
+            db.flush()
+            resource.item_id = item.id
+            resource.processing_status = "completed"
+        except Exception as exc:
+            resource.processing_status = "failed"
+            resource.error_message = str(exc)
+
+    db.commit()
+    db.refresh(resource)
+
+    if resource.item_id and resource.processing_status == "completed":
+        _trigger_ingestion(resource.item_id)
+
+    return resource
+
+
+@router.get("/topics/{topic_id}/resources", response_model=list[KnowledgeResourceOut])
+def list_topic_resources(
+    topic_id: str,
+    media_type: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    processing_status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    _get_topic_or_404(topic_id, db)
+    query = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic_id)
+    if media_type:
+        query = query.filter(KnowledgeFile.media_type == media_type)
+    if processing_status:
+        query = query.filter(KnowledgeFile.processing_status == processing_status)
+    if tag:
+        query = query.filter(cast(KnowledgeFile.tags, String).contains(f'"{tag}"'))
+    return query.order_by(KnowledgeFile.uploaded_at.desc()).all()
+
+
+@router.get("/resources/{resource_id}", response_model=KnowledgeResourceOut)
+def get_resource(resource_id: str, db: Session = Depends(get_db)):
+    resource = db.query(KnowledgeFile).filter(
+        KnowledgeFile.id == resource_id,
+        KnowledgeFile.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "Resource not found"},
+        )
+    return resource
+
+
+@router.delete("/resources/{resource_id}")
+def delete_resource(resource_id: str, db: Session = Depends(get_db)):
+    resource = db.query(KnowledgeFile).filter(
+        KnowledgeFile.id == resource_id,
+        KnowledgeFile.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "Resource not found"},
+        )
+
+    storage_path = Path(resource.storage_path)
+    item = db.query(KnowledgeItem).filter(KnowledgeItem.id == resource.item_id).first() if resource.item_id else None
+    db.delete(resource)
+    if item:
+        db.delete(item)
+    db.commit()
+    storage_path.unlink(missing_ok=True)
     return {"detail": "deleted"}
 
 

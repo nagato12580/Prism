@@ -213,3 +213,102 @@ def test_update_topic_commit_duplicate_race_is_conflict(client, db_session, monk
 
     assert update.status_code == 409
     assert update.json()["detail"]["code"] == "duplicate_topic_name"
+
+
+def _create_topic(client, name="Uploads"):
+    response = client.post("/api/v1/knowledge/topics", json={"name": name})
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_upload_document_resource_creates_item(client, monkeypatch):
+    topic = _create_topic(client)
+    called = []
+    monkeypatch.setattr("backend.app.api.knowledge._trigger_ingestion", lambda item_id: called.append(item_id))
+
+    response = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+        data={"description": "Greeting", "tags": "intro,hello"},
+    )
+
+    assert response.status_code == 200
+    resource = response.json()
+    assert resource["title"] == "notes"
+    assert resource["media_type"] == "document"
+    assert resource["processing_status"] == "completed"
+    assert resource["description"] == "Greeting"
+    assert resource["tags"] == ["intro", "hello"]
+    assert resource["content_text"] == "hello document"
+    assert resource["item_id"]
+    assert called == [resource["item_id"]]
+
+
+def test_duplicate_resource_in_same_topic_is_conflict(client):
+    topic = _create_topic(client)
+    files = {"file": ("same.txt", b"same", "text/plain")}
+
+    first = client.post(f"/api/v1/knowledge/topics/{topic['id']}/resources", files=files)
+    second = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("same-copy.txt", b"same", "text/plain")},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "duplicate_resource_in_topic"
+
+
+def test_upload_image_audio_video_as_metadata_only(client):
+    topic = _create_topic(client)
+    samples = [
+        ("photo.png", b"png bytes", "image/png", "image"),
+        ("voice.mp3", b"mp3 bytes", "audio/mpeg", "audio"),
+        ("clip.mp4", b"mp4 bytes", "video/mp4", "video"),
+    ]
+
+    for filename, content, mime, expected_type in samples:
+        response = client.post(
+            f"/api/v1/knowledge/topics/{topic['id']}/resources",
+            files={"file": (filename, content, mime)},
+        )
+        assert response.status_code == 200
+        resource = response.json()
+        assert resource["media_type"] == expected_type
+        assert resource["processing_status"] == "metadata_only"
+        assert resource["item_id"] is None
+
+
+def test_list_resources_filter_by_media_type(client):
+    topic = _create_topic(client)
+    client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"text", "text/plain")},
+    )
+    client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("photo.png", b"image", "image/png")},
+    )
+
+    response = client.get(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        params={"media_type": "image"},
+    )
+
+    assert response.status_code == 200
+    resources = response.json()
+    assert len(resources) == 1
+    assert resources[0]["media_type"] == "image"
+
+
+def test_topic_delete_blocked_when_resources_exist(client):
+    topic = _create_topic(client, "Blocked")
+    client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"text", "text/plain")},
+    )
+
+    response = client.delete(f"/api/v1/knowledge/topics/{topic['id']}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "topic_not_empty"
