@@ -212,3 +212,46 @@ def test_auto_migrate_adds_missing_topic_resource_unique_constraints(monkeypatch
 
     assert any("ADD CONSTRAINT `uq_knowledge_topic_user_name`" in sql for sql in executed_sql)
     assert any("ADD CONSTRAINT `uq_knowledge_file_user_topic_md5`" in sql for sql in executed_sql)
+
+
+def test_auto_migrate_adds_missing_columns_without_string_compile_error(monkeypatch):
+    executed_sql = []
+
+    class FakeInspector:
+        def get_table_names(self):
+            return list(Base.metadata.tables)
+
+        def get_columns(self, table_name):
+            table = Base.metadata.tables[table_name]
+            if table_name == "knowledge_topic":
+                return [{"name": "id"}]
+            return [{"name": column.name} for column in table.columns]
+
+        def get_unique_constraints(self, table_name):
+            return []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, statement):
+            executed_sql.append(str(statement))
+
+        def commit(self):
+            pass
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+    from sqlalchemy.dialects import mysql
+
+    FakeEngine.dialect = mysql.dialect()
+    monkeypatch.setattr(auto_migrate_module, "inspect", lambda engine: FakeInspector())
+
+    auto_migrate_module.auto_migrate(Base, FakeEngine())
+
+    assert any("ADD COLUMN `name`" in sql for sql in executed_sql)
