@@ -75,3 +75,25 @@ def test_supported_accept_extensions_contains_all_resource_types():
     assert ".png" in extensions
     assert ".mp3" in extensions
     assert ".mp4" in extensions
+
+
+def test_unsupported_category_matching_mime_rejected():
+    try:
+        infer_media_type("file.svg", "image/svg+xml")
+    except ValueError as exc:
+        assert "Unsupported file type" in str(exc)
+    else:
+        raise AssertionError("unsupported image MIME types must be rejected")
+
+
+def test_infer_media_type_accepts_uppercase_extension():
+    assert infer_media_type("PHOTO.JPG", None) == "image"
+
+
+def test_unknown_extension_with_unlisted_video_mime_rejected():
+    try:
+        infer_media_type("clip.unknown", "video/3gpp")
+    except ValueError as exc:
+        assert "Unsupported file type" in str(exc)
+    else:
+        raise AssertionError("unlisted video MIME types must be rejected")

@@ -12,6 +12,30 @@ EXTENSION_TO_MEDIA_TYPE = {
     **{ext: "video" for ext in VIDEO_EXTENSIONS},
 }
 
+MIME_TO_MEDIA_TYPE = {
+    "application/msword": "document",
+    "application/pdf": "document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+    "text/markdown": "document",
+    "text/plain": "document",
+    "image/gif": "image",
+    "image/jpeg": "image",
+    "image/png": "image",
+    "image/webp": "image",
+    "audio/aac": "audio",
+    "audio/flac": "audio",
+    "audio/mp4": "audio",
+    "audio/mpeg": "audio",
+    "audio/ogg": "audio",
+    "audio/wav": "audio",
+    "audio/x-wav": "audio",
+    "video/mp4": "video",
+    "video/quicktime": "video",
+    "video/webm": "video",
+    "video/x-matroska": "video",
+    "video/x-msvideo": "video",
+}
+
 
 def infer_media_type(filename: str, mime_type: str | None = None) -> str:
     ext = Path(filename or "").suffix.lower()
@@ -19,14 +43,8 @@ def infer_media_type(filename: str, mime_type: str | None = None) -> str:
         return EXTENSION_TO_MEDIA_TYPE[ext]
 
     mime = (mime_type or "").lower()
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("audio/"):
-        return "audio"
-    if mime.startswith("video/"):
-        return "video"
-    if mime in {"application/pdf", "text/plain", "text/markdown"}:
-        return "document"
+    if mime in MIME_TO_MEDIA_TYPE:
+        return MIME_TO_MEDIA_TYPE[mime]
 
     raise ValueError(f"Unsupported file type: {ext or mime or 'unknown'}")
 
