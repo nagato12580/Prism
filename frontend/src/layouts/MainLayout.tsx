@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
+  BookMarked,
   BookOpen,
   CircleUserRound,
   Moon,
@@ -15,6 +16,7 @@ import { cn } from '@/lib/utils'
 const navItems = [
   { to: '/chat', label: '对话', icon: MessageSquare },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
+  { to: '/wiki', label: 'Wiki', icon: BookMarked },
 ]
 
 const mobileNavId = 'prism-mobile-navigation'
@@ -68,6 +70,14 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
           label="知识库"
           icon={BookOpen}
           active={location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/wiki"
+          label="Wiki"
+          icon={BookMarked}
+          active={location.pathname === '/wiki' || location.pathname.startsWith('/wiki/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />
