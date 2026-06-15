@@ -5,7 +5,7 @@ import type { WikiDocument } from '@/app/api'
 
 export function WikiPage() {
   const navigate = useNavigate()
-  const { documents, documentsLoading, loadDocuments, points, pointsLoading, loadPoints } = useWikiStore()
+  const { documents, documentsLoading, loadDocuments, points, pointsLoading, loadPoints, triggerExtraction } = useWikiStore()
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -64,7 +64,28 @@ export function WikiPage() {
               <div style={{ fontWeight: 500, marginBottom: '0.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 📄 {doc.original_filename || doc.id}
               </div>
-              <div style={{ fontSize: '0.8rem', color: '#667085' }}>{statusLabel(doc.status)}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.8rem', color: '#667085' }}>{statusLabel(doc.status)}</span>
+                {(doc.status === 'pending' || doc.status === 'failed') && (
+                  <button
+                    onClick={e => {
+                      e.stopPropagation()
+                      triggerExtraction(doc.id)
+                    }}
+                    style={{
+                      padding: '0.15rem 0.5rem',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      borderRadius: 4,
+                      border: '1px solid #4f46e5',
+                      background: '#eef2ff',
+                      color: '#4f46e5',
+                    }}
+                  >
+                    提取
+                  </button>
+                )}
+              </div>
               {doc.status === 'processing' && doc.progress_total > 0 && (
                 <div style={{ marginTop: '0.25rem', height: 4, background: '#e5e7eb', borderRadius: 2 }}>
                   <div style={{

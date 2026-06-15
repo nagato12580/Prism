@@ -33,6 +33,9 @@ interface WikiState {
 
   // Delete
   deleteDocument: (id: string) => Promise<void>
+
+  // Trigger extraction
+  triggerExtraction: (id: string) => Promise<void>
 }
 
 export const useWikiStore = create<WikiState>((set, get) => ({
@@ -102,5 +105,14 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   async deleteDocument(id: string) {
     await api.deleteWikiDocument(id)
     set({ documents: get().documents.filter(d => d.id !== id) })
+  },
+
+  async triggerExtraction(id: string) {
+    await api.triggerWikiExtraction(id)
+    // Refresh the list to show updated status
+    const docs = get().documents.map(d =>
+      d.id === id ? { ...d, status: 'processing' } : d
+    )
+    set({ documents: docs })
   },
 }))

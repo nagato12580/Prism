@@ -317,3 +317,10 @@ export async function uploadWikiFile(file: File): Promise<{ file_id: string; wik
   form.append('file', file)
   return uploadRequest('/upload/wiki', form)
 }
+
+export async function triggerWikiExtraction(docId: string): Promise<{ doc_id: string; status: string }> {
+  return request('/wiki/extract', {
+    method: 'POST',
+    body: JSON.stringify({ doc_id: docId }),
+  })
+}
