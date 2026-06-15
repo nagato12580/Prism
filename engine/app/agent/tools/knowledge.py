@@ -60,9 +60,16 @@ def build(ctx: ToolContext) -> StructuredTool:
             "hit_count": len(sources),
             "iterations": getattr(result, "iterations", 0),
         }
+        summary = getattr(result, "summary", "")
+        if not summary:
+            count = len(sources)
+            if count > 0:
+                summary = f"检索到 {count} 条相关内容，证据不足，正在追问"
+            else:
+                summary = f"完成 {getattr(result, 'iterations', 0)} 轮检索，未找到匹配内容"
         payload: dict[str, Any] = {
             "status": getattr(result, "status", "insufficient"),
-            "summary": getattr(result, "summary", ""),
+            "summary": summary,
             "missing": getattr(result, "missing", []),
             "clarify": getattr(result, "clarify", None),
             "sources": sources,

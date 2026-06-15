@@ -196,14 +196,28 @@ export function KnowledgePage() {
   }
 
   const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file || busy || !activeTopicId) return
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0 || busy || !activeTopicId) return
 
     setBusy(true)
     setError(null)
+    let success = 0
+    let failed = 0
     try {
-      await knowledgeApi.uploadResource(activeTopicId, file)
+      await Promise.all(
+        files.map(async (file) => {
+          try {
+            await knowledgeApi.uploadResource(activeTopicId, file)
+            success++
+          } catch {
+            failed++
+          }
+        }),
+      )
       await Promise.all([loadTopics(), loadResources(activeTopicId)])
+      if (failed > 0) {
+        setError(`${success} 个上传成功，${failed} 个失败`)
+      }
     } catch (err) {
       setError(readApiError(err, '资源上传失败'))
     } finally {
@@ -341,7 +355,7 @@ export function KnowledgePage() {
                     {activeTopic.description && <p className="mt-2 text-sm leading-6 text-slate-500">{activeTopic.description}</p>}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <input ref={fileRef} type="file" className="hidden" accept={ACCEPTED_RESOURCE_EXTENSIONS} onChange={handleUpload} />
+                    <input ref={fileRef} type="file" className="hidden" accept={ACCEPTED_RESOURCE_EXTENSIONS} onChange={handleUpload} multiple />
                     <button
                       type="button"
                       disabled={busy}

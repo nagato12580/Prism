@@ -72,6 +72,81 @@ export interface KnowledgeResource {
   error_message?: string | null
 }
 
+// ── Chat types ────────────────────────────────────────────────
+
+export interface ChatSessionOut {
+  id: string
+  title: string
+  user_id: string
+  topic_id?: string | null
+  source_types?: ResourceMediaType[] | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatMessageOut {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant'
+  content: string | null
+  sources: any[] | null
+  clarify: any | null
+  created_at: string
+}
+
+export interface ChatSessionCreate {
+  title?: string
+  topic_id?: string | null
+  source_types?: string[] | null
+}
+
+export interface ChatSessionUpdate {
+  title?: string
+  topic_id?: string | null
+  source_types?: string[] | null
+}
+
+export interface ChatMessageCreate {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: any[] | null
+  clarify?: any | null
+}
+
+export const chatApi = {
+  listSessions: () =>
+    request<ChatSessionOut[]>('/chat/sessions'),
+
+  createSession: (data: ChatSessionCreate) =>
+    request<ChatSessionOut>('/chat/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateSession: (id: string, data: ChatSessionUpdate) =>
+    request<ChatSessionOut>(`/chat/sessions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteSession: (id: string) =>
+    request<{ detail: string }>(`/chat/sessions/${id}`, { method: 'DELETE' }),
+
+  generateTitle: (id: string) =>
+    request<ChatSessionOut>(`/chat/sessions/${id}/generate-title`, {
+      method: 'POST',
+    }),
+
+  listMessages: (sessionId: string) =>
+    request<ChatMessageOut[]>(`/chat/sessions/${sessionId}/messages`),
+
+  addMessage: (sessionId: string, data: ChatMessageCreate) =>
+    request<ChatMessageOut>(`/chat/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+}
+
 export const knowledgeApi = {
   list: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''

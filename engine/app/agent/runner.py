@@ -182,6 +182,7 @@ class LangChainAgentRunner:
                     text = _message_content(response)
                     if text:
                         logger.info("[agent] output preview=%s", quoted(text))
+                        yield agent_status_event("generating answer")
                         yield token_event(text)
                     logger.info("[agent] done")
                     yield done_event()

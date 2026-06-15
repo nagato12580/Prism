@@ -57,11 +57,11 @@ def hybrid_search(
         source_types: 可选，限定来源类型列表（document/image/audio/video）
         allowed_item_ids: 可选，向量检索后置过滤的 item_id 集合
     """
-    # 向量召回
+    # 向量召回（扩大 3 倍以补偿 BM25 弱/空的情况）
     try:
         vec_results = vector_search(
             query,
-            top_k=top_k * 2,
+            top_k=top_k * 3,
             allowed_item_ids=allowed_item_ids,
         )
     except Exception:
@@ -82,6 +82,9 @@ def hybrid_search(
         bm_results = _bm25_fallback(query, top_k, allowed_item_ids)
 
     # RRF 融合
+    # BM25 为空时（如中文查英文文档），仅用向量得分
+    bm_weight = 0.0 if not bm_results else BM25_WEIGHT
+
     scores: dict[str, float] = {}
     meta: dict[str, dict] = {}
 
@@ -92,7 +95,7 @@ def hybrid_search(
 
     for rank, result in enumerate(bm_results):
         chunk_id = result["chunk_id"]
-        scores[chunk_id] = scores.get(chunk_id, 0.0) + BM25_WEIGHT / (RRF_K + rank + 1)
+        scores[chunk_id] = scores.get(chunk_id, 0.0) + bm_weight / (RRF_K + rank + 1)
         if chunk_id not in meta:
             meta[chunk_id] = result
 
@@ -101,6 +104,7 @@ def hybrid_search(
             "chunk_id": chunk_id,
             "item_id": meta[chunk_id].get("item_id"),
             "score": score,
+            "raw_score": meta[chunk_id].get("score", score),
         }
         for chunk_id, score in scores.items()
     ]

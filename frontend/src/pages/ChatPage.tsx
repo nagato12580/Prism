@@ -7,8 +7,9 @@ import {
   ArrowRight,
   BookOpen,
   ChevronDown,
-  Clock3,
+  ChevronUp,
   FileText,
+  HelpCircle,
   Image,
   Layers,
   Library,
@@ -16,6 +17,7 @@ import {
   MessageSquarePlus,
   Music,
   Plus,
+  Search,
   Send,
   Video,
   X,
@@ -28,9 +30,10 @@ import {
   type Message,
   type Source,
   type ToolRun,
+  type ThinkingStep,
 } from '@/app/chatStore'
 import type { ResourceMediaType } from '@/app/api'
-import { knowledgeApi, type KnowledgeTopic } from '@/app/api'
+import { knowledgeApi, chatApi, type KnowledgeTopic } from '@/app/api'
 import { cn } from '@/lib/utils'
 
 const starterPrompts = [
@@ -48,30 +51,6 @@ const sourceTypeIcon = (type: ResourceMediaType) => {
   }
   return icons[type] ?? <FileText size={14} />
 }
-
-const conversationList = [
-  {
-    id: 'current',
-    title: '当前对话',
-    summary: '基于知识库进行可追溯问答',
-    status: '进行中',
-    time: '刚刚',
-  },
-  {
-    id: 'brief',
-    title: '资料核心观点总结',
-    summary: '整理上传资料里的重点结论',
-    status: '已保存',
-    time: '今天',
-  },
-  {
-    id: 'todo',
-    title: '行动清单',
-    summary: '把知识库内容转成待办步骤',
-    status: '草稿',
-    time: '昨天',
-  },
-]
 
 function normalizeClarifyOptions(value: unknown): ClarifyOption[] {
   if (!Array.isArray(value)) return []
@@ -102,8 +81,25 @@ function normalizeSources(value: unknown): Source[] {
       chunk_id: String(source.chunk_id ?? ''),
       item_id: String(source.item_id ?? ''),
       score: Number(source.score ?? 0),
+      raw_score: typeof source.raw_score === 'number' ? source.raw_score : undefined,
+      doc_name: typeof source.doc_name === 'string' ? source.doc_name : undefined,
+      text: typeof source.text === 'string' ? source.text : undefined,
     }))
     .filter((source) => source.chunk_id || source.item_id)
+}
+
+function formatSessionTime(dateStr: string) {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '刚刚'
+  if (diffMin < 60) return `${diffMin} 分钟前`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour} 小时前`
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
 function historyContent(message: Message) {
@@ -118,10 +114,13 @@ export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
-  const [activeConversation, setActiveConversation] = useState('current')
   const messages = useChatStore((s) => s.messages)
   const selectedTopicId = useChatStore((s) => s.selectedTopicId)
   const selectedTopicName = useChatStore((s) => s.selectedTopicName)
+  const selectedSourceTypes = useChatStore((s) => s.selectedSourceTypes)
+  const currentSessionId = useChatStore((s) => s.currentSessionId)
+  const sessions = useChatStore((s) => s.sessions)
+  const sessionsLoading = useChatStore((s) => s.sessionsLoading)
   const addMessage = useChatStore((s) => s.addMessage)
   const appendToLast = useChatStore((s) => s.appendToLast)
   const setLastSources = useChatStore((s) => s.setLastSources)
@@ -133,9 +132,15 @@ export function ChatPage() {
   const clear = useChatStore((s) => s.clear)
   const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
   const clearSelectedTopic = useChatStore((s) => s.clearSelectedTopic)
-  const selectedSourceTypes = useChatStore((s) => s.selectedSourceTypes)
   const toggleSourceType = useChatStore((s) => s.toggleSourceType)
   const clearSelectedSourceTypes = useChatStore((s) => s.clearSelectedSourceTypes)
+  const setCurrentSessionId = useChatStore((s) => s.setCurrentSessionId)
+  const setSessions = useChatStore((s) => s.setSessions)
+  const prependSession = useChatStore((s) => s.prependSession)
+  const updateSessionTitle = useChatStore((s) => s.updateSessionTitle)
+  const removeSession = useChatStore((s) => s.removeSession)
+  const loadMessages = useChatStore((s) => s.loadMessages)
+  const restoreFromSession = useChatStore((s) => s.restoreFromSession)
   const [showTopicPicker, setShowTopicPicker] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [topics, setTopics] = useState<KnowledgeTopic[]>([])
@@ -148,6 +153,38 @@ export function ChatPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
+
+  // 页面加载：恢复最近会话
+  useEffect(() => {
+    let cancelled = false
+    async function restore() {
+      try {
+        const list = await chatApi.listSessions()
+        if (cancelled) return
+        setSessions(list)
+        if (list.length > 0) {
+          const latest = list[0]
+          setCurrentSessionId(latest.id)
+          restoreFromSession(latest)
+          if (latest.topic_id) {
+            try {
+              const topics = await knowledgeApi.listTopics()
+              if (!cancelled) {
+                const matched = topics.find((t) => t.id === latest.topic_id)
+                if (matched) setSelectedTopic(matched.id, matched.name)
+              }
+            } catch { /* topic name restore best-effort */ }
+          }
+          try {
+            const msgs = await chatApi.listMessages(latest.id)
+            if (!cancelled) loadMessages(msgs)
+          } catch { /* messages restore best-effort */ }
+        }
+      } catch { /* sessions load failed — stay empty */ }
+    }
+    restore()
+    return () => { cancelled = true }
+  }, [])
 
   // 点击外部关闭 topic picker
   useEffect(() => {
@@ -207,12 +244,32 @@ export function ChatPage() {
     setInput('')
     setSending(true)
 
+    // 确保会话存在（首次发消息时创建）
+    let sessionId = currentSessionId
+    if (!sessionId) {
+      try {
+        const session = await chatApi.createSession({
+          topic_id: selectedTopicId || undefined,
+          source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
+        })
+        sessionId = session.id
+        setCurrentSessionId(sessionId)
+        prependSession(session)
+      } catch {
+        setSending(false)
+        return
+      }
+    }
+
     const history = messages
       .filter((m) => !m.streaming)
       .map((m) => ({ role: m.role, content: historyContent(m) }))
 
     addMessage({ id: crypto.randomUUID(), role: 'user', content: query })
     addMessage({ id: crypto.randomUUID(), role: 'assistant', content: '', streaming: true })
+
+    // 用户消息即刻持久化（fire-and-forget）
+    persistUserMessage(sessionId, query)
 
     const handleStreamLine = (line: string) => {
       if (!line.trim()) return
@@ -296,7 +353,33 @@ export function ChatPage() {
       finishLast()
     } finally {
       setSending(false)
+      // 持久化 AI 回复 + 标题生成
+      if (sessionId) {
+        const msgs = useChatStore.getState().messages
+        const aiMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && !m.streaming)
+        if (aiMsg) {
+          chatApi.addMessage(sessionId, {
+            role: 'assistant',
+            content: aiMsg.content,
+            sources: aiMsg.sources || undefined,
+            clarify: aiMsg.clarify || undefined,
+          }).catch(() => { })
+        }
+        // 首轮问答后自动生成标题
+        const userCount = msgs.filter((m) => m.role === 'user').length
+        const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
+        if (userCount === 1 && session?.title === '新对话') {
+          chatApi.generateTitle(sessionId).then((updated) => {
+            updateSessionTitle(sessionId, updated.title)
+          }).catch(() => { })
+        }
+      }
     }
+  }
+
+  // 持久化用户消息（fire-and-forget，不阻塞流式响应）
+  const persistUserMessage = (sessionId: string, content: string) => {
+    chatApi.addMessage(sessionId, { role: 'user', content }).catch(() => { })
   }
 
   const sendClarifyFollowup = (value: string) => {
@@ -315,11 +398,45 @@ export function ChatPage() {
   }, [sending])
 
   const startNewConversation = () => {
-    setActiveConversation('current')
+    setCurrentSessionId(null)
     setExpandedSources({})
     clear()
     clearSelectedTopic()
     clearSelectedSourceTypes()
+  }
+
+  const switchSession = async (sessionId: string) => {
+    if (sessionId === currentSessionId) return
+    clear()
+    clearSelectedTopic()
+    clearSelectedSourceTypes()
+    setExpandedSources({})
+    setCurrentSessionId(sessionId)
+
+    const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
+    if (session) {
+      restoreFromSession(session)
+      if (session.topic_id) {
+        try {
+          const topics = await knowledgeApi.listTopics()
+          const matched = topics.find((t) => t.id === session.topic_id)
+          if (matched) setSelectedTopic(matched.id, matched.name)
+        } catch { /* best effort */ }
+      }
+    }
+    try {
+      const msgs = await chatApi.listMessages(sessionId)
+      loadMessages(msgs)
+    } catch { /* best effort */ }
+  }
+
+  const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('确认删除这个会话吗？')) return
+    try {
+      await chatApi.deleteSession(sessionId)
+      removeSession(sessionId)
+    } catch { /* silent */ }
   }
 
   return (
@@ -344,61 +461,62 @@ export function ChatPage() {
           data-scroll-region="conversation-list"
           className="min-h-0 flex-1 overflow-y-auto p-3"
         >
-          <div className="space-y-2">
-            {conversationList.map((conversation) => {
-              const active = activeConversation === conversation.id
-              return (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  onClick={() => setActiveConversation(conversation.id)}
-                  className={cn(
-                    'w-full rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]',
-                    active
-                      ? 'border-blue-200 bg-blue-50 shadow-sm'
-                      : 'border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white'
-                  )}
-                >
-                  <div className="flex items-start gap-2">
-                    <div
+          {sessionsLoading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-xs text-slate-400">
+              <Loader2 size={14} className="animate-spin" />
+              加载会话...
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="py-10 text-center text-xs text-slate-400">
+              暂无会话，发送第一条消息开始
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sessions.map((session) => {
+                const active = currentSessionId === session.id
+                const time = formatSessionTime(session.updated_at)
+                return (
+                  <div key={session.id} className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => switchSession(session.id)}
                       className={cn(
-                        'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                        active ? 'bg-[var(--prism-blue)] text-white' : 'bg-white text-slate-400'
+                        'w-full rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]',
+                        active
+                          ? 'border-blue-200 bg-blue-50 shadow-sm'
+                          : 'border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white',
                       )}
                     >
-                      <MessageSquarePlus size={15} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold text-slate-950">
-                        {conversation.title}
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={cn(
+                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                            active ? 'bg-[var(--prism-blue)] text-white' : 'bg-white text-slate-400',
+                          )}
+                        >
+                          <MessageSquarePlus size={15} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-slate-950">
+                            {session.title}
+                          </div>
+                          <div className="mt-1 text-[11px] text-slate-400">{time}</div>
+                        </div>
                       </div>
-                      <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
-                        {conversation.summary}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
-                    <span
-                      className={cn(
-                        'rounded-full px-2 py-0.5 font-medium',
-                        conversation.status === '进行中'
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : conversation.status === '草稿'
-                            ? 'bg-amber-50 text-amber-700'
-                            : 'bg-slate-100 text-slate-500'
-                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => deleteSession(session.id, e)}
+                      className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-red-50 hover:text-red-500 group-hover:flex"
+                      aria-label={`删除 ${session.title}`}
                     >
-                      {conversation.status}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-slate-400">
-                      <Clock3 size={12} />
-                      {conversation.time}
-                    </span>
+                      <X size={13} />
+                    </button>
                   </div>
-                </button>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -674,6 +792,7 @@ function MessageBlock({
   return (
     <div className={cn('flex min-w-0', isUser ? 'justify-end' : 'justify-start')}>
       <div className={cn('min-w-0 max-w-[92%] sm:max-w-[78%]', isUser ? 'text-right' : 'text-left')}>
+        {!isUser && <ThinkingPanel msg={msg} />}
         <div
           className={cn(
             'min-w-0 break-words rounded-2xl px-4 py-3 text-sm leading-6',
@@ -722,7 +841,7 @@ function MessageBlock({
                         {source.doc_name || source.item_id}
                       </span>
                       <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
-                        相关度 {formatScore(source.score)}
+                        {source.raw_score ? `匹配 ${(source.raw_score * 100).toFixed(0)}%` : `相关度 ${formatScore(source.score)}`}
                       </span>
                     </div>
                     {source.text && (
@@ -771,6 +890,88 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
           className="ml-1 inline-block h-2 w-2 rounded-full bg-[var(--prism-cyan)] align-middle"
           style={{ animation: 'prism-pulse 1s ease-in-out infinite' }}
         />
+      )}
+    </div>
+  )
+}
+
+function stepIcon(tool: string) {
+  if (tool === 'knowledge_search') return <Search size={13} />
+  if (tool === 'clarify_user') return <HelpCircle size={13} />
+  return <Loader2 size={13} className="animate-spin" />
+}
+
+function formatLatency(ms?: number) {
+  if (ms === undefined || ms === null) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function ThinkingPanel({ msg }: { msg: Message }) {
+  const [expanded, setExpanded] = useState(false)
+  const steps = msg.thinkingSteps
+  const runs = msg.toolRuns
+  if ((!steps || steps.length === 0) && (!runs || runs.length === 0)) return null
+
+  return (
+    <div className="mb-1.5 text-left">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+      >
+        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        {expanded ? '收起思考过程' : '查看思考过程'}
+        {steps && steps.length > 0 && (
+          <span className="text-slate-300">· {steps.length} 步</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-1 rounded-lg border border-[var(--prism-line)] bg-slate-50/70 px-3 py-2">
+          {steps && steps.length > 0 ? (
+            <div className="space-y-1.5">
+              {steps.map((step, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  <span className="mt-0.5 shrink-0 text-slate-400">
+                    {stepIcon(runs?.[0]?.tool || '')}
+                  </span>
+                  <span className="min-w-0 flex-1 text-slate-700">{step.label}</span>
+                  {step.detail && (
+                    <span className="max-w-32 shrink-0 truncate text-slate-400 sm:max-w-48">
+                      {step.detail}
+                    </span>
+                  )}
+                  {step.latencyMs !== undefined && (
+                    <span className="shrink-0 text-[10px] text-slate-400">
+                      {formatLatency(step.latencyMs)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {runs?.map((run) => (
+                <div key={run.id} className="flex items-start gap-2 text-xs">
+                  <span className="mt-0.5 shrink-0 text-slate-400">
+                    {stepIcon(run.tool)}
+                  </span>
+                  <span className="min-w-0 flex-1 text-slate-700">{toolLabel(run.tool)}</span>
+                  {run.query && (
+                    <span className="max-w-32 shrink-0 truncate text-slate-400 sm:max-w-48">
+                      {run.query}
+                    </span>
+                  )}
+                  {run.latencyMs && (
+                    <span className="shrink-0 text-[10px] text-slate-400">
+                      {formatLatency(run.latencyMs)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

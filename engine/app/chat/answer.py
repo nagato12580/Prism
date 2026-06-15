@@ -21,6 +21,7 @@ _Session = sessionmaker(bind=_engine)
 def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
     """加载 chunk 文本和所属文档名。
 
+    Small-to-big 检索：命中子块时返回父块完整内容。
     Returns: {chunk_id: {"text": str, "doc_name": str}}
     """
     from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem, KnowledgeFile
@@ -31,15 +32,22 @@ def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
         if not chunks:
             return {}
 
-        # 批量取 item 信息
-        item_ids = {chunk.item_id for chunk in chunks}
+        # Small-to-big：子块替换为父块内容
+        parent_ids_needed = {c.parent_id for c in chunks if c.parent_id and c.parent_id not in chunk_ids}
+        parent_chunks = {}
+        if parent_ids_needed:
+            parents = db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(parent_ids_needed)).all()
+            parent_chunks = {p.id: p for p in parents}
+
+        # 收集所有需要的 item_ids（含父块）
+        all_chunks = list(chunks) + list(parent_chunks.values())
+        item_ids = {c.item_id for c in all_chunks}
         items = {
             row[0]: row[1]
             for row in db.query(KnowledgeItem.id, KnowledgeItem.title)
             .filter(KnowledgeItem.id.in_(item_ids))
             .all()
         }
-        # 批量取 doc_name（优先 knowledge_file 的 title/original_filename）
         files = {
             row[0]: row[1] or row[2] or ""
             for row in db.query(KnowledgeFile.item_id, KnowledgeFile.title, KnowledgeFile.original_filename)
@@ -49,8 +57,14 @@ def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
 
         result = {}
         for chunk in chunks:
-            doc_name = files.get(chunk.item_id) or items.get(chunk.item_id, "")
-            result[chunk.id] = {"text": chunk.chunk_text, "doc_name": doc_name}
+            # 如果命中子块且有父块 → 返回父块内容
+            if chunk.parent_id and chunk.parent_id in parent_chunks:
+                parent = parent_chunks[chunk.parent_id]
+                doc_name = files.get(parent.item_id) or items.get(parent.item_id, "")
+                result[chunk.id] = {"text": parent.chunk_text, "doc_name": doc_name}
+            else:
+                doc_name = files.get(chunk.item_id) or items.get(chunk.item_id, "")
+                result[chunk.id] = {"text": chunk.chunk_text, "doc_name": doc_name}
         return result
     finally:
         db.close()

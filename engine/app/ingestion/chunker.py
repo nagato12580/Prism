@@ -1,44 +1,100 @@
 # prism/engine/app/ingestion/chunker.py
-"""语义分块：按句子边界切分，支持 overlap。"""
+"""父子分块策略 (Parent-Child Chunking).
+
+父块（~1024 token）提供上下文，不向量化。
+子块（~256 token，10% 重叠）用于向量召回。
+对齐 Comet 的分块方案，使用 tiktoken 精确计数。
+"""
 import re
 
-# 中文句号、问号、感叹号 + 英文句号
-SENTENCE_END = re.compile(r"[。！？!?.\n]+")
+import tiktoken
+
+# 子块/父块目标 token 数
+CHILD_CHUNK_TOKENS = 256
+PARENT_CHUNK_TOKENS = 1024
+CHILD_OVERLAP_RATIO = 0.1
+
+# 句子分隔符（中英文）
+_SENT_SEP = re.compile(r"(?<=[。！？\.\!\?\n])")
+
+_encoder = tiktoken.get_encoding("cl100k_base")
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
-    """将文本切分为不超过 chunk_size 字符的块，相邻块有 overlap 字符重叠。"""
-    if not text or not text.strip():
-        return []
+class ParentChunk:
+    """一个父块及其下的子块。"""
 
-    # 按句子边界切分
-    sentences = SENTENCE_END.split(text)
-    sentences = [s.strip() for s in sentences if s.strip()]
+    def __init__(self, content: str):
+        self.content = content
+        self.children: list[str] = []
 
-    chunks = []
-    current = ""
 
-    for sentence in sentences:
-        # 单句本身超长，硬切
-        if len(sentence) > chunk_size:
-            if current:
-                chunks.append(current)
-                current = ""
-            for i in range(0, len(sentence), chunk_size):
-                chunks.append(sentence[i:i + chunk_size])
+def count_tokens(text: str) -> int:
+    return len(_encoder.encode(text))
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = [s.strip() for s in _SENT_SEP.split(text) if s and s.strip()]
+    return parts
+
+
+def _merge_to_chunks(
+    sentences: list[str], target_tokens: int, overlap_ratio: float = 0.0
+) -> list[str]:
+    """把句子合并成不超过 target_tokens 的块，可带重叠。"""
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_tokens = 0
+    for sent in sentences:
+        st = count_tokens(sent)
+        # 单句超长：直接成块
+        if st >= target_tokens:
+            if cur:
+                chunks.append("".join(cur))
+                cur, cur_tokens = [], 0
+            chunks.append(sent)
             continue
-
-        if len(current) + len(sentence) + 1 <= chunk_size:
-            current = current + "。" + sentence if current else sentence
-        else:
-            chunks.append(current)
-            # overlap：取当前块末尾 overlap 字符作为下一块开头
-            if overlap > 0 and len(current) > overlap:
-                current = current[-overlap:] + "。" + sentence
+        if cur_tokens + st > target_tokens and cur:
+            chunks.append("".join(cur))
+            # 重叠：保留尾部一部分句子
+            if overlap_ratio > 0:
+                keep = max(1, int(len(cur) * overlap_ratio))
+                cur = cur[-keep:]
+                cur_tokens = sum(count_tokens(s) for s in cur)
             else:
-                current = sentence
-
-    if current:
-        chunks.append(current)
-
+                cur, cur_tokens = [], 0
+        cur.append(sent)
+        cur_tokens += st
+    if cur:
+        chunks.append("".join(cur))
     return chunks
+
+
+def chunk_parent_child(text: str) -> list[ParentChunk]:
+    """父子分块：先切父块，再在每个父块内切子块。
+
+    返回 ParentChunk 列表，每个包含父块全文和子块列表。
+    """
+    text = text.strip()
+    if not text:
+        return []
+    sentences = _split_sentences(text)
+    parent_contents = _merge_to_chunks(sentences, PARENT_CHUNK_TOKENS)
+    result: list[ParentChunk] = []
+    for pc in parent_contents:
+        parent = ParentChunk(pc)
+        child_sents = _split_sentences(pc)
+        parent.children = _merge_to_chunks(
+            child_sents, CHILD_CHUNK_TOKENS, CHILD_OVERLAP_RATIO
+        )
+        result.append(parent)
+    return result
+
+
+# 兼容旧接口
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
+    """兼容旧调用：返回所有子块（扁平列表）。"""
+    parents = chunk_parent_child(text)
+    result = []
+    for p in parents:
+        result.extend(p.children)
+    return result

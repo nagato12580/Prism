@@ -17,6 +17,8 @@ class ChatSession(Base):
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     title = Column(String(255), default="新对话", comment="会话标题")
     user_id = Column(CHAR(36), default="default-user")
+    topic_id = Column(CHAR(36), nullable=True, default=None, comment="关联知识库主题")
+    source_types = Column(JSON, nullable=True, default=None, comment="过滤数据来源类型")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -32,6 +34,7 @@ class ChatMessage(Base):
     role = Column(String(20), nullable=False, comment="user/assistant/system")
     content = Column(Text, comment="消息内容")
     sources = Column(JSON, comment="引用的知识块ID列表")
+    clarify = Column(JSON, nullable=True, default=None, comment="追问卡片数据")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("ChatSession", back_populates="messages")

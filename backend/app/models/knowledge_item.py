@@ -55,6 +55,8 @@ class KnowledgeChunk(Base):
     item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="CASCADE"), nullable=False)
     chunk_text = Column(Text, nullable=False, comment="Chunk text")
     chunk_index = Column(Integer, default=0, comment="Chunk index")
+    chunk_type = Column(String(16), default="child", comment="child / parent")
+    parent_id = Column(CHAR(36), nullable=True, default=None, comment="子块指向父块 ID")
     embedding_id = Column(String(100), comment="Milvus vector ID")
     extra_meta = Column(JSON, comment="Page, position, and other metadata")
     created_at = Column(DateTime, default=datetime.utcnow)

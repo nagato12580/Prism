@@ -17,6 +17,8 @@ _INDEX_MAPPING = {
             "chunk_id": {"type": "keyword"},
             "item_id": {"type": "keyword"},
             "topic_id": {"type": "keyword"},
+            "chunk_type": {"type": "keyword"},
+            "parent_id": {"type": "keyword"},
             "content": {
                 "type": "text",
                 "analyzer": "ik_max_word",

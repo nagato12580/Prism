@@ -45,17 +45,19 @@ def insert_vectors(chunk_id: str, item_id: str, embedding: list[float]):
 
 
 def search_vectors(query_embedding: list[float], top_k: int = 10) -> list[dict]:
-    """向量检索，返回 [{chunk_id, item_id, score}]。"""
+    """向量检索，返回 [{chunk_id, item_id, score}]。
+
+    集合常驻内存（load 在已加载时是空操作），不再每次 release。
+    """
     coll = ensure_collection()
-    coll.load()
+    coll.load()  # 已加载时为 no-op
     results = coll.search(
         data=[query_embedding],
         anns_field="embedding",
-        param={"metric_type": "COSINE", "params": {"nprobe": 10}},
+        param={"metric_type": "COSINE", "params": {"nprobe": 32}},
         limit=top_k,
         output_fields=["chunk_id", "item_id"],
     )
-    coll.release()
     hits = []
     for hit in results[0]:
         hits.append({
