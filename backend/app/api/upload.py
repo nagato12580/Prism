@@ -129,6 +129,8 @@ async def upload_wiki_file(
 ):
     """Wiki 独立上传入口：保存文件 → 创建 knowledge_file + wiki_document → 触发提取。"""
     from ..models.wiki import WikiDocument
+    import hashlib
+    import traceback
 
     ext = Path(file.filename).suffix
     ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".md", ".txt", ".markdown"}
@@ -146,28 +148,34 @@ async def upload_wiki_file(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"文件解析失败: {e}")
 
-    # 创建 knowledge_file（source_type=wiki）
-    kfile = KnowledgeFile(
-        original_name=file.filename,
-        file_path=str(saved_path),
-        file_type=ext.lstrip("."),
-        file_size=len(content_bytes),
-        parse_status="completed",
-        source_type="wiki",
-        content_text=text,
-    )
-    db.add(kfile)
-    db.flush()
+    try:
+        # 创建 knowledge_file（source_type=wiki）
+        kfile = KnowledgeFile(
+            original_name=file.filename,
+            file_path=str(saved_path),
+            file_type=ext.lstrip("."),
+            file_size=len(content_bytes),
+            md5=hashlib.md5(content_bytes).hexdigest(),
+            parse_status="completed",
+            source_type="wiki",
+            content_text=text,
+        )
+        db.add(kfile)
+        db.flush()
 
-    # 创建 wiki_document 关联
-    wiki_doc = WikiDocument(
-        file_id=kfile.id,
-        status="pending",
-        user_id="default-user",
-    )
-    db.add(wiki_doc)
-    db.commit()
-    db.refresh(wiki_doc)
+        # 创建 wiki_document 关联
+        wiki_doc = WikiDocument(
+            file_id=kfile.id,
+            status="pending",
+            user_id="default-user",
+        )
+        db.add(wiki_doc)
+        db.commit()
+        db.refresh(wiki_doc)
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"数据库写入失败: {e}")
 
     # 触发提取
     _trigger_wiki_extraction(wiki_doc.id)
