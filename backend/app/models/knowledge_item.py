@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON, CHAR
-from sqlalchemy.orm import relationship, synonym, validates
+from sqlalchemy.orm import relationship, synonym
 
 from ..database import Base
 
@@ -101,8 +101,6 @@ class KnowledgeFile(Base):
     file_type = synonym("file_ext")
     parse_status = synonym("processing_status")
 
-    @validates("processing_status")
-    def _normalize_processing_status(self, key, value):
-        if value == "done":
-            return "completed"
-        return value
+    # Validator removed: "done" is now a distinct status from "completed".
+    # "completed" = text extracted, waiting for manual vectorization.
+    # "done" = fully ingested with vectors in Milvus.

@@ -200,6 +200,8 @@ export const knowledgeApi = {
     }),
   deleteResource: (id: string) =>
     request<{ detail: string }>(`/knowledge/resources/${id}`, { method: 'DELETE' }),
+  ingestResource: (id: string) =>
+    request<KnowledgeResource>(`/knowledge/resources/${id}/ingest`, { method: 'POST' }),
   uploadFile: async (file: File, category?: string): Promise<KnowledgeItem> => {
     const form = new FormData()
     form.append('file', file)

@@ -19,6 +19,7 @@ import {
   Trash2,
   Upload,
   X,
+  Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -82,6 +83,7 @@ export function KnowledgePage() {
   const [editingTopicName, setEditingTopicName] = useState('')
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [editingResourceTitle, setEditingResourceTitle] = useState('')
+  const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -253,6 +255,27 @@ export function KnowledgePage() {
     }
   }
 
+  const handleIngest = async (resourceId: string) => {
+    if (busy || ingestingIds.has(resourceId) || !activeTopicId) return
+
+    setIngestingIds((current) => new Set(current).add(resourceId))
+    setError(null)
+    try {
+      const updated = await knowledgeApi.ingestResource(resourceId)
+      setResources((current) =>
+        current.map((r) => (r.id === resourceId ? updated : r)),
+      )
+    } catch (err) {
+      setError(readApiError(err, '向量化失败'))
+    } finally {
+      setIngestingIds((current) => {
+        const next = new Set(current)
+        next.delete(resourceId)
+        return next
+      })
+    }
+  }
+
   const handleDeleteResource = async (resourceId: string) => {
     if (busy || !activeTopicId || !confirm('确认删除这个资源吗？')) return
 
@@ -402,12 +425,14 @@ export function KnowledgePage() {
                       key={resource.id}
                       resource={resource}
                       busy={busy}
+                      ingesting={ingestingIds.has(resource.id)}
                       editing={editingResourceId === resource.id}
                       editingTitle={editingResourceTitle}
                       onStartEdit={() => startResourceEdit(resource)}
                       onChangeEdit={setEditingResourceTitle}
                       onSaveEdit={saveResourceTitle}
                       onCancelEdit={() => setEditingResourceId(null)}
+                      onIngest={() => handleIngest(resource.id)}
                       onDelete={handleDeleteResource}
                     />
                   ))}
@@ -550,6 +575,38 @@ function EmptyState({
   )
 }
 
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: '待解析',
+    processing: '处理中',
+    completed: '待向量化',
+    done: '已向量化',
+    failed: '失败',
+    metadata_only: '仅元数据',
+  }
+  return labels[status] || status
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const isError = status === 'failed'
+  const isDone = status === 'done'
+  const isProcessing = status === 'processing'
+
+  return (
+    <span
+      className={cn(
+        'rounded-md px-2 py-1 font-medium',
+        isError && 'bg-red-50 text-red-700',
+        isDone && 'bg-emerald-50 text-emerald-700',
+        isProcessing && 'bg-violet-50 text-violet-600',
+        !isError && !isDone && !isProcessing && 'bg-amber-50 text-amber-700',
+      )}
+    >
+      {statusLabel(status)}
+    </span>
+  )
+}
+
 function ResourceIcon({ mediaType }: { mediaType: ResourceMediaType }) {
   if (mediaType === 'image') return <FileImage size={18} />
   if (mediaType === 'audio') return <FileAudio size={18} />
@@ -566,22 +623,26 @@ function formatSize(value: number) {
 function ResourceCard({
   resource,
   busy,
+  ingesting,
   editing,
   editingTitle,
   onStartEdit,
   onChangeEdit,
   onSaveEdit,
   onCancelEdit,
+  onIngest,
   onDelete,
 }: {
   resource: KnowledgeResource
   busy: boolean
+  ingesting: boolean
   editing: boolean
   editingTitle: string
   onStartEdit: () => void
   onChangeEdit: (value: string) => void
   onSaveEdit: () => void
   onCancelEdit: () => void
+  onIngest: () => void
   onDelete: (id: string) => void
 }) {
   const uploadedDate = formatDate(resource.uploaded_at)
@@ -610,15 +671,58 @@ function ResourceCard({
             <h3 className="break-words text-sm font-semibold leading-5 text-slate-950">{displayTitle}</h3>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{MEDIA_LABEL[resource.media_type]}</span>
-            <span className={cn('rounded-md px-2 py-1 font-medium', resource.processing_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700')}>
-              {resource.processing_status}
-            </span>
+            <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{resource.file_ext.replace('.', '').toUpperCase() || MEDIA_LABEL[resource.media_type]}</span>
+            <StatusBadge status={resource.processing_status} />
             <span>{formatSize(resource.file_size)}</span>
             {uploadedDate && <span>{uploadedDate}</span>}
           </div>
         </div>
-        <div className="flex shrink-0 gap-1">
+        <div className="flex shrink-0 items-start gap-1">
+          {/* 已向量化：实心紫色闪电 */}
+          {resource.media_type === 'document' && resource.processing_status === 'done' && (
+            <span
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-500"
+              title="已向量化"
+            >
+              <Zap size={15} fill="currentColor" />
+            </span>
+          )}
+          {/* 未向量化：空心闪电，可点击触发 */}
+          {resource.media_type === 'document' && resource.processing_status === 'completed' && (
+            <button
+              type="button"
+              disabled={ingesting}
+              onClick={onIngest}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-300 transition hover:bg-violet-100 hover:text-violet-600 disabled:opacity-50"
+              title="向量化此文档"
+            >
+              {ingesting ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Zap size={15} />
+              )}
+            </button>
+          )}
+          {/* 处理中：旋转 */}
+          {resource.media_type === 'document' && resource.processing_status === 'processing' && (
+            <span
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-400"
+              title="向量化处理中"
+            >
+              <Loader2 size={15} className="animate-spin" />
+            </span>
+          )}
+          {/* 失败：红色警告 */}
+          {resource.media_type === 'document' && resource.processing_status === 'failed' && (
+            <button
+              type="button"
+              onClick={onIngest}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-red-400 transition hover:bg-red-50 hover:text-red-600"
+              title="向量化失败，点击重试"
+            >
+              <Zap size={15} />
+            </button>
+          )}
           {editing ? (
             <>
               <button type="button" disabled={busy} onClick={onSaveEdit} className={iconButtonClass('hover:text-emerald-700')} aria-label="保存资源名称" title="保存">

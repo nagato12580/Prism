@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .upload import _trigger_ingestion
+from ..config import settings
 from ..database import get_db
 from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..schemas.knowledge import (
@@ -300,8 +301,8 @@ async def upload_topic_resource(
     db.commit()
     db.refresh(resource)
 
-    if resource.item_id and resource.processing_status == "completed":
-        _trigger_ingestion(resource.item_id)
+    # P0: 不再自动触发 ingestion。用户通过前端按钮手动触发向量化。
+    # 文件解析完成，状态为 "completed"，等待用户点击"向量化"。
 
     return resource
 
@@ -359,6 +360,57 @@ def delete_resource(resource_id: str, db: Session = Depends(get_db)):
     db.commit()
     storage_path.unlink(missing_ok=True)
     return {"detail": "deleted"}
+
+
+@router.post("/resources/{resource_id}/ingest", response_model=KnowledgeResourceOut)
+def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
+    """手动触发单个资源的向量化摄入。"""
+    resource = db.query(KnowledgeFile).filter(
+        KnowledgeFile.id == resource_id,
+        KnowledgeFile.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "Resource not found"},
+        )
+    if not resource.item_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "no_item", "message": "Resource has no associated knowledge item"},
+        )
+
+    # 设置为处理中
+    resource.processing_status = "processing"
+    db.commit()
+    db.refresh(resource)
+
+    # 同步调用 Engine 摄入，不 fire-and-forget
+    import httpx
+    try:
+        resp = httpx.post(
+            f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/ingest",
+            json={"item_id": resource.item_id},
+            timeout=120,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            chunk_count = data.get("chunks", 0)
+            if chunk_count > 0:
+                resource.processing_status = "done"
+            else:
+                resource.processing_status = "failed"
+                resource.error_message = "Ingestion returned 0 chunks (content may be empty)"
+        else:
+            resource.processing_status = "failed"
+            resource.error_message = f"Engine returned {resp.status_code}"
+    except Exception as exc:
+        resource.processing_status = "failed"
+        resource.error_message = str(exc)
+
+    db.commit()
+    db.refresh(resource)
+    return resource
 
 
 @router.put("/resources/{resource_id}", response_model=KnowledgeResourceOut)

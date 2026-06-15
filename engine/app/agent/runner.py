@@ -63,6 +63,22 @@ def _call_value(tool_call: Any, key: str, default: Any = None) -> Any:
     return getattr(tool_call, key, default)
 
 
+def _message_role_summary(messages: list[Any]) -> str:
+    summary: list[str] = []
+    for index, message in enumerate(messages):
+        role = getattr(message, "type", None) or message.__class__.__name__
+        tool_call_id = getattr(message, "tool_call_id", None)
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if tool_call_id:
+            summary.append(f"{index}:{role}(tool_call_id={tool_call_id})")
+        elif tool_calls:
+            call_ids = ",".join(str(_call_value(call, "id", "")) for call in tool_calls)
+            summary.append(f"{index}:{role}(tool_calls=[{call_ids}])")
+        else:
+            summary.append(f"{index}:{role}")
+    return " | ".join(summary)
+
+
 def _payload_clarify(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]] | None:
     clarify = payload if payload.get("status") == "clarify" else payload.get("clarify")
     if not isinstance(clarify, dict):
@@ -119,11 +135,14 @@ class LangChainAgentRunner:
         tools: list[Any],
         system_prompt: str = AGENT_SYSTEM_PROMPT,
         max_iterations: int = 5,
+        clarify_depth: int = 0,
     ) -> None:
         self.model = model
         self.tools = tools
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self.clarify_depth = clarify_depth
+        self._pending_clarify: tuple[str, list[dict[str, str]]] | None = None
         self.tool_map = {tool.name: tool for tool in tools}
 
     def stream(self, query: str, history: list[dict[str, Any]] | None = None):
@@ -140,7 +159,6 @@ class LangChainAgentRunner:
         try:
             messages = self._build_messages(query, history)
             model = self.model.bind_tools(self.tools) if self.tools else self.model
-            knowledge_fallback_used = False
 
             for iteration in range(1, self.max_iterations + 1):
                 logger.info(
@@ -148,42 +166,36 @@ class LangChainAgentRunner:
                     iteration,
                     len(messages),
                 )
+                logger.info(
+                    "[agent] message_roles iteration=%s %s",
+                    iteration,
+                    _message_role_summary(messages),
+                )
                 response = model.invoke(messages)
                 tool_calls = getattr(response, "tool_calls", None) or []
+                logger.info(
+                    "[agent] model_response iteration=%s response_type=%s tool_calls=%s",
+                    iteration,
+                    response.__class__.__name__,
+                    ",".join(
+                        f"{_call_value(call, 'name', '')}:{_call_value(call, 'id', '')}"
+                        for call in tool_calls
+                    )
+                    or "none",
+                )
                 if not tool_calls:
-                    should_fallback = (
-                        not is_casual_chat
-                        and not knowledge_fallback_used
-                        and self._should_fallback_to_knowledge_search(messages)
-                    )
-                    fallback_events = (
-                        self._fallback_knowledge_search(query, messages)
-                        if should_fallback
-                        else None
-                    )
-                    if fallback_events is not None:
-                        logger.info(
-                            "[agent] fallback tool=knowledge_search reason=no_tool_calls"
-                        )
-                        knowledge_fallback_used = True
-                        for event in fallback_events:
-                            yield event
-                        if any(
-                            json.loads(event).get("type") == "done"
-                            for event in fallback_events
-                        ):
-                            return
-                        response = model.invoke(messages)
-                        tool_calls = getattr(response, "tool_calls", None) or []
-                        if tool_calls:
-                            messages.append(response)
-                            continue
-
                     text = _message_content(response)
                     if text:
                         logger.info("[agent] output preview=%s", quoted(text))
                         yield agent_status_event("generating answer")
                         yield token_event(text)
+
+                    pending = self._pending_clarify
+                    if pending is not None:
+                        self._pending_clarify = None
+                        question, options = pending
+                        yield clarify_event(question, options)
+
                     logger.info("[agent] done")
                     yield done_event()
                     return
@@ -191,13 +203,15 @@ class LangChainAgentRunner:
                 messages.append(response)
                 for tool_call in tool_calls:
                     name = str(_call_value(tool_call, "name", ""))
+                    tool_call_id = str(_call_value(tool_call, "id", name))
                     args = _call_value(tool_call, "args", {}) or {}
                     if not isinstance(args, dict):
                         args = {}
                     query_arg = str(args.get("query") or args.get("question") or "")
                     logger.info(
-                        "[agent] tool_call tool=%s query=%s",
+                        "[agent] tool_call tool=%s tool_call_id=%s query=%s",
                         name,
+                        tool_call_id,
                         quoted(query_arg),
                     )
                     yield tool_call_event(name, query_arg)
@@ -230,25 +244,41 @@ class LangChainAgentRunner:
                     if sources:
                         yield sources_event(sources)
 
-                    clarify = _payload_clarify(payload)
-                    if clarify is not None:
-                        question, options = clarify
-                        logger.info(
-                            "[agent] clarify question=%s options=%s",
-                            quoted(question),
-                            len(options),
-                        )
-                        yield clarify_event(question, options)
-                        logger.info("[agent] done")
-                        yield done_event()
-                        return
-
+                    # P0-1: Add ToolMessage FIRST, then check clarify.
+                    # Do NOT terminate — let the model see the tool result
+                    # and generate text before we emit structured clarify.
                     messages.append(
                         ToolMessage(
                             content=result_text,
-                            tool_call_id=str(_call_value(tool_call, "id", name)),
+                            tool_call_id=tool_call_id,
                         )
                     )
+                    logger.info(
+                        "[agent] appended_tool_message tool=%s tool_call_id=%s message_roles=%s",
+                        name,
+                        tool_call_id,
+                        _message_role_summary(messages),
+                    )
+
+                    clarify = _payload_clarify(payload)
+                    if clarify is not None:
+                        if self.clarify_depth >= 1:
+                            # P0-3: Already clarified once — suppress further
+                            # clarifies and force answer from available evidence.
+                            logger.info(
+                                "[agent] clarify_suppressed depth=%s question=%s",
+                                self.clarify_depth,
+                                quoted(clarify[0]),
+                            )
+                        else:
+                            # P0-2: Track pending clarify for emission AFTER
+                            # model generates text in the next loop iteration.
+                            logger.info(
+                                "[agent] clarify_pending question=%s options=%s",
+                                quoted(clarify[0]),
+                                len(clarify[1]),
+                            )
+                            self._pending_clarify = clarify
 
             logger.warning("[agent] max_iterations_exceeded limit=%s", self.max_iterations)
             yield error_event("Agent reached the maximum tool iteration limit.")
@@ -308,53 +338,3 @@ class LangChainAgentRunner:
 
         return result_text, payload, status, latency_ms
 
-    def _fallback_knowledge_search(
-        self,
-        query: str,
-        messages: list[Any],
-    ) -> list[str] | None:
-        tool = self.tool_map.get("knowledge_search")
-        if tool is None:
-            return None
-
-        result_text, payload, status, latency_ms = self._invoke_tool(
-            "knowledge_search",
-            {"query": query},
-        )
-
-        summary = str(payload.get("summary") or payload.get("question") or result_text)
-        events = [
-            tool_call_event("knowledge_search", query),
-            tool_result_event(
-                tool="knowledge_search",
-                status=status,
-                summary=summary,
-                query=query,
-                stats=payload.get("stats"),
-                latency_ms=latency_ms,
-            ),
-        ]
-
-        sources = payload.get("sources") or []
-        if sources:
-            events.append(sources_event(sources))
-
-        clarify = _payload_clarify(payload)
-        if clarify is not None:
-            question, options = clarify
-            events.append(clarify_event(question, options))
-            events.append(done_event())
-            return events
-
-        messages.append(
-            ToolMessage(
-                content=result_text,
-                tool_call_id="knowledge_search_fallback",
-            )
-        )
-        return events
-
-    def _should_fallback_to_knowledge_search(self, messages: list[Any]) -> bool:
-        if "knowledge_search" not in self.tool_map:
-            return False
-        return not any(isinstance(message, ToolMessage) for message in messages)

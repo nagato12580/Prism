@@ -16,21 +16,14 @@ JudgeFn: TypeAlias = Callable[
 ]
 
 
-DEFAULT_CLARIFY: ClarifyRequest = {
-    "question": "I need one more detail to answer accurately. What should I use as the scope?",
-    "options": [
-        {"label": "Current knowledge base", "value": "scope:knowledge"},
-        {"label": "Specific directory", "value": "scope:directory"},
-        {"label": "Allow web supplement", "value": "scope:web"},
-    ],
-}
+# P0: No longer emit a meaningless scope clarify by default.
+# When the RAG judge returns insufficient without a specific clarify question,
+# return None so the agent answers based on whatever evidence it has.
+DEFAULT_CLARIFY: ClarifyRequest | None = None
 
 
-def default_clarify_request() -> ClarifyRequest:
-    return {
-        "question": DEFAULT_CLARIFY["question"],
-        "options": [option.copy() for option in DEFAULT_CLARIFY["options"]],
-    }
+def default_clarify_request() -> ClarifyRequest | None:
+    return None
 
 
 @dataclass(slots=True)
@@ -50,7 +43,7 @@ class AgenticRagResult:
     evidence: list[Evidence] = field(default_factory=list)
     sources: list[SearchHit] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
-    clarify: ClarifyRequest = field(default_factory=default_clarify_request)
+    clarify: ClarifyRequest | None = field(default_factory=default_clarify_request)
     iterations: int = 0
 
 

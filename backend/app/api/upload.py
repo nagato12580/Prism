@@ -109,7 +109,7 @@ def _trigger_ingestion(item_id: str):
         def _call():
             try:
                 httpx.post(
-                    f"http://{settings.ENGINE_HOST}:{settings.ENGINE_PORT}/api/v1/ingest",
+                    f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/ingest",
                     json={"item_id": item_id},
                     timeout=30,
                 )

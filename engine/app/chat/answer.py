@@ -183,6 +183,7 @@ def _resolve_allowed_item_ids(topic_id: str | None) -> set[str] | None:
 def build_agent_runner(
     topic_id: str | None = None,
     source_types: list[str] | None = None,
+    clarify_depth: int = 0,
 ) -> LangChainAgentRunner:
     """构造 Agent Runner，注入带过滤的搜索闭包。
 
@@ -216,7 +217,7 @@ def build_agent_runner(
     )
     tools = build_enabled_tools(ctx)
     model = create_chat_model(settings)
-    return LangChainAgentRunner(model=model, tools=tools)
+    return LangChainAgentRunner(model=model, tools=tools, clarify_depth=clarify_depth)
 
 
 def answer_stream(
@@ -226,15 +227,22 @@ def answer_stream(
     source_types: list[str] | None = None,
 ):
     history = history or []
+    # P0-3: Count previous clarify rounds from history to limit depth.
+    # Each assistant message with a non-empty clarify JSON counts as one round.
+    clarify_depth = sum(
+        1 for msg in history
+        if msg.get("role") == "assistant" and msg.get("clarify")
+    )
     logger.info(
-        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s",
+        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s clarify_depth=%s",
         quoted(query),
         len(history),
         topic_id,
         source_types,
+        clarify_depth,
     )
     try:
-        runner = build_agent_runner(topic_id=topic_id, source_types=source_types)
+        runner = build_agent_runner(topic_id=topic_id, source_types=source_types, clarify_depth=clarify_depth)
         logger.info("[chat] runner_ready")
         yield from runner.stream(query, history)
         logger.info("[chat] stream_complete")
