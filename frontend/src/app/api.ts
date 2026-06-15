@@ -215,3 +215,105 @@ export const knowledgeApi = {
     return uploadRequest<KnowledgeItem>('/upload/url', form)
   },
 }
+
+// ── Wiki types ────────────────────────────────────────────────
+
+export interface WikiDocument {
+  id: string
+  file_id: string
+  status: string
+  extract_stage: string
+  progress_current: number
+  progress_total: number
+  user_id: string
+  created_at: string
+  original_filename?: string | null
+  mime_type?: string | null
+  file_size?: number | null
+}
+
+export interface WikiDocumentDetail extends WikiDocument {
+  logs: WikiExtractionLog[]
+}
+
+export interface WikiKnowledgePoint {
+  id: string
+  document_id: string
+  title: string
+  description?: string | null
+  content?: string | null
+  category: string
+  tags: string
+  aliases: string
+  group_name: string
+  status: string
+  images?: string | null
+  user_id: string
+  created_at: string
+}
+
+export interface WikiKnowledgePointListItem {
+  id: string
+  document_id: string
+  title: string
+  description?: string | null
+  category: string
+  tags: string
+  status: string
+  created_at: string
+}
+
+export interface WikiKnowledgeRelation {
+  id: string
+  from_point_id: string
+  to_point_id: string
+  type: string
+  confidence: number
+  created_at: string
+  from_title?: string | null
+  to_title?: string | null
+}
+
+export interface WikiExtractionLog {
+  id: string
+  document_id: string
+  stage: string
+  message: string
+  status: string
+  progress_current: number
+  progress_total: number
+  created_at: string
+}
+
+// ── Wiki API functions ────────────────────────────────────────
+
+export async function fetchWikiDocuments(): Promise<WikiDocument[]> {
+  return request('/wiki/documents')
+}
+
+export async function fetchWikiDocument(id: string): Promise<WikiDocumentDetail> {
+  return request(`/wiki/documents/${id}`)
+}
+
+export async function deleteWikiDocument(id: string): Promise<void> {
+  await request(`/wiki/documents/${id}`, { method: 'DELETE' })
+}
+
+export async function fetchWikiPoints(docId?: string): Promise<WikiKnowledgePointListItem[]> {
+  const params = docId ? `?doc_id=${encodeURIComponent(docId)}` : ''
+  return request(`/wiki/points${params}`)
+}
+
+export async function fetchWikiPoint(id: string): Promise<WikiKnowledgePoint> {
+  return request(`/wiki/points/${id}`)
+}
+
+export async function fetchWikiPointRelations(id: string): Promise<WikiKnowledgeRelation[]> {
+  return request(`/wiki/points/${id}/relations`)
+}
+
+export async function uploadWikiFile(file: File): Promise<{ file_id: string; wiki_doc_id: string; status: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  return uploadRequest('/upload/wiki', form)
+}
