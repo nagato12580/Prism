@@ -1,4 +1,5 @@
 # prism/backend/app/api/upload.py
+import threading
 import uuid
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form

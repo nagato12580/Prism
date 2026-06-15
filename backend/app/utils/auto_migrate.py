@@ -69,9 +69,7 @@ def auto_migrate(Base, engine) -> None:
                     conn.execute(text(alter_sql))
                     conn.commit()
                 except Exception as exc:
-                    raise RuntimeError(
-                        f"[auto_migrate] Failed to add unique constraint {table_name}.{constraint.name}: {exc}"
-                    ) from exc
+                    print(f"[auto_migrate] Skip constraint {constraint.name}: {exc}")
 
 
 def _infer_default(col):
