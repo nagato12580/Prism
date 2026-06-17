@@ -11,7 +11,7 @@ class FakeRunner:
 
 
 def test_answer_stream_delegates_to_agent_runner(monkeypatch):
-    monkeypatch.setattr(answer, "build_agent_runner", lambda: FakeRunner())
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
 
     lines = list(answer.answer_stream("hello", [{"role": "user", "content": "old"}]))
 
@@ -20,7 +20,7 @@ def test_answer_stream_delegates_to_agent_runner(monkeypatch):
 
 
 def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
-    monkeypatch.setattr(answer, "build_agent_runner", lambda: FakeRunner())
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
 
     with caplog.at_level(logging.INFO, logger="uvicorn.error"):
         list(answer.answer_stream("hello", [{"role": "user", "content": "old"}]))
@@ -37,7 +37,7 @@ def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
 
 
 def test_answer_stream_emits_error_when_runner_build_fails(monkeypatch):
-    def fail():
+    def fail(**kwargs):
         raise RuntimeError("no model")
 
     monkeypatch.setattr(answer, "build_agent_runner", fail)
@@ -48,7 +48,7 @@ def test_answer_stream_emits_error_when_runner_build_fails(monkeypatch):
 
 
 def test_answer_stream_logs_runner_build_error(monkeypatch, caplog):
-    def fail():
+    def fail(**kwargs):
         raise RuntimeError("no model")
 
     monkeypatch.setattr(answer, "build_agent_runner", fail)

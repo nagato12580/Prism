@@ -4,9 +4,11 @@ import {
   BookMarked,
   BookOpen,
   CircleUserRound,
+  Inbox,
   Moon,
   Menu,
   MessageSquare,
+  Network,
   Search,
   Sun,
   X,
@@ -15,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 const navItems = [
   { to: '/chat', label: '对话', icon: MessageSquare },
+  { to: '/inbox', label: '收件箱', icon: Inbox },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
   { to: '/wiki', label: 'Wiki', icon: BookMarked },
 ]
@@ -70,6 +73,30 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
           label="知识库"
           icon={BookOpen}
           active={location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/assets"
+          label="资产"
+          icon={BookOpen}
+          active={location.pathname === '/assets' || location.pathname.startsWith('/assets/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/graph"
+          label="图谱"
+          icon={Network}
+          active={location.pathname === '/graph' || location.pathname.startsWith('/graph/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/inbox"
+          label="收件箱"
+          icon={Inbox}
+          active={location.pathname === '/inbox' || location.pathname.startsWith('/inbox/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />

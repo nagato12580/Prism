@@ -100,6 +100,10 @@ def _bulk_index_chunks_es(
 def ingest_item(item_id: str) -> int:
     """处理一个知识条目，返回生成的 chunk 数量（子块数）。"""
     from backend.app.models.knowledge_item import KnowledgeItem, KnowledgeChunk
+    from backend.app.services.knowledge_governance import (
+        clear_document_item_governance,
+        settle_document_item_to_governance,
+    )
 
     db = _Session()
     try:
@@ -107,7 +111,8 @@ def ingest_item(item_id: str) -> int:
         if not item or not item.content:
             return 0
 
-        # 删除旧 chunk（重新摄入时）
+        # 删除旧治理数据和旧 chunk（重新摄入时）
+        clear_document_item_governance(db, item_id)
         db.query(KnowledgeChunk).filter(KnowledgeChunk.item_id == item_id).delete()
 
         # 父子分块
@@ -182,6 +187,7 @@ def ingest_item(item_id: str) -> int:
 
         # 生成摘要
         item.summary = item.content[:200]
+        settle_document_item_to_governance(db, item_id)
         db.commit()
         return len(child_texts)
     except Exception:

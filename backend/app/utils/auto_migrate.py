@@ -6,6 +6,9 @@ from sqlalchemy.types import Boolean, Float, Integer, String
 KNOWN_UNIQUE_CONSTRAINTS = {
     "uq_knowledge_topic_user_name",
     "uq_knowledge_file_user_topic_md5",
+    "uq_pku_source_normalized",
+    "uq_pku_ckp_relation",
+    "uq_ckp_relation",
 }
 
 

@@ -2,6 +2,9 @@ import { createBrowserRouter } from 'react-router-dom'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ChatPage } from '@/pages/ChatPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
+import { InboxPage } from '@/pages/InboxPage'
+import { AssetsPage } from '@/pages/AssetsPage'
+import { KnowledgeGraphPage } from '@/pages/KnowledgeGraphPage'
 import { WikiPage } from '@/pages/WikiPage'
 import { WikiUploadPage } from '@/pages/WikiUploadPage'
 import { WikiDocDetail } from '@/pages/WikiDocDetail'
@@ -14,6 +17,9 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <ChatPage /> },
       { path: 'chat', element: <ChatPage /> },
+      { path: 'inbox', element: <InboxPage /> },
+      { path: 'assets', element: <AssetsPage /> },
+      { path: 'graph', element: <KnowledgeGraphPage /> },
       { path: 'knowledge', element: <KnowledgePage /> },
       { path: 'wiki', element: <WikiPage /> },
       { path: 'wiki/upload', element: <WikiUploadPage /> },

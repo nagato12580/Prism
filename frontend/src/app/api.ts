@@ -324,3 +324,318 @@ export async function triggerWikiExtraction(docId: string): Promise<{ doc_id: st
     body: JSON.stringify({ doc_id: docId }),
   })
 }
+
+// ── Inbox types ────────────────────────────────────────────────
+
+export type InboxKind = 'knowledge' | 'opinion' | 'resource' | 'task' | 'memory' | 'idea' | 'chat'
+export type InboxAction = 'make_wiki' | 'save_note' | 'save_resource' | 'remember' | 'review_later' | 'ignore'
+
+export interface InboxRawItem {
+  id: string
+  user_id: string
+  title: string
+  content: string
+  source_type: string
+  source_url: string
+  source_platform: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface InboxReview {
+  id: string
+  raw_item_id: string
+  user_id: string
+  kind: InboxKind
+  title: string
+  summary?: string | null
+  suggested_action: InboxAction
+  category: string
+  tags: string[]
+  rationale?: string | null
+  confidence: number
+  status: string
+  settled_type: string
+  settled_ref_id: string
+  created_at: string
+  updated_at: string
+  raw_item?: InboxRawItem | null
+}
+
+export interface NotebookNote {
+  id: string
+  user_id: string
+  title: string
+  content?: string | null
+  note_type: string
+  category: string
+  tags: string[]
+  source_raw_item_id: string
+  source_review_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MemoryEntry {
+  id: string
+  user_id: string
+  title: string
+  content: string
+  memory_type: string
+  category: string
+  tags: string[]
+  importance: number
+  source_raw_item_id: string
+  source_review_id: string
+  created_at: string
+  updated_at: string
+}
+
+export const inboxApi = {
+  createItem: (data: {
+    content: string
+    title?: string
+    source_type?: string
+    source_url?: string
+    source_platform?: string
+    classify?: boolean
+  }) =>
+    request<{ item: InboxRawItem; review?: InboxReview | null }>('/inbox/items', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listReviews: (params?: { status?: string; kind?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+    return request<InboxReview[]>(`/inbox/reviews${qs}`)
+  },
+  approveReview: (id: string) =>
+    request<{ review: InboxReview; settled_type: string; settled_ref_id: string }>(
+      `/inbox/reviews/${id}/approve`,
+      { method: 'POST' },
+    ),
+  rejectReview: (id: string) =>
+    request<InboxReview>(`/inbox/reviews/${id}/reject`, { method: 'POST' }),
+  listNotes: () => request<NotebookNote[]>('/inbox/notes'),
+  listMemories: () => request<MemoryEntry[]>('/inbox/memories'),
+}
+
+// ── Personal Asset types ─────────────────────────────────────
+
+export interface AssetDraft {
+  id: string
+  raw_item_id?: string | null
+  user_id: string
+  title: string
+  summary?: string | null
+  asset_kind: string
+  source_type: string
+  source_platform: string
+  source_url: string
+  media_type: string
+  category: string
+  tags: string[]
+  extracts: Array<Record<string, unknown>>
+  suggested_relations: Array<Record<string, unknown>>
+  suggested_extensions: Array<Record<string, unknown>>
+  confidence: Record<string, unknown>
+  rationale?: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PersonalAsset {
+  id: string
+  user_id: string
+  asset_kind: string
+  title: string
+  body?: string | null
+  summary?: string | null
+  category: string
+  tags: string[]
+  source_type: string
+  source_platform: string
+  source_url: string
+  media_type: string
+  extra_meta: Record<string, unknown>
+  capabilities: string[]
+  source_raw_item_id: string
+  source_draft_id: string
+  source_ref_type: string
+  source_ref_id: string
+  importance: number
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AssetSearchResult {
+  asset_id: string
+  asset_kind: string
+  title: string
+  summary?: string | null
+  source_type: string
+  source_platform: string
+  tags: string[]
+  category: string
+  score: number
+}
+
+export interface AssetOverview {
+  summary: string
+  categories: Array<Record<string, unknown>>
+  tags: Array<Record<string, unknown>>
+  representative_assets: AssetSearchResult[]
+}
+
+export interface KnowledgeDraft {
+  id: string
+  user_id: string
+  title: string
+  content?: string | null
+  summary?: string | null
+  category: string
+  tags: string[]
+  source_asset_ids: string[]
+  outline: Array<Record<string, unknown>>
+  confidence: Record<string, unknown>
+  rationale?: string | null
+  status: string
+  knowledge_item_id: string
+  created_at: string
+  updated_at: string
+}
+
+export const assetApi = {
+  createDraft: (data: {
+    raw_item_id?: string
+    content?: string
+    title?: string
+    source_type?: string
+    source_platform?: string
+    source_url?: string
+  }) =>
+    request<AssetDraft>('/assets/drafts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listDrafts: (params?: { status?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+    return request<AssetDraft[]>(`/assets/drafts${qs}`)
+  },
+  updateDraft: (id: string, data: Partial<AssetDraft>) =>
+    request<AssetDraft>(`/assets/drafts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  confirmDraft: (
+    id: string,
+    data?: {
+      confirm_relations?: Array<Record<string, unknown>>
+      confirm_extensions?: Array<Record<string, unknown>>
+      create_memory?: boolean
+    },
+  ) =>
+    request<{ draft: AssetDraft; asset: PersonalAsset; relation_count: number; extension_count: number }>(
+      `/assets/drafts/${id}/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data ?? {}),
+      },
+    ),
+  listAssets: () => request<PersonalAsset[]>('/assets'),
+  search: (q: string, limit?: number) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    if (limit) params.set('limit', String(limit))
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    return request<AssetSearchResult[]>(`/assets/search${qs}`)
+  },
+  overview: (q: string, limit?: number) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    if (limit) params.set('limit', String(limit))
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    return request<AssetOverview>(`/assets/overview${qs}`)
+  },
+  createKnowledgeDraft: (data: { asset_ids: string[]; title?: string; instruction?: string }) =>
+    request<KnowledgeDraft>('/assets/knowledge-drafts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listKnowledgeDrafts: (params?: { status?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+    return request<KnowledgeDraft[]>(`/assets/knowledge-drafts${qs}`)
+  },
+  getKnowledgeDraft: (id: string) =>
+    request<KnowledgeDraft>(`/assets/knowledge-drafts/${id}`),
+  updateKnowledgeDraft: (id: string, data: Partial<KnowledgeDraft>) =>
+    request<KnowledgeDraft>(`/assets/knowledge-drafts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  confirmKnowledgeDraft: (id: string, data?: { ingest?: boolean }) =>
+    request<{ draft: KnowledgeDraft; knowledge_item_id: string }>(`/assets/knowledge-drafts/${id}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    }),
+}
+
+// ── Knowledge governance graph ───────────────────────────────
+
+export type KnowledgeGraphNodeType = 'canonical' | 'pku' | 'asset' | 'document_chunk'
+export type KnowledgeGraphEdgeType = 'canonical_pku' | 'pku_source'
+
+export interface KnowledgeGraphNode {
+  id: string
+  type: KnowledgeGraphNodeType
+  label: string
+  ref_id?: string
+  statement?: string
+  summary?: string | null
+  text?: string | null
+  source_kind?: string
+  source_id?: string
+  canonical_type?: string
+  unit_type?: string
+  modality?: string
+  role?: string
+  confidence?: number
+  category?: string | null
+  tags?: string[]
+  keywords?: string[]
+  source_platform?: string
+}
+
+export interface KnowledgeGraphEdge {
+  id: string
+  source: string
+  target: string
+  type: KnowledgeGraphEdgeType
+  label: string
+  role?: string
+  confidence?: number
+  source_kind?: string
+}
+
+export interface KnowledgeGraphPayload {
+  nodes: KnowledgeGraphNode[]
+  edges: KnowledgeGraphEdge[]
+  stats: {
+    node_count: number
+    edge_count: number
+    node_counts: Record<string, number>
+    edge_counts: Record<string, number>
+  }
+}
+
+export const knowledgeGraphApi = {
+  get: (params?: { q?: string; limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.q) search.set('q', params.q)
+    if (params?.limit) search.set('limit', String(params.limit))
+    const qs = search.toString() ? `?${search.toString()}` : ''
+    return request<KnowledgeGraphPayload>(`/knowledge-graph${qs}`)
+  },
+}
