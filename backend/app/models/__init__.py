@@ -3,7 +3,7 @@ from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, Knowl
 from .chat import ChatSession, ChatMessage
 from .wiki import WikiDocument, WikiConcept, WikiKnowledgePoint, WikiKnowledgeRelation, WikiImage, WikiExtractionLog
 from .inbox import InboxRawItem, InboxReviewItem, NotebookNote, MemoryEntry
-from .asset import AssetDraft, PersonalAsset, PersonalAssetItem, AssetRelation, ExtensionPoint, AssetUsageEvent, KnowledgeDraft
+from .asset import AssetDraft, PersonalAsset, PersonalAssetItem, PersonalAssetUnit, AssetRelation, ExtensionPoint, AssetUsageEvent, KnowledgeDraft
 from .knowledge_governance import (
     CanonicalKnowledgePoint,
     CanonicalRelation,
@@ -32,6 +32,7 @@ __all__ = [
     "AssetDraft",
     "PersonalAsset",
     "PersonalAssetItem",
+    "PersonalAssetUnit",
     "AssetRelation",
     "ExtensionPoint",
     "AssetUsageEvent",

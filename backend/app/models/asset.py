@@ -193,3 +193,24 @@ class KnowledgeDraft(Base):
     knowledge_item_id = Column(CHAR(36), default="", index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PersonalAssetUnit(Base):
+    __tablename__ = "personal_asset_unit"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    user_id = Column(CHAR(36), default="default-user", index=True, nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(Text)
+    summary = Column(Text)
+    category = Column(String(128), default="", index=True)
+    tags = Column(JSON, default=list)
+    source_asset_ids = Column(JSON, default=list)
+    outline = Column(JSON, default=list)
+    confidence = Column(JSON, default=dict)
+    rationale = Column(Text)
+    status = Column(String(32), default="pending_review", index=True, comment="pending_review/confirmed/rejected")
+    confirmed_at = Column(DateTime)
+    edited_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
