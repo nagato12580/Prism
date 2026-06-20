@@ -170,6 +170,8 @@ def test_document_chunk_settlement_persists_multiple_llm_pkus_from_anchor(db_ses
             llm_model="qwen-plus",
         ),
     )
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
 
     result = kg.settle_document_item_to_governance(db_session, item.id)
     db_session.commit()
