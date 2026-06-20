@@ -1099,24 +1099,15 @@ def clear_document_item_governance(db: Session, item_id: str) -> int:
     return count
 
 
-def _create_or_get_document_pku(
+def _create_or_get_document_pku_from_extracted(
     db: Session,
     *,
     item: KnowledgeItem,
     chunk: KnowledgeChunk,
-    statement: str,
-    keywords: list[str],
+    extracted: ExtractedPKU,
 ) -> PersonalKnowledgeUnit:
-    normalized = _normalize_space(statement)
+    normalized = _normalize_space(extracted.statement)
     statement_hash = _text_hash(normalized)
-    type_decision = _ollama_pku_type_decision(
-        text=statement,
-        fallback=_unit_type_from_document_text(statement),
-        title=item.title,
-        category=item.category,
-        tags=item.tags or [],
-    )
-    unit_type = type_decision.unit_type
     user_id = item.user_id or DEFAULT_USER_ID
     existing = (
         db.query(PersonalKnowledgeUnit)
@@ -1124,7 +1115,7 @@ def _create_or_get_document_pku(
             PersonalKnowledgeUnit.user_id == user_id,
             PersonalKnowledgeUnit.source_kind == "document_chunk",
             PersonalKnowledgeUnit.source_id == chunk.id,
-            PersonalKnowledgeUnit.unit_type == unit_type,
+            PersonalKnowledgeUnit.unit_type == extracted.unit_type,
             PersonalKnowledgeUnit.normalized_statement_hash == statement_hash,
         )
         .first()
@@ -1132,26 +1123,54 @@ def _create_or_get_document_pku(
     if existing:
         return existing
 
+    keywords = extracted.keywords or _extract_keywords(
+        extracted.statement,
+        item.title,
+        item.summary,
+        item.category,
+        item.tags or [],
+    )
     pku = PersonalKnowledgeUnit(
         user_id=user_id,
         source_kind="document_chunk",
         source_id=chunk.id,
-        unit_type=unit_type,
-        statement=statement,
+        unit_type=extracted.unit_type,
+        statement=extracted.statement,
         normalized_statement=normalized,
         normalized_statement_hash=statement_hash,
         modality="fact",
-        domains=[item.category] if item.category else [],
-        concepts=item.tags or [],
+        domains=extracted.domains or ([item.category] if item.category else []),
+        entities=extracted.entities,
+        concepts=extracted.concepts or (item.tags or []),
         keywords=keywords,
-        evidence_span=statement[:1200],
-        confidence=0.72,
-        llm_model=type_decision.llm_model,
+        evidence_span=extracted.evidence_span[:1200],
+        confidence=_clamp_confidence(extracted.confidence, 0.72),
+        llm_model=extracted.llm_model,
         status="active",
     )
     db.add(pku)
     db.flush()
     return pku
+
+
+def _fallback_document_chunk_pku(item: KnowledgeItem, chunk: KnowledgeChunk) -> ExtractedPKU | None:
+    statement = _normalize_space(chunk.chunk_text or "")
+    if not statement:
+        return None
+    statement = statement[:1200]
+    return ExtractedPKU(
+        statement=statement,
+        unit_type=_unit_type_from_document_text(statement),
+        evidence_span=statement,
+        keywords=_extract_keywords(statement, item.title, item.summary, item.category, item.tags or []),
+        concepts=item.tags or [],
+        entities=[],
+        domains=[item.category] if item.category else [],
+        group="",
+        confidence=0.72,
+        reason="Document chunk fallback because LLM PKU extraction returned no valid PKUs.",
+        llm_model="",
+    )
 
 
 def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceResult:
@@ -1177,39 +1196,57 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
     ckp_ids: set[str] = set()
     link_ids: set[str] = set()
 
-    for chunk in chunks:
-        statement = _normalize_space(chunk.chunk_text or "")
-        if not statement:
+    for index, chunk in enumerate(chunks):
+        previous_chunk = chunks[index - 1] if index > 0 else None
+        next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
+        extraction = _extract_document_chunk_pkus_with_llm(
+            item,
+            chunk,
+            previous_chunk,
+            next_chunk,
+            anchor_index=index,
+        )
+        extracted_pkus = list(extraction.pkus)
+        if not extracted_pkus:
+            fallback = _fallback_document_chunk_pku(item, chunk)
+            extracted_pkus = [fallback] if fallback else []
+        if not extracted_pkus:
             continue
-        statement = statement[:1200]
-        keywords = _extract_keywords(statement, item.title, item.summary, item.category, item.tags or [])
-        pku = _create_or_get_document_pku(
-            db,
-            item=item,
-            chunk=chunk,
-            statement=statement,
-            keywords=keywords,
-        )
-        ckp = _create_or_get_ckp_from_pku(
-            db,
-            user_id=item.user_id or DEFAULT_USER_ID,
-            pku=pku,
-            title=item.title or statement,
-            summary=item.summary or "",
-            aliases=[item.title] if item.title else [],
-            extra_meta={"created_from": "document_chunk", "source_item_id": item.id, "source_chunk_id": chunk.id},
-        )
-        link = _create_or_get_generic_link(
-            db,
-            user_id=item.user_id or DEFAULT_USER_ID,
-            pku=pku,
-            ckp=ckp,
-            relation_type="same_as",
-            role="external_reference",
-            reason="Initial deterministic settlement from ingested KnowledgeChunk.",
-        )
-        pku_ids.add(pku.id)
-        ckp_ids.add(ckp.id)
-        link_ids.add(link.id)
+
+        for extracted in extracted_pkus:
+            pku = _create_or_get_document_pku_from_extracted(
+                db,
+                item=item,
+                chunk=chunk,
+                extracted=extracted,
+            )
+            ckp = _create_or_get_ckp_from_pku(
+                db,
+                user_id=item.user_id or DEFAULT_USER_ID,
+                pku=pku,
+                title=item.title or pku.statement,
+                summary=item.summary or "",
+                aliases=[item.title] if item.title else [],
+                extra_meta={
+                    "created_from": "document_chunk",
+                    "source_item_id": item.id,
+                    "source_chunk_id": chunk.id,
+                    "anchor_chunk_index": index,
+                    "extraction_group": extracted.group,
+                    "extraction_reason": extracted.reason,
+                },
+            )
+            link = _create_or_get_generic_link(
+                db,
+                user_id=item.user_id or DEFAULT_USER_ID,
+                pku=pku,
+                ckp=ckp,
+                relation_type="same_as",
+                role="external_reference",
+                reason="Settlement from document chunk PKU extraction.",
+            )
+            pku_ids.add(pku.id)
+            ckp_ids.add(ckp.id)
+            link_ids.add(link.id)
 
     return GovernanceResult(pku_count=len(pku_ids), canonical_count=len(ckp_ids), link_count=len(link_ids))

@@ -107,3 +107,76 @@ def test_extract_document_chunk_pkus_uses_main_llm_and_anchor_context(monkeypatc
     assert result.llm_model == "qwen-plus"
     assert result.pkus[0].statement == "Metadata filters restrict retrieval by source."
     assert result.pkus[0].unit_type == "method"
+
+
+def test_document_chunk_settlement_persists_multiple_llm_pkus_from_anchor(db_session, monkeypatch):
+    from backend.app.models import KnowledgeChunk, KnowledgeItem, PersonalKnowledgeUnit
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(
+        title="Metadata retrieval",
+        content="",
+        summary="Metadata filters narrow retrieval.",
+        category="RAG",
+        tags=["metadata", "retrieval"],
+        source_type="manual",
+        user_id="default-user",
+    )
+    db_session.add(item)
+    db_session.flush()
+    anchor = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Metadata filters restrict retrieval by source. Filtered candidates are reranked before answering.",
+        chunk_type="parent",
+    )
+    db_session.add(anchor)
+    db_session.flush()
+
+    monkeypatch.setattr(
+        kg,
+        "_extract_document_chunk_pkus_with_llm",
+        lambda item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None: kg.AssetUnitPKUExtraction(
+            pkus=[
+                kg.ExtractedPKU(
+                    local_id="pku_1",
+                    statement="Metadata filters restrict retrieval by source.",
+                    unit_type="method",
+                    evidence_span="Metadata filters restrict retrieval by source.",
+                    keywords=["metadata", "retrieval"],
+                    concepts=["metadata filter"],
+                    entities=[],
+                    domains=["RAG"],
+                    group="retrieval",
+                    confidence=0.91,
+                    reason="anchor evidence",
+                    llm_model="qwen-plus",
+                ),
+                kg.ExtractedPKU(
+                    local_id="pku_2",
+                    statement="Filtered retrieval candidates are reranked before answering.",
+                    unit_type="method",
+                    evidence_span="Filtered candidates are reranked before answering.",
+                    keywords=["rerank"],
+                    concepts=["reranking"],
+                    entities=[],
+                    domains=["RAG"],
+                    group="retrieval",
+                    confidence=0.87,
+                    reason="anchor evidence",
+                    llm_model="qwen-plus",
+                ),
+            ],
+            relations=[],
+            llm_model="qwen-plus",
+        ),
+    )
+
+    result = kg.settle_document_item_to_governance(db_session, item.id)
+    db_session.commit()
+
+    assert result.pku_count == 2
+    pkus = db_session.query(PersonalKnowledgeUnit).filter_by(source_kind="document_chunk").all()
+    assert len(pkus) == 2
+    assert {pku.source_id for pku in pkus} == {anchor.id}
+    assert {pku.llm_model for pku in pkus} == {"qwen-plus"}
+    assert {pku.unit_type for pku in pkus} == {"method"}
