@@ -8,6 +8,7 @@ from .knowledge_governance import (
     CanonicalKnowledgePoint,
     CanonicalRelation,
     PKUCanonicalLink,
+    PKURelation,
     PersonalKnowledgeUnit,
 )
 
@@ -38,5 +39,6 @@ __all__ = [
     "PersonalKnowledgeUnit",
     "CanonicalKnowledgePoint",
     "PKUCanonicalLink",
+    "PKURelation",
     "CanonicalRelation",
 ]

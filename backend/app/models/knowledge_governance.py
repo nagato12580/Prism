@@ -64,6 +64,18 @@ class PersonalKnowledgeUnit(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     canonical_links = relationship("PKUCanonicalLink", back_populates="pku", cascade="all, delete-orphan")
+    outgoing_relations = relationship(
+        "PKURelation",
+        foreign_keys="PKURelation.source_pku_id",
+        back_populates="source_pku",
+        cascade="all, delete-orphan",
+    )
+    incoming_relations = relationship(
+        "PKURelation",
+        foreign_keys="PKURelation.target_pku_id",
+        back_populates="target_pku",
+        cascade="all, delete-orphan",
+    )
 
 
 class CanonicalKnowledgePoint(Base):
@@ -135,6 +147,56 @@ class PKUCanonicalLink(Base):
 
     pku = relationship("PersonalKnowledgeUnit", back_populates="canonical_links")
     canonical = relationship("CanonicalKnowledgePoint", back_populates="pku_links")
+
+
+class PKURelation(Base):
+    __tablename__ = "pku_relation"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_pku_id",
+            "target_pku_id",
+            "relation_type",
+            name="uq_pku_relation",
+        ),
+    )
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    user_id = Column(CHAR(36), default="default-user", index=True, nullable=False)
+
+    source_pku_id = Column(
+        CHAR(36),
+        ForeignKey("personal_knowledge_unit.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    target_pku_id = Column(
+        CHAR(36),
+        ForeignKey("personal_knowledge_unit.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    relation_type = Column(String(64), default="related_to", index=True)
+    confidence = Column(Float, default=0.5)
+    reason = Column(Text)
+    source_kind = Column(String(64), default="", index=True)
+    source_id = Column(CHAR(36), default="", index=True)
+    llm_model = Column(String(128), default="")
+    extra_meta = Column("metadata", JSON, default=dict)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    source_pku = relationship(
+        "PersonalKnowledgeUnit",
+        foreign_keys=[source_pku_id],
+        back_populates="outgoing_relations",
+    )
+    target_pku = relationship(
+        "PersonalKnowledgeUnit",
+        foreign_keys=[target_pku_id],
+        back_populates="incoming_relations",
+    )
 
 
 class CanonicalRelation(Base):
