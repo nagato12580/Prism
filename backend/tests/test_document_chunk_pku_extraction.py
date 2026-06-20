@@ -257,3 +257,40 @@ def test_document_chunk_settlement_persists_llm_pku_relations(db_session, monkey
     assert relation.source_id == anchor.id
     assert relation.relation_type == "prerequisite_of"
     assert relation.llm_model == "qwen-plus"
+
+
+def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, monkeypatch):
+    from backend.app.models import KnowledgeChunk, KnowledgeItem
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="Chunk context", category="RAG", tags=[], user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    first = KnowledgeChunk(item_id=item.id, chunk_text="Previous parent context.", chunk_type="parent")
+    second = KnowledgeChunk(item_id=item.id, chunk_text="Anchor parent content.", chunk_type="parent")
+    third = KnowledgeChunk(item_id=item.id, chunk_text="Next parent context.", chunk_type="parent")
+    db_session.add_all([first, second, third])
+    db_session.flush()
+
+    calls = []
+
+    def fake_extract(item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None):
+        calls.append(
+            {
+                "anchor": anchor_chunk.id,
+                "previous": previous_chunk.id if previous_chunk else None,
+                "next": next_chunk.id if next_chunk else None,
+                "index": anchor_index,
+            }
+        )
+        return kg.AssetUnitPKUExtraction(pkus=[], relations=[], llm_model="")
+
+    monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+
+    kg.settle_document_item_to_governance(db_session, item.id)
+
+    assert calls == [
+        {"anchor": first.id, "previous": None, "next": second.id, "index": 0},
+        {"anchor": second.id, "previous": first.id, "next": third.id, "index": 1},
+        {"anchor": third.id, "previous": second.id, "next": None, "index": 2},
+    ]
