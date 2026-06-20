@@ -182,3 +182,78 @@ def test_document_chunk_settlement_persists_multiple_llm_pkus_from_anchor(db_ses
     assert {pku.source_id for pku in pkus} == {anchor.id}
     assert {pku.llm_model for pku in pkus} == {"qwen-plus"}
     assert {pku.unit_type for pku in pkus} == {"method"}
+
+
+def test_document_chunk_settlement_persists_llm_pku_relations(db_session, monkeypatch):
+    from backend.app.models import KnowledgeChunk, KnowledgeItem, PKURelation
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="PKU workflow", category="Governance", tags=["pku"], user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    anchor = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="First extract atomic PKUs. Then link prerequisite relations between the extracted PKUs.",
+        chunk_type="parent",
+    )
+    db_session.add(anchor)
+    db_session.flush()
+
+    monkeypatch.setattr(
+        kg,
+        "_extract_document_chunk_pkus_with_llm",
+        lambda item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None: kg.AssetUnitPKUExtraction(
+            pkus=[
+                kg.ExtractedPKU(
+                    local_id="pku_1",
+                    statement="Document settlement first extracts atomic PKUs.",
+                    unit_type="method",
+                    evidence_span="First extract atomic PKUs.",
+                    keywords=["pku"],
+                    concepts=["PKU extraction"],
+                    entities=[],
+                    domains=["Governance"],
+                    group="workflow",
+                    confidence=0.9,
+                    reason="anchor evidence",
+                    llm_model="qwen-plus",
+                ),
+                kg.ExtractedPKU(
+                    local_id="pku_2",
+                    statement="Document settlement links prerequisite relations between extracted PKUs.",
+                    unit_type="method",
+                    evidence_span="Then link prerequisite relations between the extracted PKUs.",
+                    keywords=["relation"],
+                    concepts=["PKU relation"],
+                    entities=[],
+                    domains=["Governance"],
+                    group="workflow",
+                    confidence=0.88,
+                    reason="anchor evidence",
+                    llm_model="qwen-plus",
+                ),
+            ],
+            relations=[
+                kg.ExtractedPKURelation(
+                    from_ref="pku_1",
+                    to_ref="pku_2",
+                    relation_type="prerequisite_of",
+                    confidence=0.86,
+                    reason="Extraction comes before relation linking.",
+                )
+            ],
+            llm_model="qwen-plus",
+        ),
+    )
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
+    result = kg.settle_document_item_to_governance(db_session, item.id)
+    db_session.commit()
+
+    assert result.pku_relation_count == 1
+    relation = db_session.query(PKURelation).one()
+    assert relation.source_kind == "document_chunk"
+    assert relation.source_id == anchor.id
+    assert relation.relation_type == "prerequisite_of"
+    assert relation.llm_model == "qwen-plus"

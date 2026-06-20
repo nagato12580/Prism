@@ -1195,6 +1195,7 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
     pku_ids: set[str] = set()
     ckp_ids: set[str] = set()
     link_ids: set[str] = set()
+    relation_ids: set[str] = set()
 
     for index, chunk in enumerate(chunks):
         previous_chunk = chunks[index - 1] if index > 0 else None
@@ -1207,12 +1208,14 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
             anchor_index=index,
         )
         extracted_pkus = list(extraction.pkus)
+        using_llm_extraction = bool(extracted_pkus)
         if not extracted_pkus:
             fallback = _fallback_document_chunk_pku(item, chunk)
             extracted_pkus = [fallback] if fallback else []
         if not extracted_pkus:
             continue
 
+        pku_by_ref: dict[str, PersonalKnowledgeUnit] = {}
         for extracted in extracted_pkus:
             pku = _create_or_get_document_pku_from_extracted(
                 db,
@@ -1248,5 +1251,31 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
             pku_ids.add(pku.id)
             ckp_ids.add(ckp.id)
             link_ids.add(link.id)
+            if extracted.local_id:
+                pku_by_ref[_normalize_space(extracted.local_id)] = pku
+            pku_by_ref[_normalize_space(extracted.statement)] = pku
 
-    return GovernanceResult(pku_count=len(pku_ids), canonical_count=len(ckp_ids), link_count=len(link_ids))
+        if using_llm_extraction:
+            for relation in extraction.relations:
+                source_pku = pku_by_ref.get(_normalize_space(relation.from_ref))
+                target_pku = pku_by_ref.get(_normalize_space(relation.to_ref))
+                if not source_pku or not target_pku or source_pku.id == target_pku.id:
+                    continue
+                row = _create_or_get_pku_relation(
+                    db,
+                    user_id=item.user_id or DEFAULT_USER_ID,
+                    source_pku=source_pku,
+                    target_pku=target_pku,
+                    relation=relation,
+                    source_kind="document_chunk",
+                    source_id=chunk.id,
+                    llm_model=extraction.llm_model,
+                )
+                relation_ids.add(row.id)
+
+    return GovernanceResult(
+        pku_count=len(pku_ids),
+        canonical_count=len(ckp_ids),
+        link_count=len(link_ids),
+        pku_relation_count=len(relation_ids),
+    )
