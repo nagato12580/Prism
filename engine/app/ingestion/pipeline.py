@@ -142,11 +142,11 @@ def ingest_item(item_id: str) -> int:
         parent_id_map: dict[str, str] = {}  # child_id → parent_id
 
         # 先存父块（不向量化）
-        for pc in parents:
+        for parent_index, pc in enumerate(parents):
             parent = KnowledgeChunk(
                 item_id=item_id,
                 chunk_text=pc.content,
-                chunk_index=0,
+                chunk_index=parent_index,
                 chunk_type="parent",
             )
             db.add(parent)
@@ -154,11 +154,11 @@ def ingest_item(item_id: str) -> int:
             chunk_id_map[pc.content] = parent.id
 
             # 存子块
-            for child_text in pc.children:
+            for child_index, child_text in enumerate(pc.children):
                 child = KnowledgeChunk(
                     item_id=item_id,
                     chunk_text=child_text,
-                    chunk_index=0,
+                    chunk_index=child_index,
                     chunk_type="child",
                     parent_id=parent.id,
                 )

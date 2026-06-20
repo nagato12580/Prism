@@ -993,7 +993,37 @@ def _create_or_get_pku_relation(
 
 
 def settle_personal_asset_item_to_governance(db: Session, asset: PersonalAssetItem) -> GovernanceResult:
-    return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
+    if asset.status != "confirmed":
+        return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
+
+    pku_ids: set[str] = set()
+    ckp_ids: set[str] = set()
+    link_ids: set[str] = set()
+
+    for candidate in _candidate_statements_from_asset(asset):
+        keywords = _extract_keywords(
+            candidate["statement"],
+            asset.title,
+            asset.summary,
+            asset.category,
+            asset.tags or [],
+            asset.raw_keywords or [],
+        )
+        pku = _create_or_get_asset_pku(
+            db,
+            asset=asset,
+            statement=candidate["statement"],
+            unit_type=candidate["unit_type"],
+            confidence=candidate["confidence"],
+            keywords=keywords,
+        )
+        ckp = _create_or_get_ckp(db, asset=asset, pku=pku, keywords=keywords)
+        link = _create_or_get_link(db, asset=asset, pku=pku, ckp=ckp)
+        pku_ids.add(pku.id)
+        ckp_ids.add(ckp.id)
+        link_ids.add(link.id)
+
+    return GovernanceResult(pku_count=len(pku_ids), canonical_count=len(ckp_ids), link_count=len(link_ids))
 
 
 def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUnit) -> GovernanceResult:
@@ -1181,14 +1211,14 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
     chunks = (
         db.query(KnowledgeChunk)
         .filter(KnowledgeChunk.item_id == item_id, KnowledgeChunk.chunk_type == "parent")
-        .order_by(KnowledgeChunk.created_at.asc(), KnowledgeChunk.id.asc())
+        .order_by(KnowledgeChunk.chunk_index.asc(), KnowledgeChunk.created_at.asc(), KnowledgeChunk.id.asc())
         .all()
     )
     if not chunks:
         chunks = (
             db.query(KnowledgeChunk)
             .filter(KnowledgeChunk.item_id == item_id)
-            .order_by(KnowledgeChunk.created_at.asc(), KnowledgeChunk.id.asc())
+            .order_by(KnowledgeChunk.chunk_index.asc(), KnowledgeChunk.created_at.asc(), KnowledgeChunk.id.asc())
             .all()
         )
 

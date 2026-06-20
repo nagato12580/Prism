@@ -142,7 +142,12 @@ def test_pku_relations_store_direct_pku_edges(db_session):
     assert loaded.extra_meta == {"group": "PKU沉淀"}
 
 
-def test_confirmed_asset_item_does_not_settle_into_pku_or_ckp(db_session):
+def test_confirmed_asset_item_settles_into_pku_and_ckp(db_session, monkeypatch):
+    from backend.app.services import knowledge_governance as kg
+
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
     asset = PersonalAssetItem(
         raw_text="Metadata filters are useful for personal knowledge retrieval.",
         title="Metadata filter note",
@@ -162,12 +167,12 @@ def test_confirmed_asset_item_does_not_settle_into_pku_or_ckp(db_session):
     result = settle_personal_asset_item_to_governance(db_session, asset)
     db_session.commit()
 
-    assert result.pku_count == 0
-    assert result.canonical_count == 0
-    assert result.link_count == 0
-    assert db_session.query(PersonalKnowledgeUnit).count() == 0
-    assert db_session.query(CanonicalKnowledgePoint).count() == 0
-    assert db_session.query(PKUCanonicalLink).count() == 0
+    assert result.pku_count >= 1
+    assert result.canonical_count >= 1
+    assert result.link_count >= 1
+    assert db_session.query(PersonalKnowledgeUnit).filter_by(source_kind="personal_asset_item").count() >= 1
+    assert db_session.query(CanonicalKnowledgePoint).count() >= 1
+    assert db_session.query(PKUCanonicalLink).count() >= 1
 
 
 def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_session, monkeypatch):

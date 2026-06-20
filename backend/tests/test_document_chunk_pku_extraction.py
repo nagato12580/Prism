@@ -317,6 +317,66 @@ def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, 
     ]
 
 
+def test_document_settlement_orders_neighbor_context_by_chunk_index(db_session, monkeypatch):
+    from datetime import datetime
+
+    from backend.app.models import KnowledgeChunk, KnowledgeItem
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="Chunk source order", category="RAG", tags=[], user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    first = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="First parent source context.",
+        chunk_type="parent",
+        chunk_index=0,
+        created_at=datetime(2026, 1, 1, 12, 0, 2),
+    )
+    second = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Second parent anchor context.",
+        chunk_type="parent",
+        chunk_index=1,
+        created_at=datetime(2026, 1, 1, 12, 0, 0),
+    )
+    third = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Third parent source context.",
+        chunk_type="parent",
+        chunk_index=2,
+        created_at=datetime(2026, 1, 1, 12, 0, 1),
+    )
+    db_session.add_all([first, second, third])
+    db_session.flush()
+
+    calls = []
+
+    def fake_extract(item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None):
+        calls.append(
+            {
+                "anchor": anchor_chunk.id,
+                "previous": previous_chunk.id if previous_chunk else None,
+                "next": next_chunk.id if next_chunk else None,
+                "index": anchor_index,
+            }
+        )
+        return kg.AssetUnitPKUExtraction(pkus=[], relations=[], llm_model="")
+
+    monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+    monkeypatch.setattr(kg, "_fallback_document_chunk_pku", lambda item, chunk: None)
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
+    kg.settle_document_item_to_governance(db_session, item.id)
+
+    assert calls == [
+        {"anchor": first.id, "previous": None, "next": second.id, "index": 0},
+        {"anchor": second.id, "previous": first.id, "next": third.id, "index": 1},
+        {"anchor": third.id, "previous": second.id, "next": None, "index": 2},
+    ]
+
+
 def test_document_chunk_fallback_does_not_call_ollama_type_classifier(db_session, monkeypatch):
     from backend.app.models import KnowledgeChunk, KnowledgeItem, PersonalKnowledgeUnit
     from backend.app.services import knowledge_governance as kg
