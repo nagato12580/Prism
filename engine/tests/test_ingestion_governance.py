@@ -10,6 +10,7 @@ from backend.app.models import (
     PKUCanonicalLink,
     PersonalKnowledgeUnit,
 )
+from backend.app.services import knowledge_governance as kg
 import engine.app.ingestion.pipeline as pipeline
 
 
@@ -50,6 +51,32 @@ def test_ingest_item_settles_document_chunks_into_governance_layer(monkeypatch):
     monkeypatch.setattr(pipeline, "insert_vectors", lambda **kwargs: None)
     monkeypatch.setattr(pipeline, "get_es", lambda: _FakeES())
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 1)
+    monkeypatch.setattr(
+        kg,
+        "_extract_document_chunk_pkus_with_llm",
+        lambda item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None: kg.AssetUnitPKUExtraction(
+            pkus=[
+                kg.ExtractedPKU(
+                    local_id="pku_1",
+                    statement="Metadata filtering allows retrieval systems to restrict results by project.",
+                    unit_type="method",
+                    evidence_span="Metadata filtering allows retrieval systems to restrict results by project.",
+                    keywords=["metadata", "retrieval"],
+                    concepts=["metadata filtering"],
+                    entities=[],
+                    domains=["RAG"],
+                    group="retrieval",
+                    confidence=0.9,
+                    reason="test extraction",
+                    llm_model="test-model",
+                )
+            ],
+            relations=[],
+            llm_model="test-model",
+        ),
+    )
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"test-vector:{ckp.id}")
 
     count = pipeline.ingest_item(item_id)
 
@@ -64,6 +91,7 @@ def test_ingest_item_settles_document_chunks_into_governance_layer(monkeypatch):
         assert pkus[0].source_id in {chunk.id for chunk in chunks}
         assert pkus[0].modality == "fact"
         assert "Metadata filtering" in pkus[0].statement
+        assert pkus[0].llm_model == "test-model"
 
         links = session.query(PKUCanonicalLink).all()
         assert len(links) == 1
