@@ -1,8 +1,10 @@
 import json
+from types import SimpleNamespace
 
 from backend.app.prompts.asset_parse import (
     ASSET_UNIT_PKU_RELATION_TYPES,
     ASSET_UNIT_PKU_UNIT_TYPES,
+    build_knowledge_synthesis_messages,
     build_asset_unit_pku_extraction_messages,
 )
 
@@ -53,6 +55,27 @@ def test_build_asset_unit_pku_extraction_messages_include_required_schema():
             }
         ],
     }
+
+
+def test_build_knowledge_synthesis_messages_accept_legacy_asset_body():
+    _system_prompt, user_message = build_knowledge_synthesis_messages(
+        assets=[
+            SimpleNamespace(
+                id="asset-1",
+                title="Metadata filter note",
+                asset_kind="claim",
+                summary="Metadata filters help retrieval.",
+                body="Body text from the committed PersonalAssetItem shape.",
+                category="RAG",
+                tags=["metadata"],
+                source_platform="manual",
+            )
+        ],
+    )
+
+    request = json.loads(user_message)
+
+    assert request["assets"][0]["body"] == "Body text from the committed PersonalAssetItem shape."
 
 
 def test_parse_asset_unit_pku_extraction_keeps_valid_pkus_and_relations():

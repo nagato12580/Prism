@@ -153,7 +153,7 @@ def build_knowledge_synthesis_request(
                 "title": asset.title,
                 "asset_kind": asset.asset_kind,
                 "summary": asset.summary,
-                "body": (asset.rewritten_content or asset.body or "")[:max_body_length],
+                "body": (getattr(asset, "rewritten_content", "") or asset.body or "")[:max_body_length],
                 "category": asset.category,
                 "tags": asset.tags or [],
                 "source_platform": asset.source_platform,
