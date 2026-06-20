@@ -170,11 +170,24 @@ def test_confirmed_asset_item_does_not_settle_into_pku_or_ckp(db_session):
     assert db_session.query(PKUCanonicalLink).count() == 0
 
 
-def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_session):
+def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_session, monkeypatch):
+    from backend.app.services import knowledge_governance as kg
+
+    monkeypatch.setattr(kg, "_extract_asset_unit_pkus_with_llm", lambda unit: kg.AssetUnitPKUExtraction([], []))
+    monkeypatch.setattr(
+        kg,
+        "_extract_document_chunk_pkus_with_llm",
+        lambda item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None: kg.AssetUnitPKUExtraction(
+            [], []
+        ),
+    )
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
     unit = PersonalAssetUnit(
         title="Metadata filter retrieval practice",
         content="Metadata filter can restrict retrieval results by source, project, or category.",
-        summary="Metadata filter can restrict retrieval results.",
+        summary="Metadata filter can restrict retrieval results by source, project, or category.",
         category="RAG",
         tags=["metadata", "filter"],
         source_asset_ids=["asset-1"],
@@ -267,6 +280,8 @@ def test_personal_asset_unit_pku_type_uses_summary_fallback_without_ollama(db_se
         raise AssertionError("asset unit settlement must not call Ollama type classifier")
 
     monkeypatch.setattr(kg, "_ollama_pku_type_decision", fail_ollama)
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
 
     unit = PersonalAssetUnit(
         title="Asset synthesis workflow",
