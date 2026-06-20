@@ -286,6 +286,8 @@ def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, 
         return kg.AssetUnitPKUExtraction(pkus=[], relations=[], llm_model="")
 
     monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
 
     kg.settle_document_item_to_governance(db_session, item.id)
 
