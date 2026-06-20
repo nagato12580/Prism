@@ -238,7 +238,7 @@ JSON_SHAPE_ASSET_UNIT_PKU_EXTRACTION: dict[str, Any] = {
             "local_id": "pku_1",
             "statement": "可独立复用的原子知识陈述",
             "normalized_statement": "去除语气词和上下文依赖后的规范陈述",
-            "unit_type": "从ASSET_UNIT_PKU_UNIT_TYPES中的一个值",
+            "unit_type": ASSET_UNIT_PKU_UNIT_TYPES,
             "keywords": ["关键词"],
             "domains": ["领域"],
             "entities": ["实体"],
