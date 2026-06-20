@@ -260,15 +260,33 @@ def test_document_chunk_settlement_persists_llm_pku_relations(db_session, monkey
 
 
 def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, monkeypatch):
+    from datetime import datetime, timedelta
+
     from backend.app.models import KnowledgeChunk, KnowledgeItem
     from backend.app.services import knowledge_governance as kg
 
+    base = datetime(2026, 1, 1, 12, 0, 0)
     item = KnowledgeItem(title="Chunk context", category="RAG", tags=[], user_id="default-user")
     db_session.add(item)
     db_session.flush()
-    first = KnowledgeChunk(item_id=item.id, chunk_text="Previous parent context.", chunk_type="parent")
-    second = KnowledgeChunk(item_id=item.id, chunk_text="Anchor parent content.", chunk_type="parent")
-    third = KnowledgeChunk(item_id=item.id, chunk_text="Next parent context.", chunk_type="parent")
+    first = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Previous parent context.",
+        chunk_type="parent",
+        created_at=base,
+    )
+    second = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Anchor parent content.",
+        chunk_type="parent",
+        created_at=base + timedelta(seconds=1),
+    )
+    third = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Next parent context.",
+        chunk_type="parent",
+        created_at=base + timedelta(seconds=2),
+    )
     db_session.add_all([first, second, third])
     db_session.flush()
 
@@ -286,6 +304,7 @@ def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, 
         return kg.AssetUnitPKUExtraction(pkus=[], relations=[], llm_model="")
 
     monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+    monkeypatch.setattr(kg, "_fallback_document_chunk_pku", lambda item, chunk: None)
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
 
