@@ -53,15 +53,16 @@ def _bulk_index_chunks_es(
     doc_name: str,
     source_type: str,
     parent_chunks,  # list of ParentChunk
-    chunk_id_map: dict[str, str],  # child_text → chunk_id
-    parent_id_map: dict[str, str],  # child chunk_id → parent chunk_id
+    parent_id_map_by_index: dict[int, str],
+    child_id_map_by_position: dict[tuple[int, int], str],
+    child_parent_id_map: dict[tuple[int, int], str],
 ) -> int:
     """批量写入 parent + child chunk 到 ES。"""
     es = get_es()
     now = datetime.now(timezone.utc).isoformat()
     docs = []
-    for pc in parent_chunks:
-        parent_id = chunk_id_map.get(pc.content, "")
+    for parent_index, pc in enumerate(parent_chunks):
+        parent_id = parent_id_map_by_index.get(parent_index, "")
         if parent_id:
             docs.append({
                 "_index": CHUNKS_INDEX, "_id": parent_id,
@@ -73,9 +74,10 @@ def _bulk_index_chunks_es(
                     "created_at": now,
                 },
             })
-        for child_text in pc.children:
-            cid = chunk_id_map.get(child_text, "")
-            pid = parent_id_map.get(cid, "")
+        for child_index, child_text in enumerate(pc.children):
+            child_position = (parent_index, child_index)
+            cid = child_id_map_by_position.get(child_position, "")
+            pid = child_parent_id_map.get(child_position, "")
             docs.append({
                 "_index": CHUNKS_INDEX, "_id": cid,
                 "_source": {
@@ -138,8 +140,9 @@ def ingest_item(item_id: str) -> int:
         _delete_es_chunks_by_item(item_id)
 
         # 存储：父块 + 子块 → MySQL；子块 → Milvus
-        chunk_id_map: dict[str, str] = {}  # text → chunk_id
-        parent_id_map: dict[str, str] = {}  # child_id → parent_id
+        parent_id_map_by_index: dict[int, str] = {}
+        child_id_map_by_position: dict[tuple[int, int], str] = {}
+        child_parent_id_map: dict[tuple[int, int], str] = {}
 
         # 先存父块（不向量化）
         for parent_index, pc in enumerate(parents):
@@ -151,7 +154,7 @@ def ingest_item(item_id: str) -> int:
             )
             db.add(parent)
             db.flush()
-            chunk_id_map[pc.content] = parent.id
+            parent_id_map_by_index[parent_index] = parent.id
 
             # 存子块
             for child_index, child_text in enumerate(pc.children):
@@ -164,25 +167,27 @@ def ingest_item(item_id: str) -> int:
                 )
                 db.add(child)
                 db.flush()
-                chunk_id_map[child_text] = child.id
-                parent_id_map[child.id] = parent.id
+                child_position = (parent_index, child_index)
+                child_id_map_by_position[child_position] = child.id
+                child_parent_id_map[child_position] = parent.id
 
         # 子块向量存入 Milvus
-        child_idx = 0
-        for pc in parents:
-            for child_text in pc.children:
-                cid = chunk_id_map[child_text]
-                emb = embeddings[child_idx]
+        child_embedding_index = 0
+        for parent_index, pc in enumerate(parents):
+            for child_index, _child_text in enumerate(pc.children):
+                cid = child_id_map_by_position[(parent_index, child_index)]
+                emb = embeddings[child_embedding_index]
                 insert_vectors(chunk_id=cid, item_id=item_id, embedding=emb)
-                child_idx += 1
+                child_embedding_index += 1
 
         # 写入 ES（父子块都写，但只有子块有向量）
         _bulk_index_chunks_es(
             item_id=item_id, topic_id=topic_id,
             doc_name=doc_name, source_type=source_type,
             parent_chunks=parents,
-            chunk_id_map=chunk_id_map,
-            parent_id_map=parent_id_map,
+            parent_id_map_by_index=parent_id_map_by_index,
+            child_id_map_by_position=child_id_map_by_position,
+            child_parent_id_map=child_parent_id_map,
         )
 
         # 生成摘要

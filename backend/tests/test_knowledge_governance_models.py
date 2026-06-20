@@ -147,6 +147,11 @@ def test_confirmed_asset_item_settles_into_pku_and_ckp(db_session, monkeypatch):
 
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_asset_unit_pkus_with_llm",
+        lambda unit: (_ for _ in ()).throw(AssertionError("asset item settlement must not call asset-unit LLM extraction")),
+    )
 
     asset = PersonalAssetItem(
         raw_text="Metadata filters are useful for personal knowledge retrieval.",
@@ -167,12 +172,29 @@ def test_confirmed_asset_item_settles_into_pku_and_ckp(db_session, monkeypatch):
     result = settle_personal_asset_item_to_governance(db_session, asset)
     db_session.commit()
 
-    assert result.pku_count >= 1
-    assert result.canonical_count >= 1
-    assert result.link_count >= 1
-    assert db_session.query(PersonalKnowledgeUnit).filter_by(source_kind="personal_asset_item").count() >= 1
-    assert db_session.query(CanonicalKnowledgePoint).count() >= 1
-    assert db_session.query(PKUCanonicalLink).count() >= 1
+    assert result.pku_count == 1
+    assert result.canonical_count == 1
+    assert result.link_count == 1
+
+    pkus = db_session.query(PersonalKnowledgeUnit).filter_by(source_kind="personal_asset_item").all()
+    assert len(pkus) == 1
+    assert {pku.source_id for pku in pkus} == {asset.id}
+    assert {pku.statement for pku in pkus} == {"Metadata filters are useful."}
+    assert {pku.unit_type for pku in pkus} == {"claim"}
+    assert {pku.modality for pku in pkus} == {"opinion"}
+
+    ckps = db_session.query(CanonicalKnowledgePoint).all()
+    assert len(ckps) == 1
+    assert {ckp.extra_meta["created_from"] for ckp in ckps} == {"personal_asset_item"}
+    assert {ckp.extra_meta["source_id"] for ckp in ckps} == {asset.id}
+
+    links = db_session.query(PKUCanonicalLink).all()
+    assert len(links) == 1
+    assert {link.relation_type for link in links} == {"same_as"}
+    assert {link.role for link in links} == {"personal_claim"}
+    assert {link.reason for link in links} == {"Initial deterministic settlement from confirmed PersonalAssetItem."}
+    assert {link.pku.source_kind for link in links} == {"personal_asset_item"}
+    assert {link.pku.source_id for link in links} == {asset.id}
 
 
 def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_session, monkeypatch):
