@@ -315,3 +315,48 @@ def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, 
         {"anchor": second.id, "previous": first.id, "next": third.id, "index": 1},
         {"anchor": third.id, "previous": second.id, "next": None, "index": 2},
     ]
+
+
+def test_document_chunk_fallback_does_not_call_ollama_type_classifier(db_session, monkeypatch):
+    from backend.app.models import KnowledgeChunk, KnowledgeItem, PersonalKnowledgeUnit
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(
+        title="Fallback document",
+        category="RAG",
+        tags=["metadata"],
+        user_id="default-user",
+    )
+    db_session.add(item)
+    db_session.flush()
+    chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Metadata filter is defined as a constraint on retrieval candidates.",
+        chunk_type="parent",
+    )
+    db_session.add(chunk)
+    db_session.flush()
+
+    monkeypatch.setattr(
+        kg,
+        "_extract_document_chunk_pkus_with_llm",
+        lambda item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None: kg.AssetUnitPKUExtraction(
+            [], []
+        ),
+    )
+    monkeypatch.setattr(
+        kg,
+        "_ollama_pku_type_decision",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Document fallback must not call Ollama")),
+    )
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
+    result = kg.settle_document_item_to_governance(db_session, item.id)
+    db_session.commit()
+
+    assert result.pku_count == 1
+    pku = db_session.query(PersonalKnowledgeUnit).filter_by(source_kind="document_chunk").one()
+    assert pku.statement == "Metadata filter is defined as a constraint on retrieval candidates."
+    assert pku.unit_type == "definition"
+    assert pku.llm_model == ""
