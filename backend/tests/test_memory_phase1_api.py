@@ -177,3 +177,37 @@ def test_supersede_requires_confirmed_existing_statement(client, db_session):
     assert "confirmed" in response.json()["detail"]
     db_session.refresh(old)
     assert old.status == "draft"
+
+
+def test_list_memory_statements_excludes_superseded_and_drafts(client, db_session):
+    db_session.add_all(
+        [
+            MemoryStatement(
+                user_id="default-user",
+                content="Confirmed memory",
+                statement_type="fact",
+                status="confirmed",
+                importance=0.7,
+            ),
+            MemoryStatement(
+                user_id="default-user",
+                content="Draft memory",
+                statement_type="fact",
+                status="draft",
+                importance=0.9,
+            ),
+            MemoryStatement(
+                user_id="default-user",
+                content="Superseded memory",
+                statement_type="fact",
+                status="superseded",
+                importance=1.0,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/memories/statements")
+
+    assert response.status_code == 200
+    assert [item["content"] for item in response.json()] == ["Confirmed memory"]
