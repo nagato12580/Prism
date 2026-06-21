@@ -2,7 +2,16 @@
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
 from .chat import ChatSession, ChatMessage
 from .wiki import WikiDocument, WikiConcept, WikiKnowledgePoint, WikiKnowledgeRelation, WikiImage, WikiExtractionLog
-from .memory import MemoryEntry
+from .memory import (
+    MemoryDraft,
+    MemoryEntity,
+    MemoryEntry,
+    MemoryEvent,
+    MemoryInsight,
+    MemoryRelation,
+    MemorySource,
+    MemoryStatement,
+)
 from .asset import PersonalAsset, PersonalAssetItem, PersonalAssetUnit, AssetRelation, ExtensionPoint, AssetUsageEvent
 from .knowledge_governance import (
     CanonicalKnowledgePoint,
@@ -25,7 +34,14 @@ __all__ = [
     "WikiKnowledgeRelation",
     "WikiImage",
     "WikiExtractionLog",
+    "MemoryDraft",
+    "MemoryEntity",
     "MemoryEntry",
+    "MemoryEvent",
+    "MemoryInsight",
+    "MemoryRelation",
+    "MemorySource",
+    "MemoryStatement",
     "PersonalAsset",
     "PersonalAssetItem",
     "AssetRelation",
