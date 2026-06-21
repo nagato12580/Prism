@@ -42,9 +42,18 @@ def _create_source(source_in, db: Session) -> MemorySource:
 
 def _statement_from_draft(draft: MemoryDraft) -> MemoryStatement:
     payload = draft.payload or {}
-    content = (payload.get("content") or "").strip()
+    raw_content = payload.get("content")
+    if not isinstance(raw_content, str):
+        raise HTTPException(
+            status_code=400,
+            detail="Memory statement content must be a non-empty string",
+        )
+    content = raw_content.strip()
     if not content:
-        raise HTTPException(status_code=400, detail="Memory statement content is required")
+        raise HTTPException(
+            status_code=400,
+            detail="Memory statement content must be a non-empty string",
+        )
     return MemoryStatement(
         user_id=draft.user_id,
         content=content,
@@ -187,6 +196,8 @@ def supersede_memory_draft(
     )
     if old_statement is None:
         raise HTTPException(status_code=404, detail="Superseded memory statement not found")
+    if old_statement.status != MemoryStatus.CONFIRMED:
+        raise HTTPException(status_code=400, detail="Only confirmed statements can be superseded")
     statement = _statement_from_draft(draft)
     draft.status = MemoryStatus.CONFIRMED
     draft.reviewed_at = local_now()

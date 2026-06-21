@@ -130,3 +130,50 @@ def test_supersede_draft_confirms_new_statement_and_supersedes_old(client, db_se
 
     statements = client.get("/api/v1/memories/statements").json()
     assert [item["content"] for item in statements] == ["The user prefers review-first memory."]
+
+
+def test_confirm_rejects_non_string_statement_content(client, db_session):
+    draft = MemoryDraft(
+        user_id="default-user",
+        draft_type="statement",
+        payload={"content": 123},
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.post(f"/api/v1/memories/drafts/{draft.id}/confirm")
+
+    assert response.status_code == 400
+    assert "non-empty string" in response.json()["detail"]
+    assert db_session.query(MemoryStatement).count() == 0
+
+
+def test_supersede_requires_confirmed_existing_statement(client, db_session):
+    old = MemoryStatement(
+        user_id="default-user",
+        content="Draft statement should not be superseded.",
+        statement_type="preference",
+        temporal_type="current",
+        status="draft",
+    )
+    draft = MemoryDraft(
+        user_id="default-user",
+        draft_type="statement",
+        payload={
+            "content": "The user prefers review-first memory.",
+            "statement_type": "preference",
+            "temporal_type": "current",
+        },
+    )
+    db_session.add_all([old, draft])
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/memories/drafts/{draft.id}/supersede",
+        json={"superseded_statement_id": old.id},
+    )
+
+    assert response.status_code == 400
+    assert "confirmed" in response.json()["detail"]
+    db_session.refresh(old)
+    assert old.status == "draft"
