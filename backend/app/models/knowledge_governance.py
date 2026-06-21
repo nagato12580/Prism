@@ -1,12 +1,12 @@
 # prism/backend/app/models/knowledge_governance.py
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.mysql import CHAR, JSON
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils.time import local_now
 
 
 def _uuid():
@@ -60,8 +60,8 @@ class PersonalKnowledgeUnit(Base):
     embedding_status = Column(String(32), default="pending", index=True)
 
     status = Column(String(32), default="active", index=True, comment="active/merged/deprecated/rejected")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     canonical_links = relationship("PKUCanonicalLink", back_populates="pku", cascade="all, delete-orphan")
     outgoing_relations = relationship(
@@ -107,8 +107,8 @@ class CanonicalKnowledgePoint(Base):
     embedding_status = Column(String(32), default="pending", index=True)
     extra_meta = Column("metadata", JSON, default=dict)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     pku_links = relationship("PKUCanonicalLink", back_populates="canonical", cascade="all, delete-orphan")
     outgoing_relations = relationship(
@@ -142,8 +142,8 @@ class PKUCanonicalLink(Base):
     confidence = Column(Float, default=0.5)
     reason = Column(Text)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     pku = relationship("PersonalKnowledgeUnit", back_populates="canonical_links")
     canonical = relationship("CanonicalKnowledgePoint", back_populates="pku_links")
@@ -184,8 +184,8 @@ class PKURelation(Base):
     llm_model = Column(String(128), default="")
     extra_meta = Column("metadata", JSON, default=dict)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     source_pku = relationship(
         "PersonalKnowledgeUnit",
@@ -231,8 +231,8 @@ class CanonicalRelation(Base):
     reason = Column(Text)
     extra_meta = Column("metadata", JSON, default=dict)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     source = relationship(
         "CanonicalKnowledgePoint",

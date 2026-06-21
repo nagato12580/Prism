@@ -21,6 +21,7 @@ from backend.app.models.knowledge_governance import (
 from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem
 from backend.app.prompts.asset_parse import (
     build_asset_unit_pku_extraction_messages,
+    build_ckp_topic_extraction_messages,
     build_document_chunk_pku_extraction_messages,
 )
 from backend.app.services.ckp_vectors import search_ckp_vectors, upsert_ckp_vector
@@ -100,6 +101,27 @@ class ExtractedPKURelation:
 class AssetUnitPKUExtraction:
     pkus: list[ExtractedPKU]
     relations: list[ExtractedPKURelation]
+    llm_model: str = ""
+
+
+@dataclass(frozen=True)
+class ExtractedCKPTopic:
+    local_id: str
+    title: str
+    description: str
+    keywords: list[str]
+    concepts: list[str]
+    entities: list[str]
+    domains: list[str]
+    member_pku_refs: list[str]
+    confidence: float
+    reason: str
+    llm_model: str = ""
+
+
+@dataclass(frozen=True)
+class CKPTopicExtraction:
+    topics: list[ExtractedCKPTopic]
     llm_model: str = ""
 
 
@@ -358,6 +380,48 @@ def _parse_asset_unit_pku_extraction(data: dict[str, Any], llm_model: str = "") 
     return AssetUnitPKUExtraction(parsed_pkus, parsed_relations, llm_model=llm_model)
 
 
+def _clean_ckp_topic_string_list(value: Any, *, limit: int, max_length: int = 120) -> list[str]:
+    cleaned: list[str] = []
+    for item in _as_list(value):
+        text = _normalize_space(str(item or ""))
+        if text and text not in cleaned:
+            cleaned.append(text[:max_length])
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _parse_ckp_topic_extraction(data: dict[str, Any], *, llm_model: str = "") -> CKPTopicExtraction:
+    parsed_topics: list[ExtractedCKPTopic] = []
+    for item in _as_list(data.get("topics")):
+        if not isinstance(item, dict):
+            continue
+        title = _first_text(item.get("title"), item.get("name"))
+        member_pku_refs = _clean_ckp_topic_string_list(
+            item.get("member_pku_refs") or item.get("members") or item.get("pku_refs"),
+            limit=80,
+        )
+        if not title or not member_pku_refs:
+            continue
+        local_id = _first_text(item.get("local_id"), item.get("id"), title)[:120]
+        parsed_topics.append(
+            ExtractedCKPTopic(
+                local_id=local_id,
+                title=title[:255],
+                description=_first_text(item.get("description"), item.get("summary"))[:1200],
+                keywords=_clean_ckp_topic_string_list(item.get("keywords"), limit=12),
+                concepts=_clean_ckp_topic_string_list(item.get("concepts"), limit=12),
+                entities=_clean_ckp_topic_string_list(item.get("entities"), limit=12),
+                domains=_clean_ckp_topic_string_list(item.get("domains"), limit=8),
+                member_pku_refs=member_pku_refs,
+                confidence=_clamp_confidence(item.get("confidence"), 0.75),
+                reason=_normalize_space(str(item.get("reason") or ""))[:500],
+                llm_model=llm_model,
+            )
+        )
+    return CKPTopicExtraction(parsed_topics, llm_model=llm_model)
+
+
 def _extract_asset_unit_pkus_with_llm(unit: PersonalAssetUnit) -> AssetUnitPKUExtraction:
     if not settings.LLM_API_BASE or not settings.LLM_API_KEY:
         return AssetUnitPKUExtraction([], [], llm_model="")
@@ -385,6 +449,92 @@ def _extract_asset_unit_pkus_with_llm(unit: PersonalAssetUnit) -> AssetUnitPKUEx
         return _parse_asset_unit_pku_extraction(data, llm_model=settings.LLM_MODEL)
     except Exception:
         return AssetUnitPKUExtraction([], [], llm_model="")
+
+
+def _extract_ckp_topics_with_llm(
+    *,
+    source_kind: str,
+    source_id: str,
+    title: str,
+    summary: str = "",
+    category: str = "",
+    tags: list[str] | None = None,
+    pkus: list[dict[str, Any]],
+) -> CKPTopicExtraction:
+    if not settings.LLM_API_BASE or not settings.LLM_API_KEY or not pkus:
+        return CKPTopicExtraction([], llm_model="")
+
+    system_prompt, user_message = build_ckp_topic_extraction_messages(
+        source_kind=source_kind,
+        source_id=source_id,
+        title=title,
+        summary=summary,
+        category=category,
+        tags=tags or [],
+        pkus=pkus,
+    )
+    try:
+        client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
+        response = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        data = _parse_json_object(content)
+        return _parse_ckp_topic_extraction(data, llm_model=settings.LLM_MODEL)
+    except Exception:
+        return CKPTopicExtraction([], llm_model="")
+
+
+def _pku_topic_payload(ref: str, pku: PersonalKnowledgeUnit) -> dict[str, Any]:
+    return {
+        "ref": ref,
+        "statement": pku.normalized_statement or pku.statement,
+        "unit_type": pku.unit_type,
+        "keywords": pku.keywords or [],
+        "concepts": pku.concepts or [],
+        "entities": pku.entities or [],
+        "domains": pku.domains or [],
+        "evidence_span": pku.evidence_span or "",
+    }
+
+
+def _fallback_local_topic(
+    *,
+    source_title: str,
+    source_summary: str,
+    source_category: str,
+    source_tags: list[str],
+    pku_refs: list[tuple[str, PersonalKnowledgeUnit]],
+) -> ExtractedCKPTopic | None:
+    if not pku_refs:
+        return None
+    keywords: list[str] = []
+    concepts: list[str] = []
+    domains: list[str] = [source_category] if source_category else []
+    for _, pku in pku_refs:
+        keywords.extend(str(value) for value in _as_list(pku.keywords))
+        concepts.extend(str(value) for value in _as_list(pku.concepts))
+        domains.extend(str(value) for value in _as_list(pku.domains))
+    title = _short_title(source_title or " ".join(keywords[:3]) or pku_refs[0][1].normalized_statement, "Untitled topic")
+    return ExtractedCKPTopic(
+        local_id="fallback_topic",
+        title=title,
+        description=_normalize_space(source_summary or f"Topic hub for {title}."),
+        keywords=list(dict.fromkeys([*source_tags, *keywords]))[:12],
+        concepts=list(dict.fromkeys(concepts))[:12],
+        entities=[],
+        domains=list(dict.fromkeys(domains))[:8],
+        member_pku_refs=[ref for ref, _ in pku_refs],
+        confidence=0.72,
+        reason="Fallback topic because topic extraction returned no valid topics.",
+        llm_model="",
+    )
 
 
 def _document_chunk_prompt_payload(chunk: KnowledgeChunk | None, index: int | None = None) -> dict[str, Any] | None:
@@ -651,14 +801,19 @@ def _find_existing_ckp(
 
     for hit in vector_hits:
         ckp_id = str(hit.get("ckp_id") or "")
-        score = float(hit.get("score") or 0.0)
+        try:
+            score = float(hit.get("score") or 0.0)
+        except (TypeError, ValueError):
+            continue
         if not ckp_id:
             continue
-        candidate = (
-            db.query(CanonicalKnowledgePoint)
-            .filter(CanonicalKnowledgePoint.id == ckp_id, CanonicalKnowledgePoint.user_id == user_id)
-            .first()
+        candidate_query = db.query(CanonicalKnowledgePoint).filter(
+            CanonicalKnowledgePoint.id == ckp_id,
+            CanonicalKnowledgePoint.user_id == user_id,
         )
+        if canonical_type:
+            candidate_query = candidate_query.filter(CanonicalKnowledgePoint.canonical_type == canonical_type)
+        candidate = candidate_query.first()
         if not candidate:
             continue
         if score >= 0.8:
@@ -667,6 +822,86 @@ def _find_existing_ckp(
             decision = _llm_ckp_same_as_decision(normalized, candidate, score)
             if decision.same and decision.confidence >= 0.8:
                 return candidate
+    return None
+
+
+def _topic_match_text(topic: ExtractedCKPTopic) -> str:
+    return _normalize_space(
+        " ".join(
+            [
+                topic.title,
+                topic.description,
+                " ".join(topic.keywords),
+                " ".join(topic.concepts),
+                " ".join(topic.domains),
+            ]
+        )
+    )
+
+
+def _find_existing_topic_ckp(
+    db: Session,
+    *,
+    user_id: str,
+    topic: ExtractedCKPTopic,
+) -> CanonicalKnowledgePoint | None:
+    title = _normalize_space(topic.title)
+    if not title:
+        return None
+    query = db.query(CanonicalKnowledgePoint).filter(
+        CanonicalKnowledgePoint.user_id == user_id,
+        CanonicalKnowledgePoint.status != "deprecated",
+        CanonicalKnowledgePoint.canonical_type == "topic",
+    )
+    exact = query.filter(CanonicalKnowledgePoint.title == title).first()
+    if exact:
+        return exact
+
+    words = [word for word in topic.keywords[:6] if len(word) >= 2]
+    candidates = query.filter(CanonicalKnowledgePoint.title.like(f"%{title[:32]}%")).limit(10).all()
+    if not candidates and words:
+        candidates = query.filter(
+            or_(*(CanonicalKnowledgePoint.keywords.like(f"%{word}%") for word in words))
+        ).limit(10).all()
+    topic_words = set(topic.keywords + topic.concepts + topic.domains)
+    best: CanonicalKnowledgePoint | None = None
+    best_score = 0
+    for candidate in candidates:
+        candidate_words = set(
+            _as_list(candidate.keywords) + _as_list(candidate.concepts) + _as_list(candidate.domains)
+        )
+        title_match = 3 if _normalize_space(candidate.title).lower() == title.lower() else 0
+        score = len(topic_words & candidate_words) + title_match
+        if score > best_score:
+            best = candidate
+            best_score = score
+    if best and best_score >= 2:
+        return best
+
+    try:
+        vector_hits = search_ckp_vectors(text=_topic_match_text(topic), user_id=user_id, canonical_type="topic", top_k=8)
+    except Exception:
+        vector_hits = []
+    for hit in vector_hits:
+        ckp_id = str(hit.get("ckp_id") or "")
+        try:
+            score = float(hit.get("score") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if not ckp_id:
+            continue
+        candidate = (
+            db.query(CanonicalKnowledgePoint)
+            .filter(
+                CanonicalKnowledgePoint.id == ckp_id,
+                CanonicalKnowledgePoint.user_id == user_id,
+                CanonicalKnowledgePoint.status != "deprecated",
+                CanonicalKnowledgePoint.canonical_type == "topic",
+            )
+            .first()
+        )
+        if candidate and score >= 0.82:
+            return candidate
     return None
 
 
@@ -886,6 +1121,50 @@ def _create_or_get_ckp_from_pku(
     return ckp
 
 
+def _create_or_get_topic_ckp(
+    db: Session,
+    *,
+    user_id: str,
+    topic: ExtractedCKPTopic,
+    source_kind: str,
+    source_id: str,
+    source_title: str = "",
+) -> CanonicalKnowledgePoint:
+    existing = _find_existing_topic_ckp(db, user_id=user_id, topic=topic)
+    if existing:
+        return existing
+
+    statement = topic.description or f"Topic hub for {topic.title}."
+    ckp = CanonicalKnowledgePoint(
+        user_id=user_id,
+        canonical_type="topic",
+        title=_short_title(topic.title, "Untitled topic"),
+        canonical_statement=statement,
+        summary=topic.description,
+        aliases=[source_title] if source_title and source_title != topic.title else [],
+        domains=topic.domains,
+        entities=topic.entities,
+        concepts=topic.concepts,
+        keywords=topic.keywords,
+        scope={},
+        conditions={},
+        status="draft",
+        confidence=topic.confidence,
+        extra_meta={
+            "created_from": source_kind,
+            "source_id": source_id,
+            "source_title": source_title,
+            "topic_local_id": topic.local_id,
+            "topic_reason": topic.reason,
+            "topic_llm_model": topic.llm_model,
+        },
+    )
+    db.add(ckp)
+    db.flush()
+    _refresh_ckp_vector(ckp)
+    return ckp
+
+
 def _create_or_get_link(
     db: Session,
     *,
@@ -951,6 +1230,110 @@ def _create_or_get_generic_link(
     db.add(link)
     db.flush()
     return link
+
+
+def _settle_local_pku_topics(
+    db: Session,
+    *,
+    user_id: str,
+    source_kind: str,
+    source_id: str,
+    source_title: str,
+    source_summary: str = "",
+    source_category: str = "",
+    source_tags: list[str] | None = None,
+    pku_refs: list[tuple[str, PersonalKnowledgeUnit]],
+    role: str,
+    reason: str,
+) -> tuple[int, int]:
+    if not pku_refs:
+        return (0, 0)
+    ref_to_pku = {ref: pku for ref, pku in pku_refs}
+    extraction = _extract_ckp_topics_with_llm(
+        source_kind=source_kind,
+        source_id=source_id,
+        title=source_title,
+        summary=source_summary,
+        category=source_category,
+        tags=source_tags or [],
+        pkus=[_pku_topic_payload(ref, pku) for ref, pku in pku_refs],
+    )
+    topics = list(extraction.topics)
+    if not topics:
+        fallback = _fallback_local_topic(
+            source_title=source_title,
+            source_summary=source_summary,
+            source_category=source_category,
+            source_tags=source_tags or [],
+            pku_refs=pku_refs,
+        )
+        topics = [fallback] if fallback else []
+
+    ckp_ids: set[str] = set()
+    link_ids: set[str] = set()
+    linked_pku_ids: set[str] = set()
+    first_linked_topic: ExtractedCKPTopic | None = None
+    for topic in topics:
+        member_refs = [ref for ref in topic.member_pku_refs if ref in ref_to_pku]
+        if not member_refs:
+            continue
+        if first_linked_topic is None:
+            first_linked_topic = topic
+        ckp = _create_or_get_topic_ckp(
+            db,
+            user_id=user_id,
+            topic=topic,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_title=source_title,
+        )
+        ckp_ids.add(ckp.id)
+        for ref in member_refs:
+            pku = ref_to_pku[ref]
+            link = _create_or_get_generic_link(
+                db,
+                user_id=user_id,
+                pku=pku,
+                ckp=ckp,
+                relation_type="about",
+                role=role,
+                reason=reason,
+            )
+            link_ids.add(link.id)
+            linked_pku_ids.add(pku.id)
+
+    unlinked = [(ref, pku) for ref, pku in pku_refs if pku.id not in linked_pku_ids]
+    if unlinked and not first_linked_topic:
+        first_linked_topic = _fallback_local_topic(
+            source_title=source_title,
+            source_summary=source_summary,
+            source_category=source_category,
+            source_tags=source_tags or [],
+            pku_refs=pku_refs,
+        )
+
+    if unlinked and first_linked_topic:
+        ckp = _create_or_get_topic_ckp(
+            db,
+            user_id=user_id,
+            topic=first_linked_topic,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_title=source_title,
+        )
+        ckp_ids.add(ckp.id)
+        for _, pku in unlinked:
+            link = _create_or_get_generic_link(
+                db,
+                user_id=user_id,
+                pku=pku,
+                ckp=ckp,
+                relation_type="about",
+                role=role,
+                reason=f"{reason} Added to fallback topic because no extracted topic referenced this PKU.",
+            )
+            link_ids.add(link.id)
+    return (len(ckp_ids), len(link_ids))
 
 
 def _create_or_get_pku_relation(
@@ -1040,43 +1423,33 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
 
     pku_ids: set[str] = set()
-    ckp_ids: set[str] = set()
-    link_ids: set[str] = set()
     relation_ids: set[str] = set()
     pku_by_ref: dict[str, PersonalKnowledgeUnit] = {}
+    pku_refs: list[tuple[str, PersonalKnowledgeUnit]] = []
 
     for extracted in extracted_pkus:
         pku = _create_or_get_asset_unit_pku(db, unit=unit, extracted=extracted)
-        ckp = _create_or_get_ckp_from_pku(
-            db,
-            user_id=unit.user_id or DEFAULT_USER_ID,
-            pku=pku,
-            title=unit.title or pku.statement,
-            summary=unit.summary or "",
-            aliases=[unit.title] if unit.title else [],
-            extra_meta={
-                "created_from": "personal_asset_unit",
-                "source_unit_id": unit.id,
-                "source_asset_ids": unit.source_asset_ids or [],
-                "extraction_group": extracted.group,
-                "extraction_reason": extracted.reason,
-            },
-        )
-        link = _create_or_get_generic_link(
-            db,
-            user_id=unit.user_id or DEFAULT_USER_ID,
-            pku=pku,
-            ckp=ckp,
-            relation_type="same_as",
-            role="synthesized_personal_knowledge",
-            reason="Settlement from confirmed PersonalAssetUnit PKU extraction.",
-        )
         pku_ids.add(pku.id)
-        ckp_ids.add(ckp.id)
-        link_ids.add(link.id)
+        primary_ref = _normalize_space(extracted.local_id) or _normalize_space(extracted.statement)
+        if primary_ref:
+            pku_refs.append((primary_ref, pku))
         if extracted.local_id:
             pku_by_ref[_normalize_space(extracted.local_id)] = pku
         pku_by_ref[_normalize_space(extracted.statement)] = pku
+
+    topic_ckp_count, topic_link_count = _settle_local_pku_topics(
+        db,
+        user_id=unit.user_id or DEFAULT_USER_ID,
+        source_kind="personal_asset_unit",
+        source_id=unit.id,
+        source_title=unit.title or "",
+        source_summary=unit.summary or "",
+        source_category=unit.category or "",
+        source_tags=unit.tags or [],
+        pku_refs=pku_refs,
+        role="topic_member",
+        reason="Settlement from confirmed PersonalAssetUnit topic grouping.",
+    )
 
     if using_llm_extraction:
         for relation in extraction.relations:
@@ -1098,8 +1471,8 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
 
     return GovernanceResult(
         pku_count=len(pku_ids),
-        canonical_count=len(ckp_ids),
-        link_count=len(link_ids),
+        canonical_count=topic_ckp_count,
+        link_count=topic_link_count,
         pku_relation_count=len(relation_ids),
     )
 
@@ -1123,9 +1496,51 @@ def clear_document_item_governance(db: Session, item_id: str) -> int:
         .all()
     )
     count = len(pkus)
+    affected_ckp_ids = {link.canonical_id for pku in pkus for link in pku.canonical_links}
     for pku in pkus:
         db.delete(pku)
     db.flush()
+
+    candidate_ckps = []
+    if affected_ckp_ids:
+        candidate_ckps.extend(
+            db.query(CanonicalKnowledgePoint)
+            .filter(CanonicalKnowledgePoint.id.in_(affected_ckp_ids))
+            .all()
+        )
+
+    document_created_ckps = (
+        db.query(CanonicalKnowledgePoint)
+        .filter(
+            CanonicalKnowledgePoint.status != "deprecated",
+            CanonicalKnowledgePoint.canonical_type == "topic",
+        )
+        .all()
+    )
+    seen_ckp_ids = {ckp.id for ckp in candidate_ckps}
+    for ckp in document_created_ckps:
+        meta = ckp.extra_meta or {}
+        if (
+            ckp.id not in seen_ckp_ids
+            and meta.get("created_from") == "document_chunk"
+            and (meta.get("source_id") == item_id or meta.get("source_item_id") == item_id)
+        ):
+            candidate_ckps.append(ckp)
+            seen_ckp_ids.add(ckp.id)
+
+    for ckp in candidate_ckps:
+        meta = ckp.extra_meta or {}
+        created_from_document = (
+            meta.get("created_from") == "document_chunk"
+            and (meta.get("source_id") == item_id or meta.get("source_item_id") == item_id)
+        )
+        active_links = [
+            link
+            for link in ckp.pku_links
+            if link.pku and link.pku.status == "active"
+        ]
+        if created_from_document and not active_links:
+            ckp.status = "deprecated"
     return count
 
 
@@ -1223,9 +1638,8 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
         )
 
     pku_ids: set[str] = set()
-    ckp_ids: set[str] = set()
-    link_ids: set[str] = set()
     relation_ids: set[str] = set()
+    local_pku_refs: list[tuple[str, PersonalKnowledgeUnit]] = []
 
     for index, chunk in enumerate(chunks):
         previous_chunk = chunks[index - 1] if index > 0 else None
@@ -1253,34 +1667,10 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
                 chunk=chunk,
                 extracted=extracted,
             )
-            ckp = _create_or_get_ckp_from_pku(
-                db,
-                user_id=item.user_id or DEFAULT_USER_ID,
-                pku=pku,
-                title=item.title or pku.statement,
-                summary=item.summary or "",
-                aliases=[item.title] if item.title else [],
-                extra_meta={
-                    "created_from": "document_chunk",
-                    "source_item_id": item.id,
-                    "source_chunk_id": chunk.id,
-                    "anchor_chunk_index": index,
-                    "extraction_group": extracted.group,
-                    "extraction_reason": extracted.reason,
-                },
-            )
-            link = _create_or_get_generic_link(
-                db,
-                user_id=item.user_id or DEFAULT_USER_ID,
-                pku=pku,
-                ckp=ckp,
-                relation_type="same_as",
-                role="external_reference",
-                reason="Settlement from document chunk PKU extraction.",
-            )
             pku_ids.add(pku.id)
-            ckp_ids.add(ckp.id)
-            link_ids.add(link.id)
+            ref = _normalize_space(extracted.local_id) or _normalize_space(extracted.statement)
+            if ref:
+                local_pku_refs.append((f"chunk_{index}:{ref}", pku))
             if extracted.local_id:
                 pku_by_ref[_normalize_space(extracted.local_id)] = pku
             pku_by_ref[_normalize_space(extracted.statement)] = pku
@@ -1303,9 +1693,23 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
                 )
                 relation_ids.add(row.id)
 
+    topic_ckp_count, topic_link_count = _settle_local_pku_topics(
+        db,
+        user_id=item.user_id or DEFAULT_USER_ID,
+        source_kind="document_chunk",
+        source_id=item.id,
+        source_title=item.title or "",
+        source_summary=item.summary or "",
+        source_category=item.category or "",
+        source_tags=item.tags or [],
+        pku_refs=local_pku_refs,
+        role="topic_member",
+        reason="Settlement from document-level topic grouping.",
+    )
+
     return GovernanceResult(
         pku_count=len(pku_ids),
-        canonical_count=len(ckp_ids),
-        link_count=len(link_ids),
+        canonical_count=topic_ckp_count,
+        link_count=topic_link_count,
         pku_relation_count=len(relation_ids),
     )

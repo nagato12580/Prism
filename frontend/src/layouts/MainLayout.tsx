@@ -1,16 +1,18 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   BookMarked,
   BookOpen,
   CircleUserRound,
+  Fingerprint,
   Inbox,
-  Moon,
   Menu,
   MessageSquare,
+  Moon,
   Network,
   Search,
   Sun,
+  Waypoints,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -18,8 +20,12 @@ import { cn } from '@/lib/utils'
 const navItems = [
   { to: '/chat', label: '对话', icon: MessageSquare },
   { to: '/inbox', label: '收件箱', icon: Inbox },
+  { to: '/assets', label: '资产', icon: BookOpen },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
+  { to: '/graph', label: '图谱', icon: Network },
   { to: '/wiki', label: 'Wiki', icon: BookMarked },
+  { to: '/memory/profile', label: '用户画像', icon: Fingerprint },
+  { to: '/memory/graph', label: '记忆图谱', icon: Waypoints },
 ]
 
 const mobileNavId = 'prism-mobile-navigation'
@@ -30,7 +36,7 @@ function Brand({ isDark = false }: { isDark?: boolean }) {
       <div
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-black tracking-tight shadow-[0_0_24px_rgba(59,130,246,0.25)]',
-          isDark ? 'bg-white text-slate-950' : 'bg-slate-950 text-white'
+          isDark ? 'bg-white text-slate-950' : 'bg-slate-950 text-white',
         )}
       >
         PR
@@ -50,29 +56,25 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
 
   return (
     <nav className="mt-5 space-y-6 px-2">
-      <div className="px-2 text-[11px] font-medium text-slate-500">工作台</div>
+      <div className="px-2 text-[11px] font-medium text-slate-500">对话</div>
       <div className="space-y-1">
         <NavItem
           to="/chat"
           label="对话"
           icon={MessageSquare}
-          active={
-            location.pathname === '/chat' ||
-            location.pathname.startsWith('/chat/') ||
-            location.pathname === '/'
-          }
+          active={location.pathname === '/chat' || location.pathname.startsWith('/chat/') || location.pathname === '/'}
           isDark={isDark}
           onNavigate={onNavigate}
         />
       </div>
 
-      <div className="px-2 text-[11px] font-medium text-slate-500">知识与记忆</div>
+      <div className="px-2 text-[11px] font-medium text-slate-500">工作台</div>
       <div className="space-y-1">
         <NavItem
-          to="/knowledge"
-          label="知识库"
-          icon={BookOpen}
-          active={location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/')}
+          to="/inbox"
+          label="收件箱"
+          icon={Inbox}
+          active={location.pathname === '/inbox' || location.pathname.startsWith('/inbox/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />
@@ -85,6 +87,14 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
           onNavigate={onNavigate}
         />
         <NavItem
+          to="/knowledge"
+          label="知识库"
+          icon={BookOpen}
+          active={location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
           to="/graph"
           label="图谱"
           icon={Network}
@@ -93,18 +103,30 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
           onNavigate={onNavigate}
         />
         <NavItem
-          to="/inbox"
-          label="收件箱"
-          icon={Inbox}
-          active={location.pathname === '/inbox' || location.pathname.startsWith('/inbox/')}
-          isDark={isDark}
-          onNavigate={onNavigate}
-        />
-        <NavItem
           to="/wiki"
           label="Wiki"
           icon={BookMarked}
           active={location.pathname === '/wiki' || location.pathname.startsWith('/wiki/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+      </div>
+
+      <div className="px-2 text-[11px] font-medium text-slate-500">用户记忆</div>
+      <div className="space-y-1">
+        <NavItem
+          to="/memory/profile"
+          label="用户画像"
+          icon={Fingerprint}
+          active={location.pathname === '/memory/profile'}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/memory/graph"
+          label="记忆图谱"
+          icon={Waypoints}
+          active={location.pathname === '/memory/graph'}
           isDark={isDark}
           onNavigate={onNavigate}
         />
@@ -139,7 +161,7 @@ function NavItem({
           ? 'bg-[var(--prism-blue)] text-white shadow-[0_10px_24px_-16px_rgba(37,99,235,0.9)]'
           : isDark
             ? 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
-            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950'
+            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950',
       )}
     >
       <Icon size={16} className="shrink-0" />
@@ -172,7 +194,7 @@ function CompactNav({ onNavigate, isDark = false }: { onNavigate?: () => void; i
                 ? 'bg-[var(--prism-blue)] text-white'
                 : isDark
                   ? 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950',
             )}
           >
             <Icon size={18} className="shrink-0" />
@@ -189,24 +211,11 @@ export function MainLayout() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const isDark = theme === 'dark'
   const location = useLocation()
-  const isChatRoute =
-    location.pathname === '/' ||
-    location.pathname === '/chat' ||
-    location.pathname.startsWith('/chat/')
+  const isChatRoute = location.pathname === '/' || location.pathname === '/chat' || location.pathname.startsWith('/chat/')
 
   return (
-    <div
-      className={cn(
-        'fixed inset-0 flex overflow-hidden transition-colors',
-        isDark ? 'bg-[#070917] text-slate-100' : 'bg-[#f4f7fb] text-slate-950'
-      )}
-    >
-      <aside
-        className={cn(
-          'hidden w-[220px] shrink-0 flex-col border-r transition-colors lg:flex',
-          isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-[#f8fbff]'
-        )}
-      >
+    <div className={cn('fixed inset-0 flex overflow-hidden transition-colors', isDark ? 'bg-[#070917] text-slate-100' : 'bg-[#f4f7fb] text-slate-950')}>
+      <aside className={cn('hidden w-[220px] shrink-0 flex-col border-r transition-colors lg:flex', isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-[#f8fbff]')}>
         <Brand isDark={isDark} />
         <NavList isDark={isDark} />
       </aside>
@@ -224,7 +233,7 @@ export function MainLayout() {
             id={mobileNavId}
             className={cn(
               'relative flex h-full w-72 max-w-[86vw] flex-col border-r py-2 shadow-2xl',
-              isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-white'
+              isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-white',
             )}
           >
             <div className="flex items-center justify-between gap-4">
@@ -244,14 +253,7 @@ export function MainLayout() {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header
-          className={cn(
-            'flex h-14 shrink-0 items-center gap-3 border-b px-4 backdrop-blur transition-colors lg:px-5',
-            isDark
-              ? 'border-white/[0.07] bg-[#0a0d1c]/95'
-              : 'border-slate-200 bg-white/92'
-          )}
-        >
+        <header className={cn('flex h-14 shrink-0 items-center gap-3 border-b px-4 backdrop-blur transition-colors lg:px-5', isDark ? 'border-white/[0.07] bg-[#0a0d1c]/95' : 'border-slate-200 bg-white/92')}>
           <button
             type="button"
             aria-label="打开导航"
@@ -264,10 +266,7 @@ export function MainLayout() {
           </button>
 
           <div className="relative hidden w-full max-w-[440px] lg:block">
-            <Search
-              size={15}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               aria-label="全局搜索"
               placeholder="搜索文档、知识、对话..."
@@ -275,7 +274,7 @@ export function MainLayout() {
                 'h-8 w-full rounded-md border px-9 text-xs outline-none transition',
                 isDark
                   ? 'border-white/[0.08] bg-white/[0.07] text-slate-200 placeholder:text-slate-500 focus:border-blue-400/60 focus:bg-white/[0.1]'
-                  : 'border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:border-blue-300 focus:bg-white'
+                  : 'border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:border-blue-300 focus:bg-white',
               )}
             />
           </div>
@@ -289,42 +288,27 @@ export function MainLayout() {
                 'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium transition',
                 isDark
                   ? 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
-                  : 'border-slate-200 bg-white text-slate-600 shadow-sm hover:border-blue-200 hover:text-blue-600'
+                  : 'border-slate-200 bg-white text-slate-600 shadow-sm hover:border-blue-200 hover:text-blue-600',
               )}
             >
               {isDark ? <Sun size={15} /> : <Moon size={15} />}
               <span className="hidden sm:inline">{isDark ? '亮色' : '暗色'}</span>
             </button>
-            <div
-              className={cn(
-                'hidden items-center gap-2 text-xs sm:flex',
-                isDark ? 'text-slate-300' : 'text-slate-700'
-              )}
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--prism-blue)] text-[11px] font-semibold text-white">
-                A
-              </span>
+            <div className={cn('hidden items-center gap-2 text-xs sm:flex', isDark ? 'text-slate-300' : 'text-slate-700')}>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--prism-blue)] text-[11px] font-semibold text-white">A</span>
               <span>admin@example.com</span>
             </div>
             <CircleUserRound size={20} className="text-slate-400 sm:hidden" />
           </div>
         </header>
 
-        <main
-          className={cn(
-            'min-h-0 flex-1 p-4 transition-colors lg:p-6',
-            isChatRoute ? 'overflow-hidden' : 'overflow-auto',
-            isDark
-              ? 'bg-[radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.18),transparent_36rem),#070917]'
-              : 'bg-[#f4f7fb]'
-          )}
-        >
+        <main className={cn('min-h-0 flex-1 p-4 transition-colors lg:p-6', isChatRoute ? 'overflow-hidden' : 'overflow-auto', isDark ? 'bg-[radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.18),transparent_36rem),#070917]' : 'bg-[#f4f7fb]')}>
           <div
             className={cn(
               'mx-auto max-w-[1520px] rounded-2xl border p-3 shadow-[0_24px_80px_-56px_rgba(15,23,42,0.35)] backdrop-blur lg:p-4',
               isChatRoute && 'flex h-full min-h-0 flex-col overflow-hidden',
               !isChatRoute && 'min-h-full',
-              isDark ? 'border-white/[0.07] bg-[#0d1024]/88' : 'border-slate-200 bg-white'
+              isDark ? 'border-white/[0.07] bg-[#0d1024]/88' : 'border-slate-200 bg-white',
             )}
           >
             <Outlet />

@@ -88,6 +88,7 @@ export function KnowledgePage() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const activeTopic = topics.find((topic) => topic.id === activeTopicId) || null
+  const hasProcessingResources = resources.some((resource) => resource.processing_status === 'processing')
 
   const loadTopics = async () => {
     setLoadingTopics(true)
@@ -102,15 +103,15 @@ export function KnowledgePage() {
     }
   }
 
-  const loadResources = async (topicId: string, nextFilter = filter) => {
-    setLoadingResources(true)
+  const loadResources = async (topicId: string, nextFilter = filter, options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingResources(true)
     try {
       const params = nextFilter === 'all' ? undefined : { media_type: nextFilter }
       setResources(await knowledgeApi.listResources(topicId, params))
     } catch (err) {
       setError(`资源加载失败：${getErrorMessage(err)}`)
     } finally {
-      setLoadingResources(false)
+      if (!options?.silent) setLoadingResources(false)
     }
   }
 
@@ -125,6 +126,15 @@ export function KnowledgePage() {
       setResources([])
     }
   }, [activeTopicId, filter])
+
+  useEffect(() => {
+    if (!activeTopicId || !hasProcessingResources) return
+
+    const timer = window.setInterval(() => {
+      void loadResources(activeTopicId, filter, { silent: true })
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [activeTopicId, filter, hasProcessingResources])
 
   const createTopic = async () => {
     const name = newTopicName.trim()

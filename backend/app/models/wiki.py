@@ -1,13 +1,13 @@
 # prism/backend/app/models/wiki.py
 """Wiki 文档知识抽取 — 数据模型"""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, String, Text, Integer, Float, DateTime, ForeignKey
 from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils.time import local_now
 
 
 def _uuid():
@@ -25,7 +25,7 @@ class WikiDocument(Base):
     progress_current = Column(Integer, default=0)
     progress_total = Column(Integer, default=0)
     user_id = Column(CHAR(36), default="default-user")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     file = relationship("KnowledgeFile")
     concepts = relationship("WikiConcept", back_populates="document", cascade="all, delete-orphan")
@@ -46,7 +46,7 @@ class WikiConcept(Base):
     aliases = Column(String(1024), default="", comment="Aliases, comma separated")
     group_name = Column(String(256), default="", index=True, comment="LLM assigned group name")
     category = Column(String(128), default="", comment="Category")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     document = relationship("WikiDocument", back_populates="concepts")
 
@@ -67,7 +67,7 @@ class WikiKnowledgePoint(Base):
     status = Column(String(16), default="整理中", comment="整理中/已发布")
     images = Column(Text, comment="Associated images JSON: [{'id':'uuid','caption':'desc'},...]")
     user_id = Column(CHAR(36), default="default-user")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     document = relationship("WikiDocument", back_populates="knowledge_points")
 
@@ -81,7 +81,7 @@ class WikiKnowledgeRelation(Base):
     to_point_id = Column(CHAR(36), ForeignKey("wiki_knowledge_point.id", ondelete="CASCADE"), nullable=False)
     type = Column(String(64), default="", comment="implements/extends/optimizes/contradicts/cites/prerequisite_of/trades_off/derived_from")
     confidence = Column(Float, default=1.0, comment="Confidence 0.0~1.0")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
 
 class WikiImage(Base):
@@ -94,7 +94,7 @@ class WikiImage(Base):
     storage_path = Column(String(500), default="", comment="Storage path")
     caption = Column(Text, comment="Vision LLM description")
     mime_type = Column(String(100), default="", comment="MIME type")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     document = relationship("WikiDocument", back_populates="images")
 
@@ -110,6 +110,6 @@ class WikiExtractionLog(Base):
     status = Column(String(16), default="info", comment="info/warning/error")
     progress_current = Column(Integer, default=0)
     progress_total = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     document = relationship("WikiDocument", back_populates="logs")

@@ -23,9 +23,42 @@ body,
 
 body {
   margin: 0;
+  font-size: 13px;
   background:
     radial-gradient(circle at 20% 0%, rgba(34, 211, 238, 0.12), transparent 32rem),
     linear-gradient(180deg, #f7f9fc 0%, #eef3fb 100%);
+}
+
+@layer utilities {
+  .text-xs {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+  }
+
+  .text-sm {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+  }
+
+  .text-base {
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+  }
+
+  .text-lg {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+
+  .text-xl {
+    font-size: 1.125rem;
+    line-height: 1.625rem;
+  }
+
+  .text-2xl {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
 }
 
 button,
@@ -69,8 +102,8 @@ button:disabled {
 
 .markdown-body {
   color: #1f2937;
-  font-size: 16px;
-  line-height: 1.75;
+  font-size: 13px;
+  line-height: 1.65;
   word-break: break-word;
 }
 
@@ -105,15 +138,15 @@ button:disabled {
 }
 
 .markdown-body h1 {
-  font-size: 1.35rem;
+  font-size: 1.15rem;
 }
 
 .markdown-body h2 {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
 }
 
 .markdown-body h3 {
-  font-size: 1.05rem;
+  font-size: 0.95rem;
 }
 
 .markdown-body blockquote {

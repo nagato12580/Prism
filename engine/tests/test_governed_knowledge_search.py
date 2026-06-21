@@ -10,7 +10,7 @@ from backend.app.models import (
     KnowledgeChunk,
     KnowledgeItem,
     PKUCanonicalLink,
-    PersonalAssetItem,
+    PersonalAssetUnit,
     PersonalKnowledgeUnit,
 )
 from engine.app.agent.tools.base import ToolContext, build_enabled_tools
@@ -29,14 +29,13 @@ def test_governed_knowledge_search_returns_ckp_pku_and_raw_sources(monkeypatch):
     Session = sessionmaker(bind=engine)
     session = Session()
 
-    asset = PersonalAssetItem(
-        raw_text="我认为个人知识库需要 metadata filter 辅助检索。",
-        title="个人知识库检索观点",
-        body="我认为个人知识库需要 metadata filter 辅助检索。",
-        summary="个人知识库需要 metadata filter。",
-        asset_kind="opinion",
+    unit = PersonalAssetUnit(
+        title="Personal retrieval practice",
+        summary="Personal knowledge retrieval needs metadata filters.",
+        content="Personal knowledge retrieval needs metadata filter assisted search.",
         category="RAG",
         tags=["metadata", "filter"],
+        source_asset_ids=["asset-1"],
         user_id="default-user",
         status="confirmed",
     )
@@ -48,7 +47,7 @@ def test_governed_knowledge_search_returns_ckp_pku_and_raw_sources(monkeypatch):
         tags=["metadata", "filter"],
         user_id="default-user",
     )
-    session.add_all([asset, item])
+    session.add_all([unit, item])
     session.flush()
     chunk = KnowledgeChunk(
         item_id=item.id,
@@ -56,26 +55,26 @@ def test_governed_knowledge_search_returns_ckp_pku_and_raw_sources(monkeypatch):
         chunk_type="parent",
     )
     ckp = CanonicalKnowledgePoint(
-        title="个人知识库适合 metadata filter 辅助检索",
+        title="Personal knowledge retrieval uses metadata filters",
         canonical_type="claim",
-        canonical_statement="个人知识库适合 metadata filter 辅助检索。",
-        summary="个人观点和文档证据共同支持 metadata filter。",
-        keywords=["个人知识库", "metadata", "filter", "检索"],
+        canonical_statement="Personal knowledge retrieval uses metadata filters.",
+        summary="Personal asset units and document evidence both support metadata filters.",
+        keywords=["personal", "metadata", "filter", "retrieval"],
         concepts=["metadata", "filter"],
         user_id="default-user",
         confidence=0.86,
     )
     session.add_all([chunk, ckp])
     session.flush()
-    asset_pku = PersonalKnowledgeUnit(
-        source_kind="personal_asset_item",
-        source_id=asset.id,
+    unit_pku = PersonalKnowledgeUnit(
+        source_kind="personal_asset_unit",
+        source_id=unit.id,
         unit_type="claim",
-        statement="个人知识库需要 metadata filter 辅助检索。",
-        normalized_statement="个人知识库需要 metadata filter 辅助检索",
-        normalized_statement_hash="asset-hash",
-        modality="opinion",
-        keywords=["个人知识库", "metadata", "filter"],
+        statement="Personal knowledge retrieval needs metadata filter assisted search.",
+        normalized_statement="personal knowledge retrieval needs metadata filter assisted search",
+        normalized_statement_hash="unit-hash",
+        modality="fact",
+        keywords=["personal", "metadata", "filter"],
         user_id="default-user",
     )
     doc_pku = PersonalKnowledgeUnit(
@@ -83,21 +82,21 @@ def test_governed_knowledge_search_returns_ckp_pku_and_raw_sources(monkeypatch):
         source_id=chunk.id,
         unit_type="definition",
         statement="Metadata filter can restrict retrieval results by source or project.",
-        normalized_statement="Metadata filter restricts retrieval results by source or project",
+        normalized_statement="metadata filter restricts retrieval results by source or project",
         normalized_statement_hash="doc-hash",
         modality="fact",
         keywords=["metadata", "filter", "retrieval"],
         user_id="default-user",
     )
-    session.add_all([asset_pku, doc_pku])
+    session.add_all([unit_pku, doc_pku])
     session.flush()
     session.add_all(
         [
             PKUCanonicalLink(
-                pku_id=asset_pku.id,
+                pku_id=unit_pku.id,
                 canonical_id=ckp.id,
                 relation_type="same_as",
-                role="personal_claim",
+                role="synthesized_personal_knowledge",
                 confidence=0.9,
                 user_id="default-user",
             ),
@@ -118,12 +117,43 @@ def test_governed_knowledge_search_returns_ckp_pku_and_raw_sources(monkeypatch):
     ctx = ToolContext(rag_runner=None, citations=[], stats_holder={})
     tool = next(t for t in build_enabled_tools(ctx) if t.name == "governed_knowledge_search")
 
-    payload = json.loads(tool.invoke({"query": "个人知识库 metadata filter 检索", "limit": 5}))
+    payload = json.loads(tool.invoke({"query": "personal metadata filter retrieval", "limit": 5}))
 
     assert payload["status"] == "success"
-    assert payload["canonical_results"][0]["title"] == "个人知识库适合 metadata filter 辅助检索"
+    assert payload["canonical_results"][0]["title"] == "Personal knowledge retrieval uses metadata filters"
     bundle = payload["evidence_bundle"][0]
-    assert {pku["role"] for pku in bundle["linked_pkus"]} == {"personal_claim", "external_reference"}
-    assert {source["source_kind"] for source in bundle["raw_sources"]} == {"personal_asset_item", "document_chunk"}
+    assert {pku["role"] for pku in bundle["linked_pkus"]} == {"synthesized_personal_knowledge", "external_reference"}
+    assert {source["source_kind"] for source in bundle["raw_sources"]} == {"personal_asset_unit", "document_chunk"}
     assert len(ctx.citations) == 2
     assert ctx.stats_holder["governed_knowledge_search"]["hit_count"] == 1
+
+
+def test_governed_knowledge_search_returns_synthesized_knowledge_without_ckp(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    unit = PersonalAssetUnit(
+        title="Personal knowledge search and graph design principles",
+        summary="Personal knowledge should combine hybrid retrieval, CKP main nodes, and PKU evidence.",
+        content="The retrieval layer uses vector, keyword, and metadata filters. The graph layer uses CKP as stable knowledge points and PKU as evidence.",
+        category="Knowledge governance",
+        tags=["personal knowledge", "retrieval", "graph", "CKP", "PKU"],
+        source_asset_ids=[],
+        status="confirmed",
+        user_id="default-user",
+    )
+    session.add(unit)
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+    ctx = ToolContext(rag_runner=None, citations=[], stats_holder={})
+    tool = next(t for t in build_enabled_tools(ctx) if t.name == "governed_knowledge_search")
+
+    payload = json.loads(tool.invoke({"query": "personal knowledge search graph design principles", "limit": 5}))
+
+    assert payload["status"] == "success"
+    assert payload["knowledge_results"][0]["title"] == "Personal knowledge search and graph design principles"
+    assert payload["sources"][0]["source_kind"] == "personal_asset_unit"
+    assert ctx.stats_holder["governed_knowledge_search"]["knowledge_hit_count"] == 1

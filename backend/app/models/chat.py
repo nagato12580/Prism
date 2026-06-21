@@ -1,10 +1,10 @@
 # prism/backend/app/models/chat.py
 import uuid
-from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.mysql import JSON, CHAR
 from sqlalchemy.orm import relationship
 from ..database import Base
+from ..utils.time import local_now
 
 
 def _uuid():
@@ -19,8 +19,8 @@ class ChatSession(Base):
     user_id = Column(CHAR(36), default="default-user")
     topic_id = Column(CHAR(36), nullable=True, default=None, comment="关联知识库主题")
     source_types = Column(JSON, nullable=True, default=None, comment="过滤数据来源类型")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan",
                             order_by="ChatMessage.created_at")
@@ -35,6 +35,6 @@ class ChatMessage(Base):
     content = Column(Text, comment="消息内容")
     sources = Column(JSON, comment="引用的知识块ID列表")
     clarify = Column(JSON, nullable=True, default=None, comment="追问卡片数据")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     session = relationship("ChatSession", back_populates="messages")

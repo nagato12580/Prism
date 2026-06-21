@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models.asset import PersonalAssetItem
+from backend.app.models.asset import PersonalAssetItem, PersonalAssetUnit
 from backend.app.models.knowledge_governance import (
     CanonicalKnowledgePoint,
     PKUCanonicalLink,
@@ -43,6 +43,25 @@ _STOP_WORDS = {
     "是什么",
 }
 
+_DOMAIN_PHRASES = [
+    "个人知识库",
+    "知识库",
+    "知识治理",
+    "知识图谱",
+    "图谱设计",
+    "图谱",
+    "检索",
+    "搜索",
+    "召回",
+    "设计原则",
+    "原则",
+    "ckp",
+    "pku",
+    "rag",
+    "metadata",
+    "filter",
+]
+
 _FIELD_WEIGHTS = {
     "title": 5.0,
     "canonical_statement": 4.0,
@@ -52,6 +71,15 @@ _FIELD_WEIGHTS = {
     "concepts": 3.0,
     "keywords": 3.0,
     "pku": 2.0,
+}
+
+_KNOWLEDGE_FIELD_WEIGHTS = {
+    "title": 5.0,
+    "summary": 3.0,
+    "content": 2.0,
+    "category": 2.0,
+    "tags": 3.0,
+    "outline": 1.5,
 }
 
 
@@ -82,6 +110,10 @@ def _query_terms(query: str) -> list[str]:
     normalized = re.sub(r"([A-Za-z0-9+#.-]+)([\u4e00-\u9fff])", r"\1 \2", query or "")
     normalized = re.sub(r"([\u4e00-\u9fff])([A-Za-z0-9+#.-]+)", r"\1 \2", normalized)
     terms: list[str] = []
+    compact = re.sub(r"\s+", "", query or "").lower()
+    for phrase in _DOMAIN_PHRASES:
+        if phrase in compact:
+            _append_term(terms, phrase)
     for raw in re.findall(r"[A-Za-z0-9_+#.-]+|[\u4e00-\u9fff]+", normalized):
         raw = raw.lower()
         if re.fullmatch(r"[\u4e00-\u9fff]+", raw) and len(raw) > 6:
@@ -135,6 +167,87 @@ def _score_canonical(ckp: CanonicalKnowledgePoint, terms: list[str], pku_text: s
     return round(score, 4), matched_terms, reasons[:8]
 
 
+def _score_fields(fields: dict[str, str], terms: list[str], weights: dict[str, float]) -> tuple[float, list[str], list[str]]:
+    matched_terms: list[str] = []
+    reasons: list[str] = []
+    score = 0.0
+    for term in terms:
+        matched_fields: list[str] = []
+        term_score = 0.0
+        for field, text in fields.items():
+            if term in text:
+                matched_fields.append(field)
+                term_score += weights.get(field, 1.0)
+        if matched_fields:
+            matched_terms.append(term)
+            score += term_score
+            reasons.append(f"{term} matched {', '.join(matched_fields)}")
+    if matched_terms:
+        score += len(matched_terms) / max(len(terms), 1) * 3.0
+    return round(score, 4), matched_terms, reasons[:8]
+
+
+def _personal_asset_unit_fields(unit: PersonalAssetUnit) -> dict[str, str]:
+    return {
+        "title": _normalize_text(unit.title),
+        "summary": _normalize_text(unit.summary),
+        "content": _normalize_text(unit.content),
+        "category": _normalize_text(unit.category),
+        "tags": _normalize_text(unit.tags or []),
+        "outline": _normalize_text(unit.outline or []),
+    }
+
+
+def _knowledge_item_fields(item: KnowledgeItem) -> dict[str, str]:
+    return {
+        "title": _normalize_text(item.title),
+        "summary": _normalize_text(item.summary),
+        "content": _normalize_text(item.content),
+        "category": _normalize_text(item.category),
+        "tags": _normalize_text(item.tags or []),
+        "outline": "",
+    }
+
+
+def _personal_asset_unit_result(unit: PersonalAssetUnit, score: float, matched_terms: list[str], reasons: list[str]) -> dict[str, Any]:
+    return {
+        "source_kind": "personal_asset_unit",
+        "ref_type": "personal_asset_unit",
+        "ref_id": unit.id,
+        "personal_asset_unit_id": unit.id,
+        "title": unit.title,
+        "summary": unit.summary,
+        "text": unit.content,
+        "category": unit.category,
+        "tags": unit.tags or [],
+        "status": unit.status,
+        "source_asset_ids": unit.source_asset_ids or [],
+        "score": score,
+        "matched_terms": matched_terms,
+        "match_reasons": reasons,
+    }
+
+
+def _knowledge_item_result(item: KnowledgeItem, score: float, matched_terms: list[str], reasons: list[str]) -> dict[str, Any]:
+    return {
+        "source_kind": "knowledge_item",
+        "ref_type": "knowledge_item",
+        "ref_id": item.id,
+        "knowledge_item_id": item.id,
+        "title": item.title,
+        "summary": item.summary,
+        "text": item.content,
+        "category": item.category,
+        "tags": item.tags or [],
+        "status": item.status,
+        "source_type": item.source_type,
+        "source_ref": item.source_ref,
+        "score": score,
+        "matched_terms": matched_terms,
+        "match_reasons": reasons,
+    }
+
+
 def _source_for_pku(db, pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
     if pku.source_kind == "personal_asset_item":
         asset = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == pku.source_id).first()
@@ -152,6 +265,23 @@ def _source_for_pku(db, pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
             "source_platform": asset.source_platform,
             "category": asset.category,
             "tags": asset.tags or [],
+        }
+
+    if pku.source_kind == "personal_asset_unit":
+        unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == pku.source_id).first()
+        if not unit:
+            return None
+        return {
+            "source_kind": "personal_asset_unit",
+            "source_id": unit.id,
+            "ref_type": "personal_asset_unit",
+            "ref_id": unit.id,
+            "personal_asset_unit_id": unit.id,
+            "title": unit.title,
+            "text": unit.summary or unit.content,
+            "category": unit.category,
+            "tags": unit.tags or [],
+            "source_asset_ids": unit.source_asset_ids or [],
         }
 
     if pku.source_kind == "document_chunk":
@@ -234,7 +364,7 @@ def _build_evidence_bundle(db, ckp: CanonicalKnowledgePoint, score: float, match
     }
 
 
-def _query_governed_knowledge(query: str, limit: int) -> tuple[list[str], list[dict[str, Any]]]:
+def _query_governed_knowledge(query: str, limit: int) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]]]:
     terms = _query_terms(query)
     db = _Session()
     try:
@@ -263,7 +393,26 @@ def _query_governed_knowledge(query: str, limit: int) -> tuple[list[str], list[d
             _build_evidence_bundle(db, ckp, score, matched_terms, reasons)
             for ckp, score, matched_terms, reasons in scored[:limit]
         ]
-        return terms, bundles
+
+        knowledge_results: list[dict[str, Any]] = []
+        unit_rows = (
+            db.query(PersonalAssetUnit)
+            .filter(PersonalAssetUnit.user_id == "default-user")
+            .order_by(PersonalAssetUnit.updated_at.desc())
+            .limit(max(limit * 8, 80))
+            .all()
+        )
+        for unit in unit_rows:
+            score, matched_terms, reasons = _score_fields(
+                _personal_asset_unit_fields(unit),
+                terms,
+                _KNOWLEDGE_FIELD_WEIGHTS,
+            )
+            if not terms or matched_terms:
+                knowledge_results.append(_personal_asset_unit_result(unit, score, matched_terms, reasons))
+
+        knowledge_results.sort(key=lambda item: (float(item.get("score") or 0), item.get("title") or ""), reverse=True)
+        return terms, bundles, knowledge_results[:limit]
     finally:
         db.close()
 
@@ -288,21 +437,23 @@ def _append_unique_citations(citations: list[dict[str, Any]], sources: list[dict
 
 def _build_governed_knowledge_search(ctx: ToolContext) -> StructuredTool:
     def run(query: str, limit: int = 8) -> str:
-        terms, bundles = _query_governed_knowledge(query, limit)
+        terms, bundles, knowledge_results = _query_governed_knowledge(query, limit)
         raw_sources: list[dict[str, Any]] = []
         for bundle in bundles:
             raw_sources.extend(bundle["raw_sources"])
+        raw_sources.extend(knowledge_results)
         _append_unique_citations(ctx.citations, raw_sources)
         ctx.stats_holder[KEY] = {
             "hit_count": len(bundles),
+            "knowledge_hit_count": len(knowledge_results),
             "source_count": len(raw_sources),
             "query_terms": terms,
         }
-        status = "success" if bundles else "insufficient"
+        status = "success" if bundles or knowledge_results else "insufficient"
         summary = (
-            f"Found {len(bundles)} governed knowledge points with {len(raw_sources)} source evidence items."
-            if bundles
-            else "No governed knowledge points matched the query."
+            f"Found {len(bundles)} governed knowledge points and {len(knowledge_results)} synthesized knowledge items with {len(raw_sources)} evidence items."
+            if bundles or knowledge_results
+            else "No governed knowledge points or synthesized knowledge items matched the query."
         )
         return json.dumps(
             {
@@ -313,6 +464,7 @@ def _build_governed_knowledge_search(ctx: ToolContext) -> StructuredTool:
                     {key: value for key, value in bundle.items() if key not in {"linked_pkus", "raw_sources"}}
                     for bundle in bundles
                 ],
+                "knowledge_results": knowledge_results,
                 "evidence_bundle": bundles,
                 "source_results": raw_sources,
                 "sources": raw_sources,

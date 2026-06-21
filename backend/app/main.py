@@ -19,11 +19,13 @@ _engine_proc = None
 def _start_engine():
     """启动 Engine 子进程。"""
     global _engine_proc
-    parent_dir = str(Path(__file__).resolve().parent.parent.parent)
+    root = Path(__file__).resolve().parent.parent.parent
+    parent_dir = str(root)
+    engine_run = str(root / "engine" / "run.py")
     env = os.environ.copy()
     env["PYTHONPATH"] = parent_dir
     _engine_proc = subprocess.Popen(
-        [sys.executable, "-m", "engine.run"],
+        [sys.executable, engine_run],
         cwd=parent_dir,
         env=env,
     )

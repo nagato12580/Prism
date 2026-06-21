@@ -248,9 +248,11 @@ def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_sessi
     assert unit_result.pku_count == 1
     assert doc_result.pku_count == 1
     assert db_session.query(CanonicalKnowledgePoint).count() == 1
+    assert {ckp.canonical_type for ckp in db_session.query(CanonicalKnowledgePoint).all()} == {"topic"}
 
     links = db_session.query(PKUCanonicalLink).all()
-    assert {link.role for link in links} == {"synthesized_personal_knowledge", "external_reference"}
+    assert {link.relation_type for link in links} == {"about"}
+    assert {link.role for link in links} == {"topic_member"}
     pkus = db_session.query(PersonalKnowledgeUnit).all()
     assert len(pkus) == 2
     assert {pku.source_kind for pku in pkus} == {"personal_asset_unit", "document_chunk"}

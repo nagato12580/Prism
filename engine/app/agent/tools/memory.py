@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models.inbox import MemoryEntry
+from backend.app.models.memory import MemoryEntry
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 from engine.app.config import settings
 

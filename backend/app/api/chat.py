@@ -1,7 +1,6 @@
 # prism/backend/app/api/chat.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 from ..database import get_db
 from ..models.chat import ChatSession, ChatMessage
@@ -10,6 +9,7 @@ from ..schemas.chat import (
     ChatMessageOut, ChatMessageCreate,
 )
 from ..config import settings
+from ..utils.time import local_now
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -81,7 +81,7 @@ def add_message(session_id: str, payload: ChatMessageCreate, db: Session = Depen
     )
     db.add(msg)
     # Touch session.updated_at so list order reflects recent activity
-    session.updated_at = datetime.utcnow()
+    session.updated_at = local_now()
     db.commit()
     db.refresh(msg)
     return msg

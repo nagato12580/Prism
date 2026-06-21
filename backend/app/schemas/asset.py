@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 
 class AssetDraftCreate(BaseModel):
-    raw_item_id: Optional[str] = None
     content: Optional[str] = None
     title: Optional[str] = None
     source_type: str = "manual"
@@ -40,6 +39,7 @@ class AssetDraftUpdate(BaseModel):
     suggested_extensions: Optional[list[dict[str, Any]]] = None
     confidence: Optional[dict[str, Any]] = None
     rationale: Optional[str] = None
+    rewritten_content: Optional[str] = None
 
 
 class PersonalAssetItemUpdate(AssetDraftUpdate):
@@ -53,7 +53,6 @@ class PersonalAssetItemUpdate(AssetDraftUpdate):
     raw_metadata: Optional[dict[str, Any]] = None
     raw_keywords: Optional[list[str]] = None
     keyword_index_text: Optional[str] = None
-    body: Optional[str] = None
 
 
 class PersonalAssetItemOut(BaseModel):
@@ -75,7 +74,7 @@ class PersonalAssetItemOut(BaseModel):
     raw_embedding_status: str
     raw_embedding_updated_at: Optional[datetime]
     title: str
-    body: Optional[str]
+    rewritten_content: Optional[str]
     summary: Optional[str]
     asset_kind: str
     source_type: str
@@ -152,13 +151,13 @@ class AssetOverviewOut(BaseModel):
     representative_assets: list[AssetSearchResult]
 
 
-class KnowledgeDraftCreate(BaseModel):
+class PersonalAssetUnitCreate(BaseModel):
     asset_ids: list[str] = Field(..., min_length=1)
     title: Optional[str] = None
     instruction: Optional[str] = None
 
 
-class KnowledgeDraftUpdate(BaseModel):
+class PersonalAssetUnitUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     summary: Optional[str] = None
@@ -169,7 +168,7 @@ class KnowledgeDraftUpdate(BaseModel):
     rationale: Optional[str] = None
 
 
-class KnowledgeDraftOut(BaseModel):
+class PersonalAssetUnitOut(BaseModel):
     id: str
     user_id: str
     title: str
@@ -182,7 +181,8 @@ class KnowledgeDraftOut(BaseModel):
     confidence: dict[str, Any]
     rationale: Optional[str]
     status: str
-    knowledge_item_id: str
+    confirmed_at: Optional[datetime]
+    edited_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
@@ -190,10 +190,9 @@ class KnowledgeDraftOut(BaseModel):
         from_attributes = True
 
 
-class KnowledgeDraftConfirmRequest(BaseModel):
-    ingest: bool = False
-
-
-class KnowledgeDraftConfirmResponse(BaseModel):
-    draft: KnowledgeDraftOut
-    knowledge_item_id: str
+class PersonalAssetUnitConfirmResponse(BaseModel):
+    unit: PersonalAssetUnitOut
+    pku_count: int = 0
+    canonical_count: int = 0
+    governance_link_count: int = 0
+    pku_relation_count: int = 0

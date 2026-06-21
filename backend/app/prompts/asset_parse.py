@@ -441,3 +441,116 @@ def build_document_chunk_pku_extraction_messages(
             max_context_length=max_context_length,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# CKP Topic Extraction (local PKUs -> reusable topic hubs)
+# ---------------------------------------------------------------------------
+
+CKP_TOPIC_EXTRACTION_SYSTEM_PROMPT = (
+    "You are Prism's CKP topic hub builder. "
+    "Return strict JSON only. Do not output Markdown."
+)
+
+CKP_TOPIC_EXTRACTION_TASK = (
+    "Group local PKUs into concise CKP topic hubs. "
+    "A CKP is a reusable topic node, not a restatement of one PKU."
+)
+
+CKP_TOPIC_EXTRACTION_RULES = [
+    "Use a concise noun phrase title for each topic.",
+    "Prefer fewer meaningful topic hubs over many narrow or duplicate topics.",
+    "Each topic must reference at least one local PKU.",
+    "Do not reference unknown PKU refs.",
+    "Use source metadata as context for naming and grouping topics.",
+    "Return empty topics only when there are no usable PKUs.",
+]
+
+JSON_SHAPE_CKP_TOPIC_EXTRACTION: dict[str, Any] = {
+    "topics": [
+        {
+            "local_id": "topic_1",
+            "title": "Topic noun phrase",
+            "description": "Short topic hub description",
+            "keywords": ["keyword"],
+            "concepts": ["concept"],
+            "domains": ["domain"],
+            "entities": ["entity"],
+            "member_pku_refs": ["pku_1", "pku_2"],
+            "confidence": 0.0,
+            "reason": "Short grouping reason",
+        }
+    ],
+}
+
+
+def _topic_pku_payload(pku: dict[str, Any], max_statement_length: int) -> dict[str, Any]:
+    return {
+        "ref": str(pku.get("ref") or ""),
+        "statement": str(pku.get("statement") or "")[:max_statement_length],
+        "unit_type": str(pku.get("unit_type") or ""),
+        "keywords": pku.get("keywords") or [],
+        "concepts": pku.get("concepts") or [],
+        "entities": pku.get("entities") or [],
+        "domains": pku.get("domains") or [],
+        "evidence_span": str(pku.get("evidence_span") or ""),
+    }
+
+
+def build_ckp_topic_extraction_request(
+    *,
+    source_kind: str,
+    source_id: str,
+    title: str = "",
+    summary: str = "",
+    category: str = "",
+    tags: list[str] | None = None,
+    pkus: list[dict[str, Any]],
+    max_pkus: int = 80,
+    max_statement_length: int = 700,
+) -> str:
+    """Build the user message JSON for CKP topic extraction."""
+    request = {
+        "task": CKP_TOPIC_EXTRACTION_TASK,
+        "source": {
+            "kind": source_kind,
+            "id": source_id,
+            "title": title,
+            "summary": summary,
+            "category": category,
+            "tags": tags or [],
+        },
+        "pkus": [_topic_pku_payload(pku, max_statement_length) for pku in pkus[:max_pkus]],
+        "json_shape": JSON_SHAPE_CKP_TOPIC_EXTRACTION,
+        "rules": CKP_TOPIC_EXTRACTION_RULES,
+    }
+    return json.dumps(request, ensure_ascii=False)
+
+
+def build_ckp_topic_extraction_messages(
+    *,
+    source_kind: str,
+    source_id: str,
+    title: str = "",
+    summary: str = "",
+    category: str = "",
+    tags: list[str] | None = None,
+    pkus: list[dict[str, Any]],
+    max_pkus: int = 80,
+    max_statement_length: int = 700,
+) -> tuple[str, str]:
+    """Build the system and user messages for CKP topic extraction."""
+    return (
+        CKP_TOPIC_EXTRACTION_SYSTEM_PROMPT,
+        build_ckp_topic_extraction_request(
+            source_kind=source_kind,
+            source_id=source_id,
+            title=title,
+            summary=summary,
+            category=category,
+            tags=tags,
+            pkus=pkus,
+            max_pkus=max_pkus,
+            max_statement_length=max_statement_length,
+        ),
+    )

@@ -18,6 +18,13 @@ def auto_migrate(Base, engine) -> None:
     inspector = inspect(engine)
     existing_tables = inspector.get_table_names()
 
+    if "knowledge_draft" in existing_tables and "personal_asset_unit" not in existing_tables:
+        print("[auto_migrate] Rename table: knowledge_draft -> personal_asset_unit")
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE `knowledge_draft` RENAME TO `personal_asset_unit`"))
+        inspector = inspect(engine)
+        existing_tables = inspector.get_table_names()
+
     for table_name, table_obj in Base.metadata.tables.items():
         if table_name not in existing_tables:
             print(f"[auto_migrate] Create table: {table_name}")

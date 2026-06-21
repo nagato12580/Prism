@@ -242,7 +242,7 @@ def test_upload_document_resource_creates_item(client, monkeypatch):
     assert resource["tags"] == ["intro", "hello"]
     assert resource["content_text"] == "hello document"
     assert resource["item_id"]
-    assert called == [resource["item_id"]]
+    assert called == []
 
 
 def test_duplicate_resource_in_same_topic_is_conflict(client):
@@ -297,6 +297,161 @@ def test_upload_image_audio_video_as_metadata_only(client):
         assert resource["media_type"] == expected_type
         assert resource["processing_status"] == "metadata_only"
         assert resource["item_id"] is None
+
+
+def test_ingest_resource_returns_processing_and_triggers_background(client, monkeypatch):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+    triggered = []
+
+    monkeypatch.setattr(
+        "backend.app.api.knowledge._trigger_resource_ingestion",
+        lambda resource_id, item_id: triggered.append((resource_id, item_id)),
+    )
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
+
+    assert response.status_code == 200
+    ingested = response.json()
+    assert ingested["processing_status"] == "processing"
+    assert ingested["error_message"] is None
+    assert triggered == [(resource["id"], resource["item_id"])]
+
+
+def test_ingest_resource_does_not_retrigger_while_processing(client, db_session, monkeypatch):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
+    saved.processing_status = "processing"
+    db_session.commit()
+    triggered = []
+
+    monkeypatch.setattr(
+        "backend.app.api.knowledge._trigger_resource_ingestion",
+        lambda resource_id, item_id: triggered.append((resource_id, item_id)),
+    )
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
+
+    assert response.status_code == 200
+    assert response.json()["processing_status"] == "processing"
+    assert triggered == []
+
+
+def test_run_resource_ingestion_marks_resource_done(client, db_session, monkeypatch):
+    from backend.app.api import knowledge
+
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"chunks": 3}
+
+    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(knowledge.httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
+
+    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
+    assert saved.processing_status == "done"
+    assert saved.error_message is None
+
+
+def test_run_resource_ingestion_waits_for_long_document_governance(client, db_session, monkeypatch):
+    from backend.app.api import knowledge
+
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+    observed = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"chunks": 3}
+
+    def fake_post(*args, **kwargs):
+        observed.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(knowledge.httpx, "post", fake_post)
+
+    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
+
+    assert observed["timeout"] >= 1800
+
+
+def test_run_resource_ingestion_records_engine_error_body(client, db_session, monkeypatch):
+    from backend.app.api import knowledge
+
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+
+    class FakeResponse:
+        status_code = 500
+        text = '{"detail":"Lock wait timeout exceeded; try restarting transaction"}'
+
+        def json(self):
+            return {"detail": "Lock wait timeout exceeded; try restarting transaction"}
+
+    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(knowledge.httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
+
+    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
+    assert saved.processing_status == "failed"
+    assert saved.error_message == "Engine returned 500: Lock wait timeout exceeded; try restarting transaction"
+
+
+def test_run_resource_ingestion_marks_resource_failed_on_zero_chunks(client, db_session, monkeypatch):
+    from backend.app.api import knowledge
+
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"chunks": 0}
+
+    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(knowledge.httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
+
+    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
+    assert saved.processing_status == "failed"
+    assert saved.error_message == "Ingestion returned 0 chunks (content may be empty)"
 
 
 def test_update_resource_title_updates_linked_item(client, monkeypatch):

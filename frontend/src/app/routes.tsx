@@ -9,6 +9,8 @@ import { WikiPage } from '@/pages/WikiPage'
 import { WikiUploadPage } from '@/pages/WikiUploadPage'
 import { WikiDocDetail } from '@/pages/WikiDocDetail'
 import { WikiPointDetail } from '@/pages/WikiPointDetail'
+import { UserProfilePage } from '@/pages/UserProfilePage'
+import { MemoryGraphPage } from '@/pages/MemoryGraphPage'
 
 export const router = createBrowserRouter([
   {
@@ -22,6 +24,8 @@ export const router = createBrowserRouter([
       { path: 'graph', element: <KnowledgeGraphPage /> },
       { path: 'knowledge', element: <KnowledgePage /> },
       { path: 'wiki', element: <WikiPage /> },
+      { path: 'memory/profile', element: <UserProfilePage /> },
+      { path: 'memory/graph', element: <MemoryGraphPage /> },
       { path: 'wiki/upload', element: <WikiUploadPage /> },
       { path: 'wiki/documents/:id', element: <WikiDocDetail /> },
       { path: 'wiki/points/:id', element: <WikiPointDetail /> },

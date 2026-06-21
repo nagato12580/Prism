@@ -5,7 +5,8 @@
 子块（~256 token）正常向量化，通过 parent_id 关联父块。
 检索时命中子块 → 返回父块完整上下文。
 """
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -59,7 +60,7 @@ def _bulk_index_chunks_es(
 ) -> int:
     """批量写入 parent + child chunk 到 ES。"""
     es = get_es()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
     docs = []
     for parent_index, pc in enumerate(parent_chunks):
         parent_id = parent_id_map_by_index.get(parent_index, "")

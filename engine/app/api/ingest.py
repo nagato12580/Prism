@@ -1,9 +1,12 @@
 # prism/engine/app/api/ingest.py
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from ..ingestion.pipeline import ingest_item
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
+logger = logging.getLogger("uvicorn.error")
 
 
 class IngestRequest(BaseModel):
@@ -12,5 +15,12 @@ class IngestRequest(BaseModel):
 
 @router.post("")
 def ingest(req: IngestRequest):
-    count = ingest_item(req.item_id)
+    try:
+        count = ingest_item(req.item_id)
+    except Exception as exc:
+        logger.exception("[ingest] failed item_id=%s", req.item_id)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "ingest_failed", "message": str(exc)},
+        ) from exc
     return {"item_id": req.item_id, "chunks": count, "status": "done"}

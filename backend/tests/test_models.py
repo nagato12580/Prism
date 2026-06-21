@@ -158,10 +158,10 @@ def test_knowledge_file_done_status_normalizes_to_completed(db_session):
     db_session.commit()
 
     loaded = {item.md5: item for item in db_session.query(KnowledgeFile).all()}
-    assert loaded["legacy-done-md5"].processing_status == "completed"
-    assert loaded["legacy-done-md5"].parse_status == "completed"
-    assert loaded["new-done-md5"].processing_status == "completed"
-    assert loaded["new-done-md5"].parse_status == "completed"
+    assert loaded["legacy-done-md5"].processing_status == "done"
+    assert loaded["legacy-done-md5"].parse_status == "done"
+    assert loaded["new-done-md5"].processing_status == "done"
+    assert loaded["new-done-md5"].parse_status == "done"
     assert loaded["pending-md5"].processing_status == "pending"
 
 

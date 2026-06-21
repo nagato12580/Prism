@@ -1,8 +1,10 @@
 # prism/backend/app/api/knowledge.py
 import hashlib
+import threading
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import cast, String, func
 from sqlalchemy.exc import IntegrityError
@@ -10,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from .upload import _trigger_ingestion
 from ..config import settings
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
@@ -24,6 +26,7 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 DEFAULT_USER_ID = "default-user"
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+RESOURCE_INGEST_TIMEOUT_SECONDS = 1800
 
 
 def _topic_out(topic: KnowledgeTopic, resource_count: int = 0) -> KnowledgeTopicOut:
@@ -116,6 +119,69 @@ def _save_upload(content: bytes, filename: str | None, topic_id: str, md5: str) 
     saved_path = topic_dir / f"{md5}{ext}"
     saved_path.write_bytes(content)
     return saved_path
+
+
+def _run_resource_ingestion(resource_id: str, item_id: str) -> None:
+    db = SessionLocal()
+    try:
+        status = "failed"
+        error_message = None
+        try:
+            resp = httpx.post(
+                f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/ingest",
+                json={"item_id": item_id},
+                timeout=RESOURCE_INGEST_TIMEOUT_SECONDS,
+            )
+            if resp.status_code == 200:
+                chunk_count = resp.json().get("chunks", 0)
+                if chunk_count > 0:
+                    status = "done"
+                else:
+                    error_message = "Ingestion returned 0 chunks (content may be empty)"
+            else:
+                error_message = _engine_error_message(resp)
+        except Exception as exc:
+            error_message = str(exc)
+
+        resource = db.query(KnowledgeFile).filter(
+            KnowledgeFile.id == resource_id,
+            KnowledgeFile.user_id == DEFAULT_USER_ID,
+        ).first()
+        if not resource:
+            return
+        resource.processing_status = status
+        resource.error_message = error_message
+        db.commit()
+    finally:
+        db.close()
+
+
+def _trigger_resource_ingestion(resource_id: str, item_id: str) -> None:
+    thread = threading.Thread(
+        target=_run_resource_ingestion,
+        args=(resource_id, item_id),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _engine_error_message(resp: httpx.Response) -> str:
+    detail = ""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            raw_detail = body.get("detail")
+            if isinstance(raw_detail, dict):
+                detail = raw_detail.get("message") or raw_detail.get("code") or str(raw_detail)
+            elif raw_detail is not None:
+                detail = str(raw_detail)
+    except Exception:
+        detail = resp.text.strip()
+    if not detail:
+        detail = resp.text.strip()
+    if detail:
+        return f"Engine returned {resp.status_code}: {detail[:500]}"
+    return f"Engine returned {resp.status_code}"
 
 
 @router.post("", response_model=KnowledgeItemOut)
@@ -364,7 +430,7 @@ def delete_resource(resource_id: str, db: Session = Depends(get_db)):
 
 @router.post("/resources/{resource_id}/ingest", response_model=KnowledgeResourceOut)
 def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
-    """手动触发单个资源的向量化摄入。"""
+    """Trigger resource ingestion without waiting for Engine to finish."""
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
@@ -379,37 +445,15 @@ def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
             status_code=400,
             detail={"code": "no_item", "message": "Resource has no associated knowledge item"},
         )
+    if resource.processing_status == "processing":
+        return resource
 
-    # 设置为处理中
     resource.processing_status = "processing"
+    resource.error_message = None
     db.commit()
     db.refresh(resource)
 
-    # 同步调用 Engine 摄入，不 fire-and-forget
-    import httpx
-    try:
-        resp = httpx.post(
-            f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/ingest",
-            json={"item_id": resource.item_id},
-            timeout=120,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            chunk_count = data.get("chunks", 0)
-            if chunk_count > 0:
-                resource.processing_status = "done"
-            else:
-                resource.processing_status = "failed"
-                resource.error_message = "Ingestion returned 0 chunks (content may be empty)"
-        else:
-            resource.processing_status = "failed"
-            resource.error_message = f"Engine returned {resp.status_code}"
-    except Exception as exc:
-        resource.processing_status = "failed"
-        resource.error_message = str(exc)
-
-    db.commit()
-    db.refresh(resource)
+    _trigger_resource_ingestion(resource.id, resource.item_id)
     return resource
 
 

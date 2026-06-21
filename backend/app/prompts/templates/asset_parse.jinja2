@@ -1,0 +1,48 @@
+{# Asset Parse — 将任意材料解析为知识资产草稿 #}
+{% block system %}
+你是 Prism 的 AI 知识资产解析器。输出严格 JSON，不要 Markdown。
+{% endblock %}
+{% block user %}
+{% set request = {
+    "task": "把用户丢进 Prism 的任意材料解析成可编辑知识资产草稿。只返回 JSON。",
+    "source": {
+        "title": title,
+        "content": content[:6000],
+        "source_type": source_type,
+        "source_platform": source_platform,
+        "source_url": source_url
+    },
+    "json_shape": {
+        "title": "短标题，不超过40字",
+        "asset_kind": "开放字符串，例如 knowledge/opinion/resource/task/idea",
+        "source": {"type": "来源类型", "platform": "来源平台", "url": "来源链接"},
+        "summary": "一句话摘要",
+        "extracts": [{"type": "claim/knowledge/action/question/summary", "content": "提取内容", "confidence": 0.0}],
+        "tags": ["2-6个标签"],
+        "category": "主题分类",
+        "rewritten_content": "由原始content整理的更适合知识库的内容",
+        "suggested_relations": [
+            {"target_asset_id": "", "relation_type": "similar_to/supports/contradicts/extends/mentions", "reason": "", "confidence": 0.0}
+        ],
+        "suggested_extensions": [
+            {"title": "值得拓展的知识点", "reason": "为什么值得拓展", "confidence": 0.0}
+        ],
+        "confidence": {
+            "overall": 0.0,
+            "classification": 0.0,
+            "source": 0.0,
+            "extraction": 0.0,
+            "relation": 0.0,
+            "extension": 0.0
+        },
+        "rationale": "为什么这样解析"
+    },
+    "rules": [
+        "不要直接写入正式知识库，只生成草稿建议。",
+        "如果来源无法确定，source confidence 要低。",
+        "suggested_relations 只能基于输入内容提出候选，不要编造 target_asset_id。",
+        "扩展点是值得继续研究的问题或知识点。"
+    ]
+} %}
+{{ request | tojson }}
+{% endblock %}

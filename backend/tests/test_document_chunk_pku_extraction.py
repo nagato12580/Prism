@@ -259,6 +259,216 @@ def test_document_chunk_settlement_persists_llm_pku_relations(db_session, monkey
     assert relation.llm_model == "qwen-plus"
 
 
+def test_document_settlement_groups_all_chunk_pkus_under_document_topic_ckp(db_session, monkeypatch):
+    from backend.app.models import CanonicalKnowledgePoint, KnowledgeChunk, KnowledgeItem, PKUCanonicalLink
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(
+        title="LLM fine-tuning guide",
+        summary="LoRA and evaluation practices.",
+        category="AI",
+        tags=["fine-tuning"],
+        user_id="default-user",
+    )
+    db_session.add(item)
+    db_session.flush()
+    first_chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="LoRA reduces trainable parameters.",
+        chunk_type="parent",
+        chunk_index=0,
+    )
+    second_chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Fine-tuning evaluation should use validation data.",
+        chunk_type="parent",
+        chunk_index=1,
+    )
+    db_session.add_all([first_chunk, second_chunk])
+    db_session.flush()
+
+    def fake_extract(item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None):
+        if anchor_chunk.id == first_chunk.id:
+            return kg.AssetUnitPKUExtraction(
+                pkus=[
+                    kg.ExtractedPKU(
+                        local_id="pku_lora",
+                        statement="LoRA reduces trainable parameters.",
+                        unit_type="method",
+                        evidence_span="LoRA reduces trainable parameters.",
+                        keywords=["LoRA", "fine-tuning"],
+                        concepts=["LoRA"],
+                        entities=[],
+                        domains=["AI"],
+                        group="fine-tuning",
+                        confidence=0.91,
+                        reason="method",
+                        llm_model="qwen-plus",
+                    )
+                ],
+                relations=[],
+                llm_model="qwen-plus",
+            )
+        return kg.AssetUnitPKUExtraction(
+            pkus=[
+                kg.ExtractedPKU(
+                    local_id="pku_eval",
+                    statement="Fine-tuning evaluation should use validation data.",
+                    unit_type="rule",
+                    evidence_span="Evaluation should use validation data.",
+                    keywords=["evaluation", "fine-tuning"],
+                    concepts=["validation"],
+                    entities=[],
+                    domains=["AI"],
+                    group="fine-tuning",
+                    confidence=0.88,
+                    reason="rule",
+                    llm_model="qwen-plus",
+                )
+            ],
+            relations=[],
+            llm_model="qwen-plus",
+    )
+
+    monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+
+    def fake_extract_topics(**kwargs):
+        member_refs = [pku["ref"] for pku in kwargs["pkus"]]
+        return kg.CKPTopicExtraction(
+            topics=[
+                kg.ExtractedCKPTopic(
+                    local_id="topic_1",
+                    title="LLM fine-tuning",
+                    description="Methods and rules for adapting large language models.",
+                    keywords=["fine-tuning"],
+                    concepts=["LoRA", "validation"],
+                    entities=[],
+                    domains=["AI"],
+                    member_pku_refs=member_refs,
+                    confidence=0.9,
+                    reason="document-level topic",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        )
+
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_topics_with_llm",
+        fake_extract_topics,
+    )
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
+    result = kg.settle_document_item_to_governance(db_session, item.id)
+    db_session.commit()
+
+    assert result.pku_count == 2
+    assert result.canonical_count == 1
+    assert result.link_count == 2
+    ckp = db_session.query(CanonicalKnowledgePoint).one()
+    assert ckp.canonical_type == "topic"
+    assert ckp.title == "LLM fine-tuning"
+    assert {link.relation_type for link in db_session.query(PKUCanonicalLink).all()} == {"about"}
+
+
+def test_document_settlement_qualifies_duplicate_local_ids_across_chunks(db_session, monkeypatch):
+    from backend.app.models import CanonicalKnowledgePoint, KnowledgeChunk, KnowledgeItem, PKUCanonicalLink
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(
+        title="Retrieval operations",
+        summary="Different chunks mention different retrieval practices.",
+        category="RAG",
+        tags=["retrieval"],
+        user_id="default-user",
+    )
+    db_session.add(item)
+    db_session.flush()
+    first_chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Metadata filters narrow retrieval candidates.",
+        chunk_type="parent",
+        chunk_index=0,
+    )
+    second_chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Rerankers reorder retrieval candidates.",
+        chunk_type="parent",
+        chunk_index=1,
+    )
+    db_session.add_all([first_chunk, second_chunk])
+    db_session.flush()
+
+    def fake_extract(item, anchor_chunk, previous_chunk=None, next_chunk=None, anchor_index=None):
+        if anchor_chunk.id == first_chunk.id:
+            statement = "Metadata filters narrow retrieval candidates."
+            keywords = ["metadata", "retrieval"]
+        else:
+            statement = "Rerankers reorder retrieval candidates."
+            keywords = ["reranker", "retrieval"]
+        return kg.AssetUnitPKUExtraction(
+            pkus=[
+                kg.ExtractedPKU(
+                    local_id="pku_1",
+                    statement=statement,
+                    unit_type="method",
+                    evidence_span=statement,
+                    keywords=keywords,
+                    concepts=["retrieval"],
+                    entities=[],
+                    domains=["RAG"],
+                    group="retrieval",
+                    confidence=0.9,
+                    reason="chunk evidence",
+                    llm_model="qwen-plus",
+                )
+            ],
+            relations=[],
+            llm_model="qwen-plus",
+        )
+
+    def fake_extract_topics(**kwargs):
+        refs = [pku["ref"] for pku in kwargs["pkus"]]
+        assert len(refs) == 2
+        assert len(set(refs)) == 2
+        return kg.CKPTopicExtraction(
+            topics=[
+                kg.ExtractedCKPTopic(
+                    local_id="topic_1",
+                    title="Retrieval operations",
+                    description="Methods for narrowing and reordering retrieval candidates.",
+                    keywords=["retrieval"],
+                    concepts=["metadata", "reranker"],
+                    entities=[],
+                    domains=["RAG"],
+                    member_pku_refs=refs,
+                    confidence=0.92,
+                    reason="document-level topic",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        )
+
+    monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+    monkeypatch.setattr(kg, "_extract_ckp_topics_with_llm", fake_extract_topics)
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
+    result = kg.settle_document_item_to_governance(db_session, item.id)
+    db_session.commit()
+
+    assert result.pku_count == 2
+    assert result.link_count == 2
+    assert result.canonical_count == 1
+    assert db_session.query(CanonicalKnowledgePoint).one().canonical_type == "topic"
+    links = db_session.query(PKUCanonicalLink).all()
+    assert {link.relation_type for link in links} == {"about"}
+    assert len({link.pku_id for link in links}) == 2
+
+
 def test_document_settlement_passes_previous_and_next_parent_chunks(db_session, monkeypatch):
     from datetime import datetime, timedelta
 
@@ -420,3 +630,204 @@ def test_document_chunk_fallback_does_not_call_ollama_type_classifier(db_session
     assert pku.statement == "Metadata filter is defined as a constraint on retrieval candidates."
     assert pku.unit_type == "definition"
     assert pku.llm_model == ""
+
+
+def test_clear_document_item_governance_deprecates_document_orphan_topic_ckps(db_session):
+    from backend.app.models import CanonicalKnowledgePoint, KnowledgeChunk, KnowledgeItem, PKUCanonicalLink, PersonalKnowledgeUnit
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="Fine-tuning guide", user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    chunk = KnowledgeChunk(item_id=item.id, chunk_text="LoRA reduces parameters.", chunk_type="parent")
+    db_session.add(chunk)
+    db_session.flush()
+    pku = PersonalKnowledgeUnit(
+        user_id="default-user",
+        source_kind="document_chunk",
+        source_id=chunk.id,
+        unit_type="method",
+        statement="LoRA reduces parameters.",
+        normalized_statement="LoRA reduces parameters.",
+        normalized_statement_hash="cleanup-topic-pku",
+        status="active",
+    )
+    ckp = CanonicalKnowledgePoint(
+        user_id="default-user",
+        canonical_type="topic",
+        title="LLM fine-tuning",
+        canonical_statement="Fine-tuning topic hub.",
+        status="draft",
+        extra_meta={"created_from": "document_chunk", "source_id": item.id},
+    )
+    db_session.add_all([pku, ckp])
+    db_session.flush()
+    db_session.add(
+        PKUCanonicalLink(
+            user_id="default-user",
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+        )
+    )
+    db_session.commit()
+
+    deleted = kg.clear_document_item_governance(db_session, item.id)
+    db_session.commit()
+
+    assert deleted == 1
+    db_session.refresh(ckp)
+    assert ckp.status == "deprecated"
+
+
+def test_clear_document_item_governance_deprecates_legacy_source_item_orphan_topic_ckps(db_session):
+    from backend.app.models import CanonicalKnowledgePoint, KnowledgeChunk, KnowledgeItem, PKUCanonicalLink, PersonalKnowledgeUnit
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="Legacy fine-tuning guide", user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    chunk = KnowledgeChunk(item_id=item.id, chunk_text="QLoRA reduces memory.", chunk_type="parent")
+    db_session.add(chunk)
+    db_session.flush()
+    pku = PersonalKnowledgeUnit(
+        user_id="default-user",
+        source_kind="document_chunk",
+        source_id=chunk.id,
+        unit_type="method",
+        statement="QLoRA reduces memory.",
+        normalized_statement="QLoRA reduces memory.",
+        normalized_statement_hash="cleanup-legacy-topic-pku",
+        status="active",
+    )
+    ckp = CanonicalKnowledgePoint(
+        user_id="default-user",
+        canonical_type="topic",
+        title="Legacy LLM fine-tuning",
+        canonical_statement="Legacy fine-tuning topic hub.",
+        status="draft",
+        extra_meta={"created_from": "document_chunk", "source_item_id": item.id},
+    )
+    db_session.add_all([pku, ckp])
+    db_session.flush()
+    db_session.add(
+        PKUCanonicalLink(
+            user_id="default-user",
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+        )
+    )
+    db_session.commit()
+
+    deleted = kg.clear_document_item_governance(db_session, item.id)
+    db_session.commit()
+
+    assert deleted == 1
+    db_session.refresh(ckp)
+    assert ckp.status == "deprecated"
+
+
+def test_clear_document_item_governance_deprecates_preexisting_orphan_topic_ckps(db_session):
+    from backend.app.models import CanonicalKnowledgePoint, KnowledgeChunk, KnowledgeItem, PersonalKnowledgeUnit
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="Already orphaned fine-tuning guide", user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    chunk = KnowledgeChunk(item_id=item.id, chunk_text="DoRA improves adapter tuning.", chunk_type="parent")
+    db_session.add(chunk)
+    db_session.flush()
+    pku = PersonalKnowledgeUnit(
+        user_id="default-user",
+        source_kind="document_chunk",
+        source_id=chunk.id,
+        unit_type="method",
+        statement="DoRA improves adapter tuning.",
+        normalized_statement="DoRA improves adapter tuning.",
+        normalized_statement_hash="cleanup-preexisting-orphan-pku",
+        status="active",
+    )
+    ckp = CanonicalKnowledgePoint(
+        user_id="default-user",
+        canonical_type="topic",
+        title="Already orphaned LLM fine-tuning",
+        canonical_statement="Already orphaned fine-tuning topic hub.",
+        status="draft",
+        extra_meta={"created_from": "document_chunk", "source_item_id": item.id},
+    )
+    db_session.add_all([pku, ckp])
+    db_session.commit()
+
+    deleted = kg.clear_document_item_governance(db_session, item.id)
+    db_session.commit()
+
+    assert deleted == 1
+    db_session.refresh(ckp)
+    assert ckp.status == "deprecated"
+
+
+def test_clear_document_item_governance_keeps_shared_document_topic_ckp_active(db_session):
+    from backend.app.models import CanonicalKnowledgePoint, KnowledgeChunk, KnowledgeItem, PKUCanonicalLink, PersonalKnowledgeUnit
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(title="Shared fine-tuning guide", user_id="default-user")
+    db_session.add(item)
+    db_session.flush()
+    chunk = KnowledgeChunk(item_id=item.id, chunk_text="Adapters support efficient tuning.", chunk_type="parent")
+    db_session.add(chunk)
+    db_session.flush()
+    document_pku = PersonalKnowledgeUnit(
+        user_id="default-user",
+        source_kind="document_chunk",
+        source_id=chunk.id,
+        unit_type="method",
+        statement="Adapters support efficient tuning.",
+        normalized_statement="Adapters support efficient tuning.",
+        normalized_statement_hash="cleanup-shared-document-pku",
+        status="active",
+    )
+    surviving_pku = PersonalKnowledgeUnit(
+        user_id="default-user",
+        source_kind="personal_asset_unit",
+        source_id="asset-unit-1",
+        unit_type="method",
+        statement="Adapter tuning is a reusable efficient tuning method.",
+        normalized_statement="Adapter tuning is a reusable efficient tuning method.",
+        normalized_statement_hash="cleanup-shared-surviving-pku",
+        status="active",
+    )
+    ckp = CanonicalKnowledgePoint(
+        user_id="default-user",
+        canonical_type="topic",
+        title="Shared LLM fine-tuning",
+        canonical_statement="Shared fine-tuning topic hub.",
+        status="draft",
+        extra_meta={"created_from": "document_chunk", "source_id": item.id, "source_item_id": item.id},
+    )
+    db_session.add_all([document_pku, surviving_pku, ckp])
+    db_session.flush()
+    db_session.add_all(
+        [
+            PKUCanonicalLink(
+                user_id="default-user",
+                pku_id=document_pku.id,
+                canonical_id=ckp.id,
+                relation_type="about",
+            ),
+            PKUCanonicalLink(
+                user_id="default-user",
+                pku_id=surviving_pku.id,
+                canonical_id=ckp.id,
+                relation_type="about",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    deleted = kg.clear_document_item_governance(db_session, item.id)
+    db_session.commit()
+
+    assert deleted == 1
+    db_session.refresh(ckp)
+    assert ckp.status == "draft"
