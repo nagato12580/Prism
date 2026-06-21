@@ -1,10 +1,11 @@
-import { PointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { PointerEvent, WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  BookOpen,
+  ArrowLeft,
   Boxes,
   Check,
   FileText,
   Loader2,
+  Maximize2,
   Network,
   Pencil,
   RefreshCw,
@@ -13,6 +14,8 @@ import {
   Search,
   Sparkles,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import {
   knowledgeGraphApi,
@@ -28,26 +31,31 @@ import { cn } from '@/lib/utils'
 type PositionedNode = KnowledgeGraphNode & { x: number; y: number }
 type PositionMap = Record<string, { x: number; y: number }>
 type DragState = { id: string; dx: number; dy: number; moved: boolean } | null
+type SourceEvidence = { edge: KnowledgeGraphEdge; node: KnowledgeGraphNode }
+type GraphScope = 'ckp' | 'pku'
 
 const graphWidth = 1180
 const graphHeight = 720
 const nodeWidth = 150
 const nodeHeight = 42
 const nodeRadius = 21
+const minGraphZoom = 0.55
+const maxGraphZoom = 1.8
+const graphZoomStep = 0.15
+const sourceGraphEdgeTypes = new Set<KnowledgeGraphEdge['type']>(['pku_source'])
 
 const nodeMeta: Record<
   KnowledgeGraphNodeType,
   { label: string; color: string; fill: string; icon: typeof Network; lane: string }
 > = {
-  canonical: { label: 'CKP', color: '#155eef', fill: '#eff6ff', icon: Sparkles, lane: '稳定知识点' },
-  pku: { label: 'PKU', color: '#6d28d9', fill: '#f5f3ff', icon: Boxes, lane: '原子表达' },
-  asset: { label: '碎片', color: '#b45309', fill: '#fffbeb', icon: BookOpen, lane: '个人碎片' },
-  personal_asset_unit: { label: '资产单元', color: '#be185d', fill: '#fdf2f8', icon: Boxes, lane: '知识草稿' },
-  document_chunk: { label: '文档', color: '#0f766e', fill: '#ecfdf5', icon: FileText, lane: '文档片段' },
+  canonical: { label: 'CKP', color: '#155eef', fill: '#eff6ff', icon: Sparkles, lane: '主题层' },
+  pku: { label: 'PKU', color: '#6d28d9', fill: '#f5f3ff', icon: Boxes, lane: '知识单元' },
+  asset: { label: '碎片', color: '#b45309', fill: '#fffbeb', icon: FileText, lane: '来源碎片' },
+  personal_asset_unit: { label: '碎片单元', color: '#be185d', fill: '#fdf2f8', icon: Boxes, lane: '碎片单元' },
+  document_chunk: { label: '文档块', color: '#0f766e', fill: '#ecfdf5', icon: FileText, lane: '文档来源' },
 }
 
 const fallbackNodeMeta = { label: '节点', color: '#475569', fill: '#f8fafc', icon: Network, lane: '其他节点' }
-const graphNodeTypes: KnowledgeGraphNodeType[] = ['canonical', 'pku', 'asset', 'personal_asset_unit', 'document_chunk']
 
 function getNodeMeta(type: string) {
   return nodeMeta[type as KnowledgeGraphNodeType] ?? fallbackNodeMeta
@@ -78,33 +86,39 @@ function joinList(values?: string[]) {
   return (values ?? []).join(', ')
 }
 
-function createInitialPositions(nodes: KnowledgeGraphNode[]): PositionMap {
-  const laneX: Record<KnowledgeGraphNodeType, number> = {
-    canonical: 150,
-    pku: 470,
-    asset: 760,
-    personal_asset_unit: 930,
-    document_chunk: 1020,
-  }
-  const laneOrder = graphNodeTypes
-  const grouped = laneOrder.reduce(
-    (acc, type) => {
-      acc[type] = nodes.filter((node) => node.type === type)
-      return acc
-    },
-    {} as Record<KnowledgeGraphNodeType, KnowledgeGraphNode[]>,
-  )
+function isParentCkp(node: KnowledgeGraphNode) {
+  return node.type === 'canonical' && node.topic_level === 'parent'
+}
+
+function isChildCkp(node: KnowledgeGraphNode) {
+  return node.type === 'canonical' && node.topic_level !== 'parent'
+}
+
+function positionKey(scope: GraphScope, nodeId: string) {
+  return `${scope}:${nodeId}`
+}
+
+function createInitialPositions(nodes: KnowledgeGraphNode[], scope: GraphScope): PositionMap {
+  const lanes =
+    scope === 'ckp'
+      ? [
+          { x: 230, type: 'canonical' as KnowledgeGraphNodeType, nodes: nodes.filter(isParentCkp) },
+          { x: 610, type: 'canonical' as KnowledgeGraphNodeType, nodes: nodes.filter(isChildCkp) },
+        ]
+      : [
+          { x: 230, type: 'canonical' as KnowledgeGraphNodeType, nodes: nodes.filter((node) => node.type === 'canonical') },
+          { x: 640, type: 'pku' as KnowledgeGraphNodeType, nodes: nodes.filter((node) => node.type === 'pku') },
+        ]
 
   const positions: PositionMap = {}
-  laneOrder.forEach((type) => {
-    const list = grouped[type]
+  lanes.forEach(({ x, type, nodes: list }) => {
     if (!list.length) return
-    const gap = Math.max(76, Math.min(126, (graphHeight - 160) / Math.max(1, list.length - 1)))
+    const gap = Math.max(68, Math.min(118, (graphHeight - 150) / Math.max(1, list.length - 1)))
     const start = list.length === 1 ? graphHeight / 2 : (graphHeight - gap * (list.length - 1)) / 2
     list.forEach((node, index) => {
-      const stagger = type === 'asset' || type === 'document_chunk' ? (index % 2 === 0 ? -18 : 18) : 0
-      positions[node.id] = {
-        x: laneX[type],
+      const stagger = type === 'pku' ? (index % 2 === 0 ? -16 : 16) : 0
+      positions[positionKey(scope, node.id)] = {
+        x,
         y: clamp(start + index * gap + stagger, 72, graphHeight - 72),
       }
     })
@@ -112,10 +126,11 @@ function createInitialPositions(nodes: KnowledgeGraphNode[]): PositionMap {
   return positions
 }
 
-function mergePositions(nodes: KnowledgeGraphNode[], current: PositionMap): PositionMap {
-  const initial = createInitialPositions(nodes)
+function mergePositions(nodes: KnowledgeGraphNode[], current: PositionMap, scope: GraphScope): PositionMap {
+  const initial = createInitialPositions(nodes, scope)
   return nodes.reduce((acc, node) => {
-    acc[node.id] = current[node.id] ?? initial[node.id]
+    const key = positionKey(scope, node.id)
+    acc[key] = current[key] ?? initial[key]
     return acc
   }, {} as PositionMap)
 }
@@ -129,22 +144,15 @@ function secondaryType(node: KnowledgeGraphNode) {
 }
 
 function edgeStyle(edge: KnowledgeGraphEdge, active: boolean) {
-  if (edge.type === 'pku_relation') {
+  if (edge.type === 'canonical_relation') {
     return {
-      stroke: active ? '#be185d' : '#f472b6',
-      strokeWidth: active ? 2.4 : 1.6,
-      strokeDasharray: '6 5',
-    }
-  }
-  if (edge.type === 'pku_source') {
-    return {
-      stroke: active ? '#0f766e' : '#99f6e4',
-      strokeWidth: active ? 2 : 1.25,
-      strokeDasharray: '3 5',
+      stroke: active ? '#155eef' : '#93c5fd',
+      strokeWidth: active ? 2.6 : 1.8,
+      strokeDasharray: undefined,
     }
   }
   return {
-    stroke: active ? '#155eef' : '#cbd5e1',
+    stroke: active ? '#6d28d9' : '#c4b5fd',
     strokeWidth: active ? 2.2 : 1.35,
     strokeDasharray: undefined,
   }
@@ -157,6 +165,13 @@ function svgPoint(svg: SVGSVGElement, event: PointerEvent<SVGSVGElement>) {
   return point.matrixTransform(svg.getScreenCTM()?.inverse())
 }
 
+function sourceTitle(node: KnowledgeGraphNode) {
+  if (node.type === 'document_chunk') return node.label || '文档块'
+  if (node.type === 'personal_asset_unit') return node.label || '碎片单元'
+  if (node.type === 'asset') return node.label || '碎片'
+  return node.label || '来源'
+}
+
 export function KnowledgeGraphPage() {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [payload, setPayload] = useState<KnowledgeGraphPayload | null>(null)
@@ -166,34 +181,103 @@ export function KnowledgeGraphPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [graphScope, setGraphScope] = useState<GraphScope>('ckp')
+  const [focusedCkpId, setFocusedCkpId] = useState<string | null>(null)
+  const [graphZoom, setGraphZoom] = useState(1)
   const [dragging, setDragging] = useState<DragState>(null)
   const [viewMode, setViewMode] = useState<'workbench' | 'network'>('workbench')
 
+  const allNodeById = useMemo(
+    () => new Map((payload?.nodes ?? []).map((node) => [node.id, node] as const)),
+    [payload?.nodes],
+  )
+  const parentByChildId = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(payload?.edges ?? []).forEach((edge) => {
+      const source = allNodeById.get(edge.source)
+      const target = allNodeById.get(edge.target)
+      if (edge.type === 'canonical_relation' && source && target && isParentCkp(source) && isChildCkp(target)) {
+        map.set(target.id, source.id)
+      }
+    })
+    return map
+  }, [allNodeById, payload?.edges])
+
+  const activeCkpId = useMemo(() => {
+    if (focusedCkpId) return focusedCkpId
+    const selected = selectedId ? allNodeById.get(selectedId) : null
+    if (selected && isChildCkp(selected)) return selected.id
+    return null
+  }, [allNodeById, focusedCkpId, selectedId])
+
+  const visiblePayloadNodes = useMemo(
+    () => {
+      const allNodes = payload?.nodes ?? []
+      if (graphScope === 'ckp') return allNodes.filter((node) => node.type === 'canonical')
+      if (!activeCkpId) return allNodes.filter((node) => false)
+      const pkuIds = new Set(
+        (payload?.edges ?? [])
+          .filter((edge) => edge.type === 'canonical_pku' && edge.source === activeCkpId)
+          .map((edge) => edge.target),
+      )
+      return allNodes.filter((node) => node.id === activeCkpId || (node.type === 'pku' && pkuIds.has(node.id)))
+    },
+    [activeCkpId, graphScope, payload?.edges, payload?.nodes],
+  )
+  const visibleNodeIds = useMemo(() => new Set(visiblePayloadNodes.map((node) => node.id)), [visiblePayloadNodes])
+  const visiblePayloadEdges = useMemo(
+    () => {
+      const edgeType = graphScope === 'ckp' ? 'canonical_relation' : 'canonical_pku'
+      return (payload?.edges ?? []).filter(
+        (edge) => edge.type === edgeType && visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target),
+      )
+    },
+    [graphScope, payload?.edges, visibleNodeIds],
+  )
+
   const nodes = useMemo<PositionedNode[]>(
     () =>
-      (payload?.nodes ?? []).map((node) => ({
+      visiblePayloadNodes.map((node) => ({
         ...node,
-        ...(positions[node.id] ?? { x: graphWidth / 2, y: graphHeight / 2 }),
+        ...(positions[positionKey(graphScope, node.id)] ?? { x: graphWidth / 2, y: graphHeight / 2 }),
       })),
-    [payload?.nodes, positions],
+    [graphScope, positions, visiblePayloadNodes],
   )
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const selected = selectedId ? nodeById.get(selectedId) ?? null : nodes[0] ?? null
   const selectedEdges = useMemo(
-    () => (payload?.edges ?? []).filter((edge) => edge.source === selected?.id || edge.target === selected?.id),
-    [payload?.edges, selected?.id],
+    () => visiblePayloadEdges.filter((edge) => edge.source === selected?.id || edge.target === selected?.id),
+    [selected?.id, visiblePayloadEdges],
   )
+  const selectedSources = useMemo<SourceEvidence[]>(
+    () =>
+      selected?.type === 'pku'
+        ? (payload?.edges ?? [])
+            .filter((edge) => sourceGraphEdgeTypes.has(edge.type) && edge.source === selected.id)
+            .map((edge) => ({ edge, node: allNodeById.get(edge.target) }))
+            .filter((entry): entry is SourceEvidence => Boolean(entry.node))
+        : [],
+    [allNodeById, payload?.edges, selected],
+  )
+
+  const activeCkp = activeCkpId ? allNodeById.get(activeCkpId) ?? null : null
+  const activeParentCkp = activeCkpId ? allNodeById.get(parentByChildId.get(activeCkpId) ?? '') ?? null : null
+  const ckpNodeCount = (payload?.nodes ?? []).filter((node) => node.type === 'canonical').length
+  const pkuNodeCount = graphScope === 'pku' ? visiblePayloadNodes.filter((node) => node.type === 'pku').length : payload?.stats.node_counts.pku ?? 0
 
   const loadGraph = async (nextQuery = query) => {
     setLoading(true)
     setError(null)
     try {
       const data = await knowledgeGraphApi.get({ q: nextQuery.trim() || undefined, limit: 48 })
+      const visibleNodes = data.nodes.filter((node) => node.type === 'canonical')
       setPayload(data)
-      setPositions((current) => mergePositions(data.nodes, current))
+      setGraphScope('ckp')
+      setFocusedCkpId(null)
+      setPositions((current) => mergePositions(visibleNodes, current, 'ckp'))
       setSelectedId((current) => {
-        if (current && data.nodes.some((node) => node.id === current)) return current
-        return data.nodes[0]?.id ?? null
+        if (current && visibleNodes.some((node) => node.id === current)) return current
+        return visibleNodes[0]?.id ?? null
       })
     } catch (err) {
       setError(`加载知识图谱失败：${getErrorMessage(err)}`)
@@ -203,7 +287,39 @@ export function KnowledgeGraphPage() {
   }
 
   const resetLayout = () => {
-    setPositions(createInitialPositions(payload?.nodes ?? []))
+    setPositions((current) => ({ ...current, ...createInitialPositions(visiblePayloadNodes, graphScope) }))
+  }
+
+  const setZoom = (nextZoom: number) => {
+    setGraphZoom(clamp(Number(nextZoom.toFixed(2)), minGraphZoom, maxGraphZoom))
+  }
+
+  const zoomIn = () => setZoom(graphZoom + graphZoomStep)
+  const zoomOut = () => setZoom(graphZoom - graphZoomStep)
+  const fitGraph = () => setZoom(1)
+
+  const openPkuNetwork = (ckpId: string) => {
+    const ckp = allNodeById.get(ckpId)
+    if (!ckp || !isChildCkp(ckp)) return
+    const pkuIds = new Set(
+      (payload?.edges ?? [])
+        .filter((edge) => edge.type === 'canonical_pku' && edge.source === ckpId)
+        .map((edge) => edge.target),
+    )
+    const localNodes = (payload?.nodes ?? []).filter((node) => node.id === ckpId || (node.type === 'pku' && pkuIds.has(node.id)))
+    setGraphScope('pku')
+    setFocusedCkpId(ckpId)
+    setSelectedId(ckpId)
+    setPositions((current) => ({ ...current, ...mergePositions(localNodes, current, 'pku') }))
+  }
+
+  const backToCkpNetwork = () => {
+    const nextSelectedId = focusedCkpId ?? activeCkpId
+    const ckpNodes = (payload?.nodes ?? []).filter((node) => node.type === 'canonical')
+    setGraphScope('ckp')
+    setFocusedCkpId(null)
+    setSelectedId(nextSelectedId)
+    setPositions((current) => ({ ...current, ...mergePositions(ckpNodes, current, 'ckp') }))
   }
 
   const updateNode = async (nodeId: string, data: KnowledgeGraphNodeUpdate) => {
@@ -242,11 +358,17 @@ export function KnowledgeGraphPage() {
     const point = svgPoint(svgRef.current, event)
     const x = clamp(point.x - dragging.dx, nodeWidth / 2 + 16, graphWidth - nodeWidth / 2 - 16)
     const y = clamp(point.y - dragging.dy, nodeHeight / 2 + 16, graphHeight - nodeHeight / 2 - 16)
-    setPositions((current) => ({ ...current, [dragging.id]: { x, y } }))
+    setPositions((current) => ({ ...current, [positionKey(graphScope, dragging.id)]: { x, y } }))
     setDragging((current) => (current ? { ...current, moved: true } : current))
   }
 
   const stopDragging = () => setDragging(null)
+
+  const handleGraphWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    setZoom(graphZoom + (event.deltaY > 0 ? -graphZoomStep : graphZoomStep))
+  }
 
   useEffect(() => {
     loadGraph('')
@@ -254,46 +376,46 @@ export function KnowledgeGraphPage() {
   }, [])
 
   return (
-    <div className="flex min-h-[calc(100vh-9rem)] flex-col gap-4">
+    <div className="flex h-[calc(100vh-9rem)] min-h-0 flex-col gap-4 overflow-hidden">
       <header className="flex flex-col gap-3 border-b border-[var(--prism-line)] pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
             <Network size={15} />
             <span>知识治理图谱</span>
           </div>
-          <h1 className="mt-1 text-xl font-semibold text-slate-950">CKP、PKU 与来源证据</h1>
+          <h1 className="mt-1 text-xl font-semibold text-slate-950">CKP 与 PKU 治理网络</h1>
         </div>
         {viewMode === 'network' ? (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <div className="relative min-w-0 sm:w-80">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') loadGraph()
-              }}
-              placeholder="搜索知识点、PKU 或来源"
-              className="h-10 w-full rounded-lg border border-[var(--prism-line)] bg-white pl-9 pr-3 text-sm outline-none transition focus:border-[var(--prism-blue)] focus:ring-2 focus:ring-blue-100"
-            />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 sm:w-80">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') loadGraph()
+                }}
+                placeholder="搜索 CKP 或 PKU"
+                className="h-10 w-full rounded-lg border border-[var(--prism-line)] bg-white pl-9 pr-3 text-sm outline-none transition focus:border-[var(--prism-blue)] focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={resetLayout}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              <RotateCcw size={15} />
+              重排
+            </button>
+            <button
+              type="button"
+              onClick={() => loadGraph()}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800"
+            >
+              {loading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+              刷新
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={resetLayout}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            <RotateCcw size={15} />
-            重排
-          </button>
-          <button
-            type="button"
-            onClick={() => loadGraph()}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800"
-          >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-            刷新
-          </button>
-        </div>
         ) : null}
       </header>
 
@@ -326,47 +448,117 @@ export function KnowledgeGraphPage() {
         </div>
       ) : null}
 
-      <div className={viewMode === 'workbench' ? 'block' : 'hidden'}>
+      <div className={viewMode === 'workbench' ? 'min-h-0 flex-1' : 'hidden'}>
         <KnowledgeGraphWorkbench onSaveNode={updateNode} />
       </div>
-      <div className={cn(
-        'min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_23rem]',
-        viewMode === 'network' ? 'grid' : 'hidden',
-      )}>
+      <div
+        className={cn(
+          'min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_23rem]',
+          viewMode === 'network' ? 'grid' : 'hidden',
+        )}
+      >
         <section className="prism-panel min-h-[35rem] overflow-hidden rounded-lg">
-          <div className="grid grid-cols-2 gap-px border-b border-[var(--prism-line)] bg-[var(--prism-line)] md:grid-cols-5">
-            {graphNodeTypes.map((type) => {
-              const meta = getNodeMeta(type)
-              const Icon = meta.icon
-              return (
-                <div key={type} className="flex items-center gap-2 bg-white px-4 py-3">
-                  <Icon size={16} style={{ color: meta.color }} />
-                  <span className="text-xs font-medium text-slate-500">{meta.label}</span>
-                  <span className="ml-auto text-sm font-semibold text-slate-950">
-                    {payload?.stats.node_counts[type] ?? 0}
-                  </span>
+          <div className="grid gap-px border-b border-[var(--prism-line)] bg-[var(--prism-line)] md:grid-cols-[1.4fr_0.8fr_0.8fr]">
+            <div className="flex min-w-0 items-center gap-2 bg-white px-4 py-3">
+              {graphScope === 'pku' ? (
+                <button
+                  type="button"
+                  onClick={backToCkpNetwork}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--prism-line)] text-slate-600 transition hover:bg-slate-50"
+                  title="返回 CKP 网络"
+                >
+                  <ArrowLeft size={14} />
+                </button>
+              ) : (
+                <Network size={16} className="shrink-0 text-slate-500" />
+              )}
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-950">
+                  {graphScope === 'ckp' ? '全局 CKP 主题网络' : activeCkp?.label ?? 'CKP-PKU 局部网络'}
                 </div>
-              )
-            })}
+                <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                  {graphScope === 'ckp'
+                    ? '点击子 CKP 进入它的 PKU 网络'
+                    : activeParentCkp
+                      ? `上级：${activeParentCkp.label}`
+                      : '当前子 CKP 下的 PKU'}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-white px-4 py-3">
+              <Sparkles size={16} className="text-blue-600" />
+              <span className="text-xs font-medium text-slate-500">CKP</span>
+              <span className="ml-auto text-sm font-semibold text-slate-950">
+                {graphScope === 'ckp' ? ckpNodeCount : 1}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 bg-white px-4 py-3">
+              <Boxes size={16} className="text-violet-700" />
+              <span className="text-xs font-medium text-slate-500">PKU</span>
+              <span className="ml-auto text-sm font-semibold text-slate-950">
+                {graphScope === 'ckp' ? '-' : pkuNodeCount}
+              </span>
+            </div>
           </div>
 
-          <div className="h-[calc(100%-3.1rem)] overflow-auto bg-[#f8fafc]">
+          <div className="relative h-[calc(100%-3.1rem)] overflow-auto bg-[#f8fafc]" onWheel={handleGraphWheel}>
+            {nodes.length > 0 ? (
+              <div className="absolute left-3 top-3 z-10 inline-flex items-center rounded-lg border border-[var(--prism-line)] bg-white/95 p-1 shadow-sm backdrop-blur">
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  disabled={graphZoom <= minGraphZoom}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="缩小画布"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <span className="min-w-12 px-2 text-center text-xs font-semibold text-slate-600">
+                  {Math.round(graphZoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  disabled={graphZoom >= maxGraphZoom}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="放大画布"
+                >
+                  <ZoomIn size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={fitGraph}
+                  className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
+                  title="重置画布缩放"
+                >
+                  <Maximize2 size={14} />
+                </button>
+              </div>
+            ) : null}
             {loading && !payload ? (
               <div className="flex h-full min-h-[32rem] items-center justify-center text-sm text-slate-500">
                 <Loader2 size={18} className="mr-2 animate-spin" />
-                正在加载图谱
+                正在加载治理网络
               </div>
             ) : nodes.length === 0 ? (
               <div className="flex h-full min-h-[32rem] items-center justify-center px-6 text-center text-sm leading-6 text-slate-500">
-                暂无可展示的治理图谱。确认碎片或向量化文档后会生成 PKU 和 CKP。
+                {graphScope === 'ckp'
+                  ? '暂无可展示的 CKP 网络。确认碎片或完成文档向量化后会生成 CKP。'
+                  : '这个子 CKP 暂时没有关联 PKU。'}
               </div>
             ) : (
               <svg
                 ref={svgRef}
                 viewBox={`0 0 ${graphWidth} ${graphHeight}`}
-                className="min-h-[39rem] w-[74rem] max-w-none touch-none select-none"
+                className="block max-w-none touch-none select-none"
+                style={{
+                  width: graphWidth * graphZoom,
+                  height: graphHeight * graphZoom,
+                  minWidth: graphWidth * graphZoom,
+                  minHeight: graphHeight * graphZoom,
+                }}
                 role="img"
-                aria-label="知识治理图谱"
+                aria-label={graphScope === 'ckp' ? '全局 CKP 主题网络' : 'CKP 与 PKU 局部网络'}
                 onPointerMove={handlePointerMove}
                 onPointerUp={stopDragging}
                 onPointerLeave={stopDragging}
@@ -379,20 +571,34 @@ export function KnowledgeGraphPage() {
                     <path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8" />
                   </marker>
                 </defs>
-                <rect x="0" y="0" width={graphWidth} height={graphHeight} fill="url(#graph-grid)" opacity="0.72" />
+                <rect
+                  x="0"
+                  y="0"
+                  width={graphWidth}
+                  height={graphHeight}
+                  fill="url(#graph-grid)"
+                  opacity="0.72"
+                  pointerEvents="none"
+                />
                 <g>
-                  {graphNodeTypes.map((type) => {
-                    const laneX = createInitialPositions([{ id: type, type, label: '' } as KnowledgeGraphNode])[type]?.x
-                    if (!laneX) return null
-                    return (
-                      <text key={type} x={laneX - 48} y="34" className="fill-slate-400 text-[11px] font-medium">
-                        {getNodeMeta(type).lane}
-                      </text>
-                    )
-                  })}
+                  {[
+                    ...(graphScope === 'ckp'
+                      ? [
+                          { label: '父 CKP', x: 182 },
+                          { label: '子 CKP', x: 562 },
+                        ]
+                      : [
+                          { label: '子 CKP', x: 182 },
+                          { label: 'PKU', x: 594 },
+                        ]),
+                  ].map((lane) => (
+                    <text key={lane.label} x={lane.x} y="34" className="fill-slate-400 text-[11px] font-medium">
+                      {lane.label}
+                    </text>
+                  ))}
                 </g>
                 <g>
-                  {(payload?.edges ?? []).map((edge) => {
+                  {visiblePayloadEdges.map((edge) => {
                     const source = nodeById.get(edge.source)
                     const target = nodeById.get(edge.target)
                     if (!source || !target) return null
@@ -410,6 +616,7 @@ export function KnowledgeGraphPage() {
                         strokeWidth={style.strokeWidth}
                         strokeDasharray={style.strokeDasharray}
                         markerEnd="url(#graph-arrow)"
+                        pointerEvents="none"
                       />
                     )
                   })}
@@ -423,7 +630,12 @@ export function KnowledgeGraphPage() {
                       dragging={dragging?.id === node.id}
                       onPointerDown={(event) => handlePointerDown(event, node)}
                       onSelect={() => {
-                        if (!dragging?.moved) setSelectedId(node.id)
+                        if (dragging?.moved) return
+                        if (graphScope === 'ckp' && isChildCkp(node)) {
+                          openPkuNetwork(node.id)
+                          return
+                        }
+                        setSelectedId(node.id)
                       }}
                     />
                   ))}
@@ -437,7 +649,11 @@ export function KnowledgeGraphPage() {
           node={selected}
           edges={selectedEdges}
           nodes={nodeById}
+          sources={selectedSources}
+          scope={graphScope}
           saving={saving}
+          onOpenPkuNetwork={openPkuNetwork}
+          onBackToCkpNetwork={backToCkpNetwork}
           onSave={updateNode}
         />
       </div>
@@ -459,6 +675,7 @@ function GraphNode({
   onSelect: () => void
 }) {
   const meta = getNodeMeta(node.type)
+  const typeLabel = node.type === 'canonical' && node.topic_level === 'parent' ? '父 CKP' : meta.label
   return (
     <g
       transform={`translate(${node.x - nodeWidth / 2}, ${node.y - nodeHeight / 2})`}
@@ -466,6 +683,7 @@ function GraphNode({
       onClick={onSelect}
       className={cn('cursor-grab', dragging && 'cursor-grabbing')}
     >
+      <rect width={nodeWidth} height={nodeHeight} rx={nodeRadius} fill="transparent" pointerEvents="all" />
       <rect
         width={nodeWidth}
         height={nodeHeight}
@@ -474,13 +692,14 @@ function GraphNode({
         stroke={active ? meta.color : '#d7dee9'}
         strokeWidth={active ? 2.4 : 1}
         filter={active ? 'drop-shadow(0 8px 16px rgb(15 23 42 / 0.12))' : undefined}
+        pointerEvents="none"
       />
-      <circle cx="22" cy="21" r="7" fill={meta.color} opacity={active ? 1 : 0.86} />
-      <text x="36" y="18" className="fill-slate-950 text-[11px] font-semibold">
+      <circle cx="22" cy="21" r="7" fill={meta.color} opacity={active ? 1 : 0.86} pointerEvents="none" />
+      <text x="36" y="18" className="fill-slate-950 text-[11px] font-semibold" pointerEvents="none">
         {truncate(node.label, 15)}
       </text>
-      <text x="36" y="32" className="fill-slate-500 text-[9px] font-medium">
-        {meta.label}
+      <text x="36" y="32" className="fill-slate-500 text-[9px] font-medium" pointerEvents="none">
+        {typeLabel}
       </text>
     </g>
   )
@@ -490,13 +709,21 @@ function GraphInspector({
   node,
   edges,
   nodes,
+  sources,
+  scope,
   saving,
+  onOpenPkuNetwork,
+  onBackToCkpNetwork,
   onSave,
 }: {
   node: PositionedNode | null
   edges: KnowledgeGraphEdge[]
   nodes: Map<string, PositionedNode>
+  sources: SourceEvidence[]
+  scope: GraphScope
   saving: boolean
+  onOpenPkuNetwork: (ckpId: string) => void
+  onBackToCkpNetwork: () => void
   onSave: (nodeId: string, data: KnowledgeGraphNodeUpdate) => Promise<unknown>
 }) {
   const [editing, setEditing] = useState(false)
@@ -537,13 +764,14 @@ function GraphInspector({
   if (!node) {
     return (
       <aside className="prism-panel flex min-h-[24rem] items-center justify-center rounded-lg p-5 text-center text-sm text-slate-500">
-        选择一个节点查看详情
+        选择一个节点查看详情。
       </aside>
     )
   }
 
   const meta = getNodeMeta(node.type)
   const TypeIcon = meta.icon
+  const canOpenPkuNetwork = scope === 'ckp' && isChildCkp(node)
 
   const save = async () => {
     const update: KnowledgeGraphNodeUpdate = {
@@ -563,16 +791,6 @@ function GraphInspector({
       update.normalized_statement = draft.label
       update.unit_type = draft.typeValue
       update.modality = draft.modality
-    } else if (node.type === 'asset') {
-      update.text = draft.content
-      update.asset_kind = draft.typeValue
-      update.source_platform = draft.sourcePlatform
-      update.source_url = draft.sourceUrl
-    } else if (node.type === 'personal_asset_unit') {
-      update.text = draft.content
-      update.unit_type = draft.typeValue
-    } else {
-      update.text = draft.content
     }
     await onSave(node.id, update)
     setEditing(false)
@@ -604,6 +822,26 @@ function GraphInspector({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+        {scope === 'pku' ? (
+          <button
+            type="button"
+            onClick={onBackToCkpNetwork}
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <ArrowLeft size={15} />
+            返回 CKP 网络
+          </button>
+        ) : canOpenPkuNetwork ? (
+          <button
+            type="button"
+            onClick={() => onOpenPkuNetwork(node.id)}
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800"
+          >
+            <Boxes size={15} />
+            查看 PKU 网络
+          </button>
+        ) : null}
+
         {editing ? (
           <div className="space-y-3">
             <EditInput label="标题" value={draft.label} onChange={(value) => setDraft({ ...draft, label: value })} />
@@ -620,20 +858,6 @@ function GraphInspector({
             </div>
             {node.type === 'pku' ? (
               <EditInput label="模态" value={draft.modality} onChange={(value) => setDraft({ ...draft, modality: value })} />
-            ) : null}
-            {node.type === 'asset' ? (
-              <div className="grid grid-cols-2 gap-2">
-                <EditInput
-                  label="平台"
-                  value={draft.sourcePlatform}
-                  onChange={(value) => setDraft({ ...draft, sourcePlatform: value })}
-                />
-                <EditInput
-                  label="来源链接"
-                  value={draft.sourceUrl}
-                  onChange={(value) => setDraft({ ...draft, sourceUrl: value })}
-                />
-              </div>
             ) : null}
             <EditInput label="标签" value={draft.tags} onChange={(value) => setDraft({ ...draft, tags: value })} />
             <EditInput label="关键词" value={draft.keywords} onChange={(value) => setDraft({ ...draft, keywords: value })} />
@@ -681,8 +905,12 @@ function GraphInspector({
           </>
         )}
 
+        {node.type === 'pku' ? <SourceEvidenceList sources={sources} /> : null}
+
         <div className="border-t border-[var(--prism-line)] pt-4">
-          <h3 className="mb-2 text-sm font-semibold text-slate-950">连接关系</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-950">
+            {scope === 'ckp' ? 'CKP 层级关系' : 'CKP-PKU 关系'}
+          </h3>
           {edges.length === 0 ? (
             <p className="text-sm leading-6 text-slate-500">暂无连接</p>
           ) : (
@@ -690,27 +918,15 @@ function GraphInspector({
               {edges.map((edge) => {
                 const otherId = edge.source === node.id ? edge.target : edge.source
                 const other = nodes.get(otherId)
-                const direction = edge.type === 'pku_relation' ? (edge.source === node.id ? 'outgoing' : 'incoming') : ''
                 return (
                   <div key={edge.id} className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2">
                     <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
                       <Check size={13} />
                       {edge.label}
-                      {direction ? <span className="ml-auto text-[11px] text-pink-600">{direction}</span> : null}
                     </div>
                     <div className="mt-1 text-sm font-semibold text-slate-900">{other?.label ?? otherId}</div>
                     {edge.role ? <div className="mt-1 text-xs text-slate-500">{edge.role}</div> : null}
                     {edge.reason ? <div className="mt-1 text-xs leading-5 text-slate-500">{edge.reason}</div> : null}
-                    {edge.type === 'pku_relation' ? (
-                      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-slate-500">
-                        {typeof edge.confidence === 'number' ? (
-                          <span className="rounded-md bg-pink-50 px-2 py-1 text-pink-700">
-                            {edge.confidence.toFixed(2)}
-                          </span>
-                        ) : null}
-                        {edge.llm_model ? <span className="rounded-md bg-slate-100 px-2 py-1">{edge.llm_model}</span> : null}
-                      </div>
-                    ) : null}
                   </div>
                 )
               })}
@@ -719,6 +935,39 @@ function GraphInspector({
         </div>
       </div>
     </aside>
+  )
+}
+
+function SourceEvidenceList({ sources }: { sources: SourceEvidence[] }) {
+  return (
+    <div className="border-t border-[var(--prism-line)] pt-4">
+      <h3 className="mb-2 text-sm font-semibold text-slate-950">来源单元</h3>
+      {sources.length === 0 ? (
+        <p className="text-sm leading-6 text-slate-500">这个 PKU 暂时没有可见来源。</p>
+      ) : (
+        <div className="space-y-2">
+          {sources.map(({ edge, node }) => {
+            const meta = getNodeMeta(node.type)
+            const Icon = meta.icon
+            return (
+              <div key={edge.id} className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+                  <Icon size={13} style={{ color: meta.color }} />
+                  <span>{meta.label}</span>
+                  <span className="ml-auto rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                    {edge.source_kind || node.source_kind || node.type}
+                  </span>
+                </div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{sourceTitle(node)}</div>
+                {contentForNode(node) ? (
+                  <div className="mt-1 line-clamp-3 text-xs leading-5 text-slate-500">{contentForNode(node)}</div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 

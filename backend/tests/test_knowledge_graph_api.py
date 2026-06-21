@@ -109,6 +109,127 @@ def test_knowledge_graph_workbench_groups_ckp_pkus_sources_and_relations(client,
     assert group["relations"][0]["label"] == "prerequisite"
 
 
+def test_knowledge_graph_workbench_groups_child_ckps_under_parent(client, db_session):
+    from backend.app.models import CanonicalKnowledgePoint, CanonicalRelation, PKUCanonicalLink
+
+    parent = CanonicalKnowledgePoint(
+        title="LLM fine-tuning",
+        canonical_statement="Methods and rules for adapting large language models.",
+        canonical_type="topic",
+        status="draft",
+        confidence=0.9,
+        extra_meta={"topic_level": "parent"},
+    )
+    child = CanonicalKnowledgePoint(
+        title="LoRA fine-tuning methods",
+        canonical_statement="Parameter-efficient methods for adapting LLMs.",
+        canonical_type="topic",
+        status="draft",
+        confidence=0.88,
+        extra_meta={"topic_level": "child"},
+    )
+    unit = PersonalAssetUnit(id="unit-1", title="LoRA note", content="LoRA reduces trainable parameters.")
+    pku = PersonalKnowledgeUnit(
+        source_kind="personal_asset_unit",
+        source_id="unit-1",
+        statement="LoRA reduces trainable parameters with low-rank matrices.",
+        normalized_statement="LoRA reduces trainable parameters with low-rank matrices.",
+        normalized_statement_hash="hierarchy-pku",
+        unit_type="method",
+        modality="fact",
+        status="active",
+        confidence=0.9,
+        keywords=["LoRA"],
+    )
+    db_session.add_all([parent, child, unit, pku])
+    db_session.flush()
+    db_session.add_all(
+        [
+            CanonicalRelation(
+                source_canonical_id=child.id,
+                target_canonical_id=parent.id,
+                relation_type="subtopic_of",
+                confidence=0.87,
+                reason="child belongs to parent",
+            ),
+            PKUCanonicalLink(
+                pku_id=pku.id,
+                canonical_id=child.id,
+                relation_type="about",
+                role="topic_member",
+                confidence=0.9,
+                reason="member",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/knowledge-graph/workbench")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["parents"][0]["label"] == "LLM fine-tuning"
+    parent_group = payload["parent_groups"][payload["parents"][0]["id"]]
+    assert [child["ckp"]["label"] for child in parent_group["children"]] == ["LoRA fine-tuning methods"]
+    assert parent_group["children"][0]["ckp"]["label"] == "LoRA fine-tuning methods"
+    assert parent_group["children"][0]["pkus"][0]["pku"]["label"] == "LoRA reduces trainable parameters with low-rank matrices."
+    assert parent_group["children"][0]["parent_link"]["type"] == "canonical_relation"
+    assert parent_group["children"][0]["parent_link"]["label"] == "subtopic_of"
+
+    filtered_response = client.get("/api/v1/knowledge-graph/workbench?q=LLM fine-tuning")
+    assert filtered_response.status_code == 200
+    filtered_payload = filtered_response.json()
+
+    filtered_parent_group = filtered_payload["parent_groups"][f"ckp:{parent.id}"]
+    assert filtered_parent_group["parent"]["label"] == "LLM fine-tuning"
+    assert filtered_parent_group["children"] == []
+
+
+def test_knowledge_graph_returns_parent_child_ckp_edges(client, db_session):
+    from backend.app.models import CanonicalKnowledgePoint, CanonicalRelation
+
+    parent = CanonicalKnowledgePoint(
+        title="LLM fine-tuning",
+        canonical_statement="Methods and rules for adapting large language models.",
+        canonical_type="topic",
+        status="draft",
+        confidence=0.9,
+        extra_meta={"topic_level": "parent"},
+    )
+    child = CanonicalKnowledgePoint(
+        title="LoRA fine-tuning methods",
+        canonical_statement="Parameter-efficient methods for adapting LLMs.",
+        canonical_type="topic",
+        status="draft",
+        confidence=0.88,
+        extra_meta={"topic_level": "child"},
+    )
+    db_session.add_all([parent, child])
+    db_session.flush()
+    db_session.add(
+        CanonicalRelation(
+            source_canonical_id=child.id,
+            target_canonical_id=parent.id,
+            relation_type="subtopic_of",
+            confidence=0.87,
+            reason="child belongs to parent",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/knowledge-graph?q=fine-tuning")
+    assert response.status_code == 200
+    payload = response.json()
+
+    node_by_label = {node["label"]: node for node in payload["nodes"]}
+    assert node_by_label["LLM fine-tuning"]["topic_level"] == "parent"
+    assert node_by_label["LoRA fine-tuning methods"]["topic_level"] == "child"
+    hierarchy_edges = [edge for edge in payload["edges"] if edge["type"] == "canonical_relation"]
+    assert hierarchy_edges[0]["source"] == node_by_label["LLM fine-tuning"]["id"]
+    assert hierarchy_edges[0]["target"] == node_by_label["LoRA fine-tuning methods"]["id"]
+    assert hierarchy_edges[0]["label"] == "subtopic_of"
+
+
 def test_knowledge_graph_returns_governance_nodes_and_edges(client, db_session, monkeypatch):
     unit = PersonalAssetUnit(
         title="Metadata filter practice",

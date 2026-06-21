@@ -1,7 +1,9 @@
 # prism/backend/app/services/knowledge_governance.py
 import hashlib
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +15,7 @@ from sqlalchemy.orm import Session
 from backend.app.config import settings
 from backend.app.models.asset import PersonalAssetItem, PersonalAssetUnit
 from backend.app.models.knowledge_governance import (
+    CanonicalRelation,
     CanonicalKnowledgePoint,
     PKUCanonicalLink,
     PKURelation,
@@ -21,11 +24,14 @@ from backend.app.models.knowledge_governance import (
 from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem
 from backend.app.prompts.asset_parse import (
     build_asset_unit_pku_extraction_messages,
+    build_ckp_parent_topic_assignment_messages,
     build_ckp_topic_extraction_messages,
     build_document_chunk_pku_extraction_messages,
 )
 from backend.app.services.ckp_vectors import search_ckp_vectors, upsert_ckp_vector
 
+
+logger = logging.getLogger("uvicorn.error")
 
 DEFAULT_USER_ID = "default-user"
 PKU_UNIT_TYPES = {
@@ -126,6 +132,27 @@ class CKPTopicExtraction:
 
 
 @dataclass(frozen=True)
+class ExtractedCKPParentTopic:
+    local_id: str
+    title: str
+    description: str
+    keywords: list[str]
+    concepts: list[str]
+    entities: list[str]
+    domains: list[str]
+    member_child_refs: list[str]
+    confidence: float
+    reason: str
+    llm_model: str = ""
+
+
+@dataclass(frozen=True)
+class CKPParentTopicAssignment:
+    parent_topics: list[ExtractedCKPParentTopic]
+    llm_model: str = ""
+
+
+@dataclass(frozen=True)
 class CKPSemanticMatchDecision:
     same: bool
     confidence: float
@@ -182,6 +209,12 @@ def _first_text(*values: Any) -> str:
 
 
 def _pku_type_from_llm_value(value: Any) -> str:
+    if isinstance(value, list):
+        for item in value:
+            unit_type = _pku_type_from_llm_value(item)
+            if unit_type:
+                return unit_type
+        return ""
     unit_type = str(value or "").strip().lower()
     aliases = {
         "technique": "method",
@@ -329,13 +362,28 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 def _parse_asset_unit_pku_extraction(data: dict[str, Any], llm_model: str = "") -> AssetUnitPKUExtraction:
     parsed_pkus: list[ExtractedPKU] = []
     raw_pkus = _as_list(data.get("pkus")) or _as_list(data.get("concepts"))
+    reject_reasons: list[str] = []
+    sample_unit_types: list[str] = []
     for item in raw_pkus:
         if not isinstance(item, dict):
+            if "non_object_item" not in reject_reasons:
+                reject_reasons.append("non_object_item")
             continue
         statement = _statement_from_extracted_item(item)
-        unit_type = _pku_type_from_llm_value(item.get("unit_type") or item.get("type") or item.get("category_type"))
+        raw_unit_type = item.get("unit_type") or item.get("type") or item.get("category_type")
+        raw_unit_type_text = _normalize_space(str(raw_unit_type or ""))
+        if raw_unit_type_text and raw_unit_type_text not in sample_unit_types:
+            sample_unit_types.append(raw_unit_type_text[:80])
+        unit_type = _pku_type_from_llm_value(raw_unit_type)
         evidence_span = _first_text(item.get("evidence_span"), item.get("evidence"), item.get("evidence_text"))
-        if not statement or unit_type not in PKU_UNIT_TYPES:
+        if not statement:
+            if "missing_statement" not in reject_reasons:
+                reject_reasons.append("missing_statement")
+            continue
+        if unit_type not in PKU_UNIT_TYPES:
+            reason = "missing_unit_type" if not raw_unit_type_text else "invalid_unit_type"
+            if reason not in reject_reasons:
+                reject_reasons.append(reason)
             continue
         aliases = _clean_string_list(item.get("aliases"))
         concepts = _clean_string_list(item.get("concepts")) or aliases
@@ -356,6 +404,27 @@ def _parse_asset_unit_pku_extraction(data: dict[str, Any], llm_model: str = "") 
                 llm_model=llm_model,
                 local_id=_first_text(item.get("local_id"), item.get("id"), item.get("name"), item.get("title"))[:120],
             )
+        )
+
+    if data and not parsed_pkus:
+        logger.warning(
+            "asset unit PKU parse produced no PKUs: llm_model=%s top_level_keys=%s raw_pku_count=%s parsed_pku_count=%s rejected_count=%s reject_reasons=%s sample_unit_types=%s",
+            llm_model,
+            sorted(str(key) for key in data.keys()),
+            len(raw_pkus),
+            len(parsed_pkus),
+            len(raw_pkus),
+            reject_reasons,
+            sample_unit_types[:8],
+            extra={
+                "llm_model": llm_model,
+                "top_level_keys": sorted(str(key) for key in data.keys()),
+                "raw_pku_count": len(raw_pkus),
+                "parsed_pku_count": len(parsed_pkus),
+                "rejected_count": len(raw_pkus),
+                "reject_reasons": reject_reasons,
+                "sample_unit_types": sample_unit_types[:8],
+            },
         )
 
     parsed_relations: list[ExtractedPKURelation] = []
@@ -422,10 +491,43 @@ def _parse_ckp_topic_extraction(data: dict[str, Any], *, llm_model: str = "") ->
     return CKPTopicExtraction(parsed_topics, llm_model=llm_model)
 
 
+def _parse_ckp_parent_topic_assignment(
+    data: dict[str, Any],
+    *,
+    llm_model: str = "",
+) -> CKPParentTopicAssignment:
+    parsed_parent_topics: list[ExtractedCKPParentTopic] = []
+    for item in _as_list(data.get("parent_topics")):
+        if not isinstance(item, dict):
+            continue
+        title = _first_text(item.get("title"), item.get("name"))
+        member_child_refs = _clean_string_list(item.get("member_child_refs") or item.get("members"), limit=80)
+        if not title or not member_child_refs:
+            continue
+        local_id = _first_text(item.get("local_id"), item.get("id"), title)[:120]
+        parsed_parent_topics.append(
+            ExtractedCKPParentTopic(
+                local_id=local_id,
+                title=title[:255],
+                description=_first_text(item.get("description"), item.get("summary"))[:1200],
+                keywords=_clean_string_list(item.get("keywords"), limit=12),
+                concepts=_clean_string_list(item.get("concepts"), limit=12),
+                entities=_clean_string_list(item.get("entities"), limit=12),
+                domains=_clean_string_list(item.get("domains"), limit=8),
+                member_child_refs=member_child_refs,
+                confidence=_clamp_confidence(item.get("confidence"), 0.75),
+                reason=_normalize_space(str(item.get("reason") or ""))[:500],
+                llm_model=llm_model,
+            )
+        )
+    return CKPParentTopicAssignment(parsed_parent_topics, llm_model=llm_model)
+
+
 def _extract_asset_unit_pkus_with_llm(unit: PersonalAssetUnit) -> AssetUnitPKUExtraction:
     if not settings.LLM_API_BASE or not settings.LLM_API_KEY:
         return AssetUnitPKUExtraction([], [], llm_model="")
 
+    llm_model = settings.LLM_MODEL
     system_prompt, user_message = build_asset_unit_pku_extraction_messages(
         unit_id=unit.id,
         title=unit.title or "",
@@ -433,10 +535,11 @@ def _extract_asset_unit_pkus_with_llm(unit: PersonalAssetUnit) -> AssetUnitPKUEx
         content=unit.content or "",
         source_asset_ids=unit.source_asset_ids or [],
     )
+    started_at = time.perf_counter()
     try:
         client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
         response = client.chat.completions.create(
-            model=settings.LLM_MODEL,
+            model=llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -446,8 +549,41 @@ def _extract_asset_unit_pkus_with_llm(unit: PersonalAssetUnit) -> AssetUnitPKUEx
         )
         content = response.choices[0].message.content or "{}"
         data = _parse_json_object(content)
-        return _parse_asset_unit_pku_extraction(data, llm_model=settings.LLM_MODEL)
-    except Exception:
+        extraction = _parse_asset_unit_pku_extraction(data, llm_model=llm_model)
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        json_empty = not bool(data)
+        pku_count = len(extraction.pkus)
+        logger.info(
+            "asset unit PKU LLM extraction completed: elapsed_ms=%s model=%s json_empty=%s pku_count=%s",
+            elapsed_ms,
+            llm_model,
+            json_empty,
+            pku_count,
+            extra={
+                "elapsed_ms": elapsed_ms,
+                "model": llm_model,
+                "json_empty": json_empty,
+                "pku_count": pku_count,
+            },
+        )
+        return extraction
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        logger.warning(
+            "asset unit PKU LLM extraction failed: elapsed_ms=%s model=%s exception_type=%s exception_message=%s",
+            elapsed_ms,
+            llm_model,
+            type(exc).__name__,
+            str(exc),
+            extra={
+                "elapsed_ms": elapsed_ms,
+                "model": llm_model,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "json_empty": None,
+                "pku_count": 0,
+            },
+        )
         return AssetUnitPKUExtraction([], [], llm_model="")
 
 
@@ -489,6 +625,46 @@ def _extract_ckp_topics_with_llm(
         return _parse_ckp_topic_extraction(data, llm_model=settings.LLM_MODEL)
     except Exception:
         return CKPTopicExtraction([], llm_model="")
+
+
+def _extract_ckp_parent_topics_with_llm(
+    *,
+    source_kind: str,
+    source_id: str,
+    title: str,
+    summary: str = "",
+    category: str = "",
+    tags: list[str] | None = None,
+    child_topics: list[dict[str, Any]],
+) -> CKPParentTopicAssignment:
+    if not settings.LLM_API_BASE or not settings.LLM_API_KEY or not child_topics:
+        return CKPParentTopicAssignment([], llm_model="")
+
+    system_prompt, user_message = build_ckp_parent_topic_assignment_messages(
+        source_kind=source_kind,
+        source_id=source_id,
+        title=title,
+        summary=summary,
+        category=category,
+        tags=tags or [],
+        child_topics=child_topics,
+    )
+    try:
+        client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
+        response = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        data = _parse_json_object(content)
+        return _parse_ckp_parent_topic_assignment(data, llm_model=settings.LLM_MODEL)
+    except Exception:
+        return CKPParentTopicAssignment([], llm_model="")
 
 
 def _pku_topic_payload(ref: str, pku: PersonalKnowledgeUnit) -> dict[str, Any]:
@@ -853,7 +1029,8 @@ def _find_existing_topic_ckp(
         CanonicalKnowledgePoint.status != "deprecated",
         CanonicalKnowledgePoint.canonical_type == "topic",
     )
-    exact = query.filter(CanonicalKnowledgePoint.title == title).first()
+    exact_matches = query.filter(CanonicalKnowledgePoint.title == title).all()
+    exact = next((ckp for ckp in exact_matches if _topic_level(ckp) != "parent"), None)
     if exact:
         return exact
 
@@ -863,6 +1040,7 @@ def _find_existing_topic_ckp(
         candidates = query.filter(
             or_(*(CanonicalKnowledgePoint.keywords.like(f"%{word}%") for word in words))
         ).limit(10).all()
+    candidates = [ckp for ckp in candidates if _topic_level(ckp) != "parent"]
     topic_words = set(topic.keywords + topic.concepts + topic.domains)
     best: CanonicalKnowledgePoint | None = None
     best_score = 0
@@ -900,7 +1078,7 @@ def _find_existing_topic_ckp(
             )
             .first()
         )
-        if candidate and score >= 0.82:
+        if candidate and _topic_level(candidate) != "parent" and score >= 0.82:
             return candidate
     return None
 
@@ -1132,7 +1310,15 @@ def _create_or_get_topic_ckp(
 ) -> CanonicalKnowledgePoint:
     existing = _find_existing_topic_ckp(db, user_id=user_id, topic=topic)
     if existing:
-        return existing
+        if _topic_level(existing) == "parent":
+            existing = None
+        else:
+            meta = dict(existing.extra_meta or {})
+            if not meta.get("topic_level"):
+                meta["topic_level"] = "child"
+                existing.extra_meta = meta
+                db.flush()
+            return existing
 
     statement = topic.description or f"Topic hub for {topic.title}."
     ckp = CanonicalKnowledgePoint(
@@ -1151,6 +1337,7 @@ def _create_or_get_topic_ckp(
         status="draft",
         confidence=topic.confidence,
         extra_meta={
+            "topic_level": "child",
             "created_from": source_kind,
             "source_id": source_id,
             "source_title": source_title,
@@ -1232,6 +1419,165 @@ def _create_or_get_generic_link(
     return link
 
 
+def _topic_level(ckp: CanonicalKnowledgePoint) -> str:
+    meta = ckp.extra_meta if isinstance(ckp.extra_meta, dict) else {}
+    return str(meta.get("topic_level") or "child")
+
+
+def _parent_topic_payload(
+    ref: str,
+    topic: ExtractedCKPTopic,
+    member_pkus: list[PersonalKnowledgeUnit],
+) -> dict[str, Any]:
+    return {
+        "ref": ref,
+        "title": topic.title,
+        "description": topic.description,
+        "keywords": topic.keywords,
+        "concepts": topic.concepts,
+        "entities": topic.entities,
+        "domains": topic.domains,
+        "member_pku_statements": [pku.normalized_statement or pku.statement for pku in member_pkus],
+    }
+
+
+def _fallback_parent_topic(
+    child_topic: ExtractedCKPTopic,
+    source_title: str,
+    source_category: str,
+) -> ExtractedCKPParentTopic:
+    generic_categories = {"ai", "notes", "research", "knowledge"}
+    child_title = _normalize_space(child_topic.title)
+
+    def usable_parent_title(value: str, *, avoid_generic: bool = False) -> str:
+        candidate = _normalize_space(value)
+        if not candidate:
+            return ""
+        if avoid_generic and candidate.lower() in generic_categories:
+            return ""
+        if candidate.lower() == child_title.lower():
+            return ""
+        return candidate
+
+    category = _normalize_space(source_category)
+    title = usable_parent_title(category, avoid_generic=True)
+    if not title:
+        title = usable_parent_title(source_title)
+    if not title and child_topic.domains:
+        title = usable_parent_title(child_topic.domains[0], avoid_generic=True)
+    if not title:
+        title = f"General: {child_title or 'topic'}"
+    return ExtractedCKPParentTopic(
+        local_id=f"fallback_parent_{child_topic.local_id or 'topic'}",
+        title=title,
+        description=f"Broader topic for {child_topic.title}.",
+        keywords=child_topic.keywords[:8],
+        concepts=child_topic.concepts[:8],
+        entities=child_topic.entities[:8],
+        domains=child_topic.domains[:8] or ([category] if category else []),
+        member_child_refs=[child_topic.local_id],
+        confidence=max(0.5, min(child_topic.confidence, 0.72)),
+        reason="Fallback parent topic because parent topic assignment returned no valid parents.",
+        llm_model="",
+    )
+
+
+def _create_or_get_parent_topic_ckp(
+    db: Session,
+    *,
+    user_id: str,
+    parent_topic: ExtractedCKPParentTopic,
+    source_kind: str,
+    source_id: str,
+    source_title: str = "",
+) -> CanonicalKnowledgePoint:
+    title = _normalize_space(parent_topic.title)
+    existing = (
+        db.query(CanonicalKnowledgePoint)
+        .filter(
+            CanonicalKnowledgePoint.user_id == user_id,
+            CanonicalKnowledgePoint.status != "deprecated",
+            CanonicalKnowledgePoint.canonical_type == "topic",
+            CanonicalKnowledgePoint.title == title,
+        )
+        .all()
+    )
+    for ckp in existing:
+        if _topic_level(ckp) == "parent":
+            return ckp
+
+    statement = parent_topic.description or f"Parent topic hub for {parent_topic.title}."
+    ckp = CanonicalKnowledgePoint(
+        user_id=user_id,
+        canonical_type="topic",
+        title=_short_title(parent_topic.title, "Untitled parent topic"),
+        canonical_statement=statement,
+        summary=parent_topic.description,
+        aliases=[source_title] if source_title and source_title != parent_topic.title else [],
+        domains=parent_topic.domains,
+        entities=parent_topic.entities,
+        concepts=parent_topic.concepts,
+        keywords=parent_topic.keywords,
+        scope={},
+        conditions={},
+        status="draft",
+        confidence=parent_topic.confidence,
+        extra_meta={
+            "topic_level": "parent",
+            "created_from": "global_topic_rollup",
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "source_title": source_title,
+            "parent_topic_local_id": parent_topic.local_id,
+            "parent_topic_reason": parent_topic.reason,
+            "parent_topic_llm_model": parent_topic.llm_model,
+        },
+    )
+    db.add(ckp)
+    db.flush()
+    _refresh_ckp_vector(ckp)
+    return ckp
+
+
+def _create_or_get_ckp_hierarchy_relation(
+    db: Session,
+    *,
+    user_id: str,
+    child_ckp: CanonicalKnowledgePoint,
+    parent_ckp: CanonicalKnowledgePoint,
+    parent_topic: ExtractedCKPParentTopic,
+) -> CanonicalRelation | None:
+    if child_ckp.id == parent_ckp.id:
+        return None
+    existing = (
+        db.query(CanonicalRelation)
+        .filter(
+            CanonicalRelation.source_canonical_id == child_ckp.id,
+            CanonicalRelation.target_canonical_id == parent_ckp.id,
+            CanonicalRelation.relation_type == "subtopic_of",
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    relation = CanonicalRelation(
+        user_id=user_id,
+        source_canonical_id=child_ckp.id,
+        target_canonical_id=parent_ckp.id,
+        relation_type="subtopic_of",
+        confidence=parent_topic.confidence,
+        reason=parent_topic.reason,
+        extra_meta={
+            "created_from": "ckp_parent_topic_assignment",
+            "parent_topic_local_id": parent_topic.local_id,
+            "parent_topic_llm_model": parent_topic.llm_model,
+        },
+    )
+    db.add(relation)
+    db.flush()
+    return relation
+
+
 def _settle_local_pku_topics(
     db: Session,
     *,
@@ -1273,12 +1619,17 @@ def _settle_local_pku_topics(
     link_ids: set[str] = set()
     linked_pku_ids: set[str] = set()
     first_linked_topic: ExtractedCKPTopic | None = None
+    first_linked_topic_ref: str | None = None
+    child_topics_by_ref: dict[str, ExtractedCKPTopic] = {}
+    child_ckps_by_ref: dict[str, CanonicalKnowledgePoint] = {}
+    child_member_pkus_by_ref: dict[str, list[PersonalKnowledgeUnit]] = {}
     for topic in topics:
         member_refs = [ref for ref in topic.member_pku_refs if ref in ref_to_pku]
         if not member_refs:
             continue
         if first_linked_topic is None:
             first_linked_topic = topic
+            first_linked_topic_ref = topic.local_id
         ckp = _create_or_get_topic_ckp(
             db,
             user_id=user_id,
@@ -1288,6 +1639,9 @@ def _settle_local_pku_topics(
             source_title=source_title,
         )
         ckp_ids.add(ckp.id)
+        child_topics_by_ref[topic.local_id] = topic
+        child_ckps_by_ref[topic.local_id] = ckp
+        child_member_pkus_by_ref.setdefault(topic.local_id, [])
         for ref in member_refs:
             pku = ref_to_pku[ref]
             link = _create_or_get_generic_link(
@@ -1301,6 +1655,7 @@ def _settle_local_pku_topics(
             )
             link_ids.add(link.id)
             linked_pku_ids.add(pku.id)
+            child_member_pkus_by_ref[topic.local_id].append(pku)
 
     unlinked = [(ref, pku) for ref, pku in pku_refs if pku.id not in linked_pku_ids]
     if unlinked and not first_linked_topic:
@@ -1311,6 +1666,7 @@ def _settle_local_pku_topics(
             source_tags=source_tags or [],
             pku_refs=pku_refs,
         )
+        first_linked_topic_ref = first_linked_topic.local_id if first_linked_topic else None
 
     if unlinked and first_linked_topic:
         ckp = _create_or_get_topic_ckp(
@@ -1322,6 +1678,10 @@ def _settle_local_pku_topics(
             source_title=source_title,
         )
         ckp_ids.add(ckp.id)
+        child_ref = first_linked_topic_ref or first_linked_topic.local_id
+        child_topics_by_ref[child_ref] = first_linked_topic
+        child_ckps_by_ref[child_ref] = ckp
+        child_member_pkus_by_ref.setdefault(child_ref, [])
         for _, pku in unlinked:
             link = _create_or_get_generic_link(
                 db,
@@ -1333,7 +1693,54 @@ def _settle_local_pku_topics(
                 reason=f"{reason} Added to fallback topic because no extracted topic referenced this PKU.",
             )
             link_ids.add(link.id)
-    return (len(ckp_ids), len(link_ids))
+            child_member_pkus_by_ref[child_ref].append(pku)
+
+    child_topic_payloads = [
+        _parent_topic_payload(ref, child_topics_by_ref[ref], child_member_pkus_by_ref.get(ref, []))
+        for ref in child_topics_by_ref
+    ]
+    parent_assignment = _extract_ckp_parent_topics_with_llm(
+        source_kind=source_kind,
+        source_id=source_id,
+        title=source_title,
+        summary=source_summary,
+        category=source_category,
+        tags=source_tags or [],
+        child_topics=child_topic_payloads,
+    )
+    parent_topics = list(parent_assignment.parent_topics)
+    if not parent_topics:
+        parent_topics = [
+            _fallback_parent_topic(child_topic, source_title, source_category)
+            for child_topic in child_topics_by_ref.values()
+        ]
+
+    relation_ids: set[str] = set()
+    for parent_topic in parent_topics:
+        member_refs = [ref for ref in parent_topic.member_child_refs if ref in child_ckps_by_ref]
+        if not member_refs:
+            continue
+        parent_ckp = _create_or_get_parent_topic_ckp(
+            db,
+            user_id=user_id,
+            parent_topic=parent_topic,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_title=source_title,
+        )
+        ckp_ids.add(parent_ckp.id)
+        for ref in member_refs:
+            relation = _create_or_get_ckp_hierarchy_relation(
+                db,
+                user_id=user_id,
+                child_ckp=child_ckps_by_ref[ref],
+                parent_ckp=parent_ckp,
+                parent_topic=parent_topic,
+            )
+            if relation:
+                relation_ids.add(relation.id)
+
+    return (len(ckp_ids), len(link_ids) + len(relation_ids))
 
 
 def _create_or_get_pku_relation(
@@ -1418,6 +1825,19 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
     using_llm_extraction = bool(extracted_pkus)
     if not extracted_pkus:
         fallback = _fallback_asset_unit_summary_pku(unit)
+        logger.warning(
+            "asset unit PKU fallback activated: unit_id=%s llm_model=%s llm_pku_count=%s fallback_created=%s",
+            unit.id,
+            extraction.llm_model,
+            len(extracted_pkus),
+            fallback is not None,
+            extra={
+                "unit_id": unit.id,
+                "llm_model": extraction.llm_model,
+                "llm_pku_count": len(extracted_pkus),
+                "fallback_created": fallback is not None,
+            },
+        )
         extracted_pkus = [fallback] if fallback else []
     if not extracted_pkus:
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)

@@ -79,13 +79,20 @@ export function KnowledgeGraphWorkbench({
 }) {
   const [query, setQuery] = useState('')
   const [payload, setPayload] = useState<KnowledgeGraphWorkbenchPayload | null>(null)
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null)
   const [selectedCkpId, setSelectedCkpId] = useState<string | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [subMode, setSubMode] = useState<'evidence' | 'relations'>('evidence')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const selectedGroup = selectedCkpId && payload ? payload.groups[selectedCkpId] : null
+  const selectedParentGroup = selectedParentId && payload?.parent_groups ? payload.parent_groups[selectedParentId] : null
+  const parentList = payload?.parents?.length ? payload.parents : payload?.ckps ?? []
+  const selectedChildGroup =
+    selectedCkpId && selectedParentGroup
+      ? selectedParentGroup.children.find((child) => child.ckp.id === selectedCkpId) ?? null
+      : null
+  const selectedGroup = selectedCkpId && payload ? payload.groups[selectedCkpId] ?? selectedChildGroup : null
 
   const loadWorkbench = async (nextQuery = query) => {
     setLoading(true)
@@ -93,11 +100,26 @@ export function KnowledgeGraphWorkbench({
     try {
       const data = await knowledgeGraphApi.getWorkbench({ q: nextQuery.trim() || undefined, limit: 60 })
       setPayload(data)
-      const nextCkpId = data.ckps.some((ckp) => ckp.id === selectedCkpId)
-        ? selectedCkpId
-        : data.ckps[0]?.id ?? null
-      setSelectedCkpId(nextCkpId)
-      setSelection(nextCkpId ? { kind: 'ckp', node: data.groups[nextCkpId].ckp } : null)
+      const parents = data.parents?.length ? data.parents : data.ckps
+      const nextParentId = parents.some((parent) => parent.id === selectedParentId)
+        ? selectedParentId
+        : parents[0]?.id ?? null
+      const nextParentGroup = nextParentId && data.parent_groups ? data.parent_groups[nextParentId] : null
+      const firstChild = nextParentGroup?.children[0] ?? null
+      const preservedChild = nextParentGroup?.children.find((child) => child.ckp.id === selectedCkpId) ?? null
+      const nextChildId = nextParentGroup
+        ? preservedChild?.ckp.id ?? firstChild?.ckp.id ?? null
+        : nextParentId
+      const visibleChildId = nextParentGroup && !firstChild ? null : nextChildId
+      setSelectedParentId(nextParentId)
+      setSelectedCkpId(visibleChildId)
+      setSelection(
+        visibleChildId
+          ? { kind: 'ckp', node: data.groups[visibleChildId]?.ckp ?? preservedChild?.ckp ?? firstChild?.ckp ?? parents[0] }
+          : nextParentId
+            ? { kind: 'ckp', node: nextParentGroup?.parent ?? parents.find((parent) => parent.id === nextParentId)! }
+            : null,
+      )
     } catch (err) {
       setError(`加载 CKP Workbench 失败：${getErrorMessage(err)}`)
     } finally {
@@ -130,7 +152,7 @@ export function KnowledgeGraphWorkbench({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-13rem)] gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_23rem]">
+    <div className="grid h-full min-h-0 gap-4 overflow-hidden xl:grid-cols-[18rem_minmax(0,1fr)_23rem]">
       <aside className="prism-panel flex min-h-0 flex-col rounded-lg p-4">
         <div className="relative">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -145,36 +167,46 @@ export function KnowledgeGraphWorkbench({
           />
         </div>
         <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-          <span>{payload?.stats.ckp_count ?? 0} 个 CKP</span>
+          <span>{parentList.length} 个父 CKP</span>
           {loading ? <Loader2 size={14} className="animate-spin" /> : null}
         </div>
-        <div className="mt-3 max-h-[calc(100vh-18rem)] min-h-0 space-y-2 overflow-y-auto pr-1">
-          {(payload?.ckps ?? []).map((ckp) => (
+        <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          {parentList.map((parent) => {
+            const parentGroup = payload?.parent_groups?.[parent.id]
+            const childCount = parent.child_count ?? parentGroup?.stats.child_count ?? 1
+            const pkuCount = parent.pku_count ?? parentGroup?.stats.pku_count ?? 0
+            const sourceCount = parent.source_count ?? parentGroup?.stats.source_count ?? 0
+            return (
             <button
-              key={ckp.id}
+              key={parent.id}
               type="button"
               onClick={() => {
-                setSelectedCkpId(ckp.id)
-                setSelection({ kind: 'ckp', node: payload!.groups[ckp.id].ckp })
+                const currentParentGroup = payload?.parent_groups?.[parent.id]
+                const firstChild = currentParentGroup?.children[0]
+                setSelectedParentId(parent.id)
+                setSelectedCkpId(currentParentGroup && !firstChild ? null : firstChild?.ckp.id ?? parent.id)
+                setSelection({ kind: 'ckp', node: firstChild?.ckp ?? parent })
               }}
               className={cn(
                 'w-full rounded-lg border px-3 py-2 text-left transition',
-                selectedCkpId === ckp.id
+                selectedParentId === parent.id
                   ? 'border-blue-300 bg-blue-50 shadow-sm'
                   : 'border-[var(--prism-line)] bg-white hover:bg-slate-50',
               )}
             >
-              <div className="line-clamp-2 break-words text-sm font-semibold text-slate-950">{ckp.label}</div>
+              <div className="line-clamp-2 break-words text-sm font-semibold text-slate-950">{parent.label}</div>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                <span>{ckp.canonical_type || 'canonical'}</span>
-                <span>{ckp.pku_count ?? 0} PKU</span>
-                <span>{ckp.source_count ?? 0} 来源</span>
-                {typeof ckp.confidence === 'number' ? <span>{ckp.confidence.toFixed(2)}</span> : null}
-                {ckp.status ? <span>{ckp.status}</span> : null}
+                <span>{parent.canonical_type || 'canonical'}</span>
+                <span>{childCount} 子 CKP</span>
+                <span>{pkuCount} PKU</span>
+                <span>{sourceCount} 来源</span>
+                {typeof parent.confidence === 'number' ? <span>{parent.confidence.toFixed(2)}</span> : null}
+                {parent.status ? <span>{parent.status}</span> : null}
               </div>
             </button>
-          ))}
-          {!loading && payload && payload.ckps.length === 0 ? (
+            )
+          })}
+          {!loading && payload && parentList.length === 0 ? (
             <p className="rounded-lg border border-dashed border-[var(--prism-line)] bg-white px-3 py-6 text-center text-sm leading-6 text-slate-500">
               没有匹配的 CKP。
             </p>
@@ -182,14 +214,47 @@ export function KnowledgeGraphWorkbench({
         </div>
       </aside>
 
-      <main className="prism-panel min-h-0 rounded-lg p-4">
+      <main className="prism-panel flex min-h-0 flex-col overflow-hidden rounded-lg p-4">
         {error ? (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
             {error}
           </div>
         ) : null}
-        {!selectedGroup ? (
-          <div className="flex min-h-[32rem] items-center justify-center px-6 text-center text-sm leading-6 text-slate-500">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {selectedParentGroup && selectedParentGroup.children.length > 0 ? (
+          <section className="mb-4 rounded-lg border border-[var(--prism-line)] bg-white px-4 py-3">
+            <div className="mb-2 text-xs font-semibold uppercase text-slate-500">子 CKP</div>
+            <div className="flex flex-wrap gap-2">
+              {selectedParentGroup.children.map((child) => (
+                <button
+                  key={child.ckp.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCkpId(child.ckp.id)
+                    setSelection({ kind: 'ckp', node: child.ckp })
+                  }}
+                  className={cn(
+                    'max-w-full rounded-lg border px-3 py-2 text-left text-sm transition',
+                    selectedCkpId === child.ckp.id
+                      ? 'border-blue-300 bg-blue-50 text-blue-900 shadow-sm'
+                      : 'border-[var(--prism-line)] bg-slate-50 text-slate-700 hover:bg-white',
+                  )}
+                >
+                  <span className="line-clamp-1 break-words font-medium">{child.ckp.label}</span>
+                  <span className="mt-1 block text-[11px] text-slate-500">
+                    {child.ckp.pku_count ?? child.pkus.length} PKU · {child.ckp.source_count ?? 0} 来源
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {selectedParentGroup && selectedParentGroup.children.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[var(--prism-line)] bg-white px-4 py-6 text-center text-sm leading-6 text-slate-500">
+            当前筛选下，这个父 CKP 没有可见的子 CKP。
+          </div>
+        ) : !selectedGroup ? (
+          <div className="flex min-h-full items-center justify-center px-6 text-center text-sm leading-6 text-slate-500">
             暂无可展示的 CKP。确认碎片或完成文档向量化后，会生成 PKU 和 CKP。
           </div>
         ) : (
@@ -276,6 +341,7 @@ export function KnowledgeGraphWorkbench({
             )}
           </>
         )}
+        </div>
       </main>
 
       <WorkbenchInspector selection={selection} onSaveNode={handleSaveNode} />
@@ -286,6 +352,7 @@ export function KnowledgeGraphWorkbench({
 function updateWorkbenchNode(payload: KnowledgeGraphWorkbenchPayload | null, updated: KnowledgeGraphNode) {
   if (!payload) return payload
   const ckps = payload.ckps.map((ckp) => (ckp.id === updated.id ? { ...ckp, ...updated } : ckp))
+  const parents = payload.parents?.map((parent) => (parent.id === updated.id ? { ...parent, ...updated } : parent))
   const groups = Object.fromEntries(
     Object.entries(payload.groups).map(([id, group]) => [
       id,
@@ -303,7 +370,31 @@ function updateWorkbenchNode(payload: KnowledgeGraphWorkbenchPayload | null, upd
       },
     ]),
   )
-  return { ...payload, ckps, groups }
+  const parentGroups = payload.parent_groups
+    ? Object.fromEntries(
+        Object.entries(payload.parent_groups).map(([id, parentGroup]) => [
+          id,
+          {
+            ...parentGroup,
+            parent:
+              parentGroup.parent.id === updated.id ? { ...parentGroup.parent, ...updated } : parentGroup.parent,
+            children: parentGroup.children.map((child) => ({
+              ...child,
+              ckp: child.ckp.id === updated.id ? { ...child.ckp, ...updated } : child.ckp,
+              pkus: child.pkus.map((entry) => ({
+                ...entry,
+                pku: entry.pku.id === updated.id ? { ...entry.pku, ...updated } : entry.pku,
+                sources: entry.sources.map((source) => ({
+                  ...source,
+                  node: source.node.id === updated.id ? { ...source.node, ...updated } : source.node,
+                })),
+              })),
+            })),
+          },
+        ]),
+      )
+    : undefined
+  return { ...payload, ckps, groups, parents, parent_groups: parentGroups }
 }
 
 function updateSelectionNode(selection: Selection | null, updated: KnowledgeGraphNode) {
@@ -334,15 +425,23 @@ function PKUCard({
         className="block w-full text-left"
         onClick={() => onSelect({ kind: 'pku', node: entry.pku, edge: entry.link })}
       >
-        <div className="flex items-center gap-2 text-xs font-semibold text-violet-700">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-violet-700">
           <Boxes size={14} />
-          <span>PKU</span>
-          <span className="rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px]">{entry.pku.unit_type || 'unit'}</span>
-          <span className="rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px]">{entry.link.label}</span>
+          <span className="shrink-0">PKU</span>
+          <span className="max-w-full truncate rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px]">
+            {entry.pku.unit_type || 'unit'}
+          </span>
+          <span className="max-w-full truncate rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px]">
+            {entry.link.label}
+          </span>
           {entry.link.role ? (
-            <span className="rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px]">{entry.link.role}</span>
+            <span className="max-w-full truncate rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px]">
+              {entry.link.role}
+            </span>
           ) : null}
-          {typeof entry.pku.confidence === 'number' ? <span className="ml-auto">{entry.pku.confidence.toFixed(2)}</span> : null}
+          {typeof entry.pku.confidence === 'number' ? (
+            <span className="shrink-0 sm:ml-auto">{entry.pku.confidence.toFixed(2)}</span>
+          ) : null}
         </div>
         <p className="mt-2 break-words text-sm font-medium leading-6 text-slate-950">
           {entry.pku.statement || entry.pku.label}

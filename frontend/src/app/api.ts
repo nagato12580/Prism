@@ -624,7 +624,7 @@ export const assetApi = {
 // ── Knowledge governance graph ───────────────────────────────
 
 export type KnowledgeGraphNodeType = 'canonical' | 'pku' | 'asset' | 'personal_asset_unit' | 'document_chunk'
-export type KnowledgeGraphEdgeType = 'canonical_pku' | 'pku_source' | 'pku_relation'
+export type KnowledgeGraphEdgeType = 'canonical_pku' | 'pku_source' | 'pku_relation' | 'canonical_relation'
 
 export interface KnowledgeGraphNode {
   id: string
@@ -653,6 +653,10 @@ export interface KnowledgeGraphNode {
   source_platform?: string
   source_url?: string
   normalized_statement?: string
+  topic_level?: string
+  child_count?: number
+  pku_count?: number
+  source_count?: number
 }
 
 export interface KnowledgeGraphEdge {
@@ -700,14 +704,41 @@ export interface KnowledgeGraphWorkbenchGroup {
   relations: KnowledgeGraphEdge[]
 }
 
+export interface KnowledgeGraphWorkbenchChildGroup extends KnowledgeGraphWorkbenchGroup {
+  parent_link?: KnowledgeGraphEdge | null
+}
+
+export interface KnowledgeGraphWorkbenchParentGroup {
+  parent: KnowledgeGraphNode & {
+    child_count?: number
+    pku_count?: number
+    source_count?: number
+  }
+  children: KnowledgeGraphWorkbenchChildGroup[]
+  stats: {
+    child_count: number
+    pku_count: number
+    source_count: number
+  }
+}
+
 export interface KnowledgeGraphWorkbenchPayload {
   ckps: Array<
     KnowledgeGraphNode & {
+      child_count?: number
       pku_count?: number
       source_count?: number
     }
   >
   groups: Record<string, KnowledgeGraphWorkbenchGroup>
+  parents?: Array<
+    KnowledgeGraphNode & {
+      child_count?: number
+      pku_count?: number
+      source_count?: number
+    }
+  >
+  parent_groups?: Record<string, KnowledgeGraphWorkbenchParentGroup>
   stats: {
     ckp_count: number
     pku_count: number

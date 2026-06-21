@@ -210,6 +210,7 @@ def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_sessi
     )
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(kg, "_extract_ckp_parent_topics_with_llm", lambda **kwargs: kg.CKPParentTopicAssignment([]))
 
     unit = PersonalAssetUnit(
         title="Metadata filter retrieval practice",
@@ -247,16 +248,112 @@ def test_document_and_asset_unit_pkus_can_share_ckp_with_distinct_roles(db_sessi
 
     assert unit_result.pku_count == 1
     assert doc_result.pku_count == 1
-    assert db_session.query(CanonicalKnowledgePoint).count() == 1
-    assert {ckp.canonical_type for ckp in db_session.query(CanonicalKnowledgePoint).all()} == {"topic"}
+    ckps = db_session.query(CanonicalKnowledgePoint).all()
+    assert len(ckps) == 2
+    assert {ckp.canonical_type for ckp in ckps} == {"topic"}
+    child_ckps = [ckp for ckp in ckps if ckp.extra_meta["topic_level"] == "child"]
+    parent_ckps = [ckp for ckp in ckps if ckp.extra_meta["topic_level"] == "parent"]
+    assert len(child_ckps) == 1
+    assert len(parent_ckps) == 1
 
     links = db_session.query(PKUCanonicalLink).all()
     assert {link.relation_type for link in links} == {"about"}
     assert {link.role for link in links} == {"topic_member"}
+    assert {link.canonical_id for link in links} == {child_ckps[0].id}
+    relation = db_session.query(CanonicalRelation).one()
+    assert relation.source_canonical_id == child_ckps[0].id
+    assert relation.target_canonical_id == parent_ckps[0].id
+    assert relation.relation_type == "subtopic_of"
     pkus = db_session.query(PersonalKnowledgeUnit).all()
     assert len(pkus) == 2
     assert {pku.source_kind for pku in pkus} == {"personal_asset_unit", "document_chunk"}
     assert {pku.modality for pku in pkus} == {"fact"}
+
+
+def test_asset_unit_settlement_links_child_ckp_to_parent_ckp(db_session, monkeypatch):
+    from backend.app.models import CanonicalRelation
+    from backend.app.services import knowledge_governance as kg
+
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_asset_unit_pkus_with_llm",
+        lambda unit: kg.AssetUnitPKUExtraction(
+            [
+                kg.ExtractedPKU(
+                    statement="LoRA reduces trainable parameters with low-rank matrices.",
+                    unit_type="method",
+                    evidence_span="LoRA uses low-rank matrices.",
+                    keywords=["LoRA", "fine-tuning"],
+                    concepts=["parameter efficient tuning"],
+                    entities=[],
+                    domains=["AI"],
+                    group="LoRA fine-tuning methods",
+                    confidence=0.9,
+                    reason="explicit",
+                    local_id="pku_1",
+                )
+            ],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_topics_with_llm",
+        lambda **kwargs: kg.CKPTopicExtraction(
+            [
+                kg.ExtractedCKPTopic(
+                    local_id="child_1",
+                    title="LoRA fine-tuning methods",
+                    description="Parameter-efficient methods for adapting LLMs.",
+                    keywords=["LoRA", "fine-tuning"],
+                    concepts=["parameter efficient tuning"],
+                    entities=[],
+                    domains=["AI"],
+                    member_pku_refs=["pku_1"],
+                    confidence=0.9,
+                    reason="shared local topic",
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment([]),
+    )
+
+    unit = PersonalAssetUnit(
+        title="LoRA fine-tuning methods",
+        content="LoRA reduces trainable parameters with low-rank matrices.",
+        summary="LoRA practice notes.",
+        category="AI",
+        tags=["LoRA", "fine-tuning"],
+        source_asset_ids=["asset-1"],
+        confidence={"overall": 0.9},
+        status="confirmed",
+        user_id="default-user",
+    )
+    db_session.add(unit)
+    db_session.flush()
+
+    result = settle_personal_asset_unit_to_governance(db_session, unit)
+    db_session.commit()
+
+    ckps = db_session.query(CanonicalKnowledgePoint).all()
+    assert {ckp.title for ckp in ckps} == {"LoRA fine-tuning methods", "General: LoRA fine-tuning methods"}
+    parent = next(ckp for ckp in ckps if ckp.title == "General: LoRA fine-tuning methods")
+    child = next(ckp for ckp in ckps if ckp.title == "LoRA fine-tuning methods")
+    assert parent.extra_meta["topic_level"] == "parent"
+    assert child.extra_meta["topic_level"] == "child"
+
+    relation = db_session.query(CanonicalRelation).one()
+    assert relation.source_canonical_id == child.id
+    assert relation.target_canonical_id == parent.id
+    assert relation.relation_type == "subtopic_of"
+    assert result.canonical_count == 2
+    assert result.link_count == 2
 
 
 def test_document_pku_type_uses_local_fallback_when_llm_empty(db_session, monkeypatch):

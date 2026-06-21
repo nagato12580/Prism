@@ -1,0 +1,326 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+        - link "Wiki" [ref=e41] [cursor=pointer]:
+          - /url: /wiki
+          - img [ref=e42]
+          - generic [ref=e45]: Wiki
+      - generic [ref=e46]: 用户记忆
+      - generic [ref=e47]:
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e91]: 知识治理图谱
+            - heading "CKP 与 PKU 治理网络" [level=1] [ref=e92]
+          - generic [ref=e794]:
+            - generic [ref=e795]:
+              - img
+              - textbox "搜索 CKP 或 PKU" [ref=e796]
+            - button "重排" [ref=e797] [cursor=pointer]:
+              - img [ref=e798]
+              - text: 重排
+            - button "刷新" [ref=e801] [cursor=pointer]:
+              - img [ref=e802]
+              - text: 刷新
+        - generic [ref=e93]:
+          - button "CKP Workbench" [ref=e94] [cursor=pointer]
+          - button "全局网络" [ref=e95] [cursor=pointer]
+        - generic [ref=e807]:
+          - generic [ref=e808]:
+            - generic [ref=e809]:
+              - generic [ref=e810]:
+                - button "返回 CKP 网络" [ref=e919] [cursor=pointer]:
+                  - img [ref=e920]
+                - generic [ref=e816]:
+                  - generic [ref=e817]: 模型评估与推理部署
+                  - generic [ref=e818]: 上级：模型评估与推理部署
+              - generic [ref=e819]:
+                - img [ref=e820]
+                - generic [ref=e822]: CKP
+                - generic [ref=e823]: "1"
+              - generic [ref=e824]:
+                - img [ref=e825]
+                - generic [ref=e835]: PKU
+                - generic [ref=e836]: "20"
+            - img "CKP 与 PKU 局部网络" [ref=e922]:
+              - generic [ref=e839]:
+                - generic [ref=e841]: 子 CKP
+                - generic [ref=e923]: PKU
+              - generic [ref=e843]:
+                - generic [ref=e854]:
+                  - generic: 模型评估与推理部署
+                  - generic: CKP
+                - generic [ref=e924]:
+                  - generic: 分类任务单条预测的推理流程：输...
+                  - generic: PKU
+                - generic [ref=e926]:
+                  - generic: 混淆矩阵可以显示误分类模式，例...
+                  - generic: PKU
+                - generic [ref=e928]:
+                  - generic: 应设置置信度阈值，对不同置信度...
+                  - generic: PKU
+                - generic [ref=e930]:
+                  - generic: 建立基线时应比较微调模型与原始...
+                  - generic: PKU
+                - generic [ref=e932]:
+                  - generic: 微调成功的标志是微调模型稳定超...
+                  - generic: PKU
+                - generic [ref=e934]:
+                  - generic: 微调成功的基本判断标准包括：核...
+                  - generic: PKU
+                - generic [ref=e936]:
+                  - generic: 批量预测时应注意使用batch...
+                  - generic: PKU
+                - generic [ref=e938]:
+                  - generic: 更严格的成功标准包括验证集和测...
+                  - generic: PKU
+                - generic [ref=e940]:
+                  - generic: 评估分类模型时应使用混淆矩阵，...
+                  - generic: PKU
+                - generic [ref=e942]:
+                  - generic: 评估检查清单包括：是否看了Ac...
+                  - generic: PKU
+                - generic [ref=e944]:
+                  - generic: 推理检查清单包括：单条预测是否...
+                  - generic: PKU
+                - generic [ref=e946]:
+                  - generic: 当发现混淆矩阵问题后，应检查标...
+                  - generic: PKU
+                - generic [ref=e948]:
+                  - generic: 上线检查清单包括：是否灰度发布...
+                  - generic: PKU
+                - generic [ref=e950]:
+                  - generic: 评估时一定要看混淆矩阵，以分析...
+                  - generic: PKU
+                - generic [ref=e952]:
+                  - generic: Loss是训练优化指标，但业务...
+                  - generic: PKU
+                - generic [ref=e954]:
+                  - generic: 不同任务应关注不同指标：类别均...
+                  - generic: PKU
+                - generic [ref=e956]:
+                  - generic: 评估指标需组合使用，不能只看 ...
+                  - generic: PKU
+                - generic [ref=e958]:
+                  - generic: 分类任务常用评估指标包括Acc...
+                  - generic: PKU
+                - generic [ref=e960]:
+                  - generic: 线上推理验收前应检查典型样本预...
+                  - generic: PKU
+                - generic [ref=e962]:
+                  - generic: Loss 只能辅助判断训练状态...
+                  - generic: PKU
+          - complementary [ref=e870]:
+            - generic [ref=e871]:
+              - generic [ref=e872]:
+                - img [ref=e874]
+                - generic [ref=e876]:
+                  - generic [ref=e877]: CKP
+                  - heading "模型评估与推理部署" [level=2] [ref=e878]
+              - button "编辑节点" [ref=e879] [cursor=pointer]:
+                - img [ref=e880]
+            - generic [ref=e883]:
+              - button "返回 CKP 网络" [ref=e964] [cursor=pointer]:
+                - img [ref=e965]
+                - text: 返回 CKP 网络
+              - generic [ref=e884]:
+                - generic [ref=e885]: 内容
+                - paragraph [ref=e886]: 评估指标、混淆矩阵、基线比较、推理流程、置信度阈值及线上验收
+              - generic [ref=e887]:
+                - generic [ref=e888]:
+                  - generic [ref=e889]: 类型
+                  - generic [ref=e890]: topic
+                - generic [ref=e891]:
+                  - generic [ref=e892]: 置信度
+                  - generic [ref=e893]: "0.95"
+              - generic [ref=e894]:
+                - generic [ref=e895]:
+                  - generic [ref=e896]: 分类
+                  - generic [ref=e897]: "-"
+                - generic [ref=e898]:
+                  - generic [ref=e899]: 状态
+                  - generic [ref=e900]: draft
+              - generic [ref=e901]:
+                - generic [ref=e902]: 关键词
+                - generic [ref=e903]:
+                  - generic [ref=e904]: 评估指标
+                  - generic [ref=e905]: Accuracy
+                  - generic [ref=e906]: F1
+                  - generic [ref=e907]: 混淆矩阵
+                  - generic [ref=e908]: 推理
+                  - generic [ref=e909]: 置信度阈值
+              - generic [ref=e910]:
+                - heading "CKP-PKU 关系" [level=3] [ref=e967]
+                - generic [ref=e912]:
+                  - generic [ref=e968]:
+                    - generic [ref=e969]:
+                      - img [ref=e970]
+                      - text: about
+                    - generic [ref=e972]: 分类任务单条预测的推理流程：输入文本→tokenizer→model→logits→softmax→取最大概率类别→id2label转回标签。
+                    - generic [ref=e973]: topic_member
+                  - generic [ref=e974]:
+                    - generic [ref=e975]:
+                      - img [ref=e976]
+                      - text: about
+                    - generic [ref=e978]: 混淆矩阵可以显示误分类模式，例如退款问题常被预测成物流问题。
+                    - generic [ref=e979]: topic_member
+                  - generic [ref=e980]:
+                    - generic [ref=e981]:
+                      - img [ref=e982]
+                      - text: about
+                    - generic [ref=e984]: 应设置置信度阈值，对不同置信度区间采取不同处理方式：高置信度自动处理，中置信度人工复核，低置信度返回兜底标签或转人工。
+                    - generic [ref=e985]: topic_member
+                  - generic [ref=e986]:
+                    - generic [ref=e987]:
+                      - img [ref=e988]
+                      - text: about
+                    - generic [ref=e990]: 建立基线时应比较微调模型与原始大模型zero-shot、few-shot、传统机器学习模型、旧线上模型、人工规则系统的性能。
+                    - generic [ref=e991]: topic_member
+                  - generic [ref=e992]:
+                    - generic [ref=e993]:
+                      - img [ref=e994]
+                      - text: about
+                    - generic [ref=e996]: 微调成功的标志是微调模型稳定超过基线。
+                    - generic [ref=e997]: topic_member
+                  - generic [ref=e998]:
+                    - generic [ref=e999]:
+                      - img [ref=e1000]
+                      - text: about
+                    - generic [ref=e1002]: 微调成功的基本判断标准包括：核心指标比基线提升、多次训练波动小、典型样本正确、线上无崩坏、少数类指标不恶化、推理速度和成本可接受。
+                    - generic [ref=e1003]: topic_member
+                  - generic [ref=e1004]:
+                    - generic [ref=e1005]:
+                      - img [ref=e1006]
+                      - text: about
+                    - generic [ref=e1008]: 批量预测时应注意使用batch推理、设置max_length、避免一次性加载大文件、保存预测结果和低置信度样本供人工复核。
+                    - generic [ref=e1009]: topic_member
+                  - generic [ref=e1010]:
+                    - generic [ref=e1011]:
+                      - img [ref=e1012]
+                      - text: about
+                    - generic [ref=e1014]: 更严格的成功标准包括验证集和测试集指标接近、Macro F1和关键类别Recall达标、错误样本可解释、人工抽检通过、灰度上线稳定。
+                    - generic [ref=e1015]: topic_member
+                  - generic [ref=e1016]:
+                    - generic [ref=e1017]:
+                      - img [ref=e1018]
+                      - text: about
+                    - generic [ref=e1020]: 评估分类模型时应使用混淆矩阵，因为可以揭示类别混淆问题。
+                    - generic [ref=e1021]: topic_member
+                  - generic [ref=e1022]:
+                    - generic [ref=e1023]:
+                      - img [ref=e1024]
+                      - text: about
+                    - generic [ref=e1026]: 评估检查清单包括：是否看了Accuracy、Precision、Recall、F1、混淆矩阵，是否和基线比较，是否分析错误样本，是否关注关键类别，是否单独测试边界样本。
+                    - generic [ref=e1027]: topic_member
+                  - generic [ref=e1028]:
+                    - generic [ref=e1029]:
+                      - img [ref=e1030]
+                      - text: about
+                    - generic [ref=e1032]: 推理检查清单包括：单条预测是否正确、批量预测是否稳定、低置信度样本是否兜底、空输入和超长输入是否处理、输出格式是否稳定、推理速度是否满足业务要求。
+                    - generic [ref=e1033]: topic_member
+                  - generic [ref=e1034]:
+                    - generic [ref=e1035]:
+                      - img [ref=e1036]
+                      - text: about
+                    - generic [ref=e1038]: 当发现混淆矩阵问题后，应检查标签定义重叠、错标、样本区分性、prompt或输入字段。
+                    - generic [ref=e1039]: topic_member
+                  - generic [ref=e1040]:
+                    - generic [ref=e1041]:
+                      - img [ref=e1042]
+                      - text: about
+                    - generic [ref=e1044]: 上线检查清单包括：是否灰度发布、是否保留回滚方案、是否监控线上指标、是否收集错例、是否建立持续迭代数据闭环。
+                    - generic [ref=e1045]: topic_member
+                  - generic [ref=e1046]:
+                    - generic [ref=e1047]:
+                      - img [ref=e1048]
+                      - text: about
+                    - generic [ref=e1050]: 评估时一定要看混淆矩阵，以分析模型具体分类混淆情况。
+                    - generic [ref=e1051]: topic_member
+                  - generic [ref=e1052]:
+                    - generic [ref=e1053]:
+                      - img [ref=e1054]
+                      - text: about
+                    - generic [ref=e1056]: Loss是训练优化指标，但业务评估不能只看Loss，需要组合评估。
+                    - generic [ref=e1057]: topic_member
+                  - generic [ref=e1058]:
+                    - generic [ref=e1059]:
+                      - img [ref=e1060]
+                      - text: about
+                    - generic [ref=e1062]: 不同任务应关注不同指标：类别均衡任务关注Accuracy和Macro F1；类别不平衡任务关注Macro F1和Recall；风控审核召回类关注Recall；误杀代价高的关注Precision。
+                    - generic [ref=e1063]: topic_member
+                  - generic [ref=e1064]:
+                    - generic [ref=e1065]:
+                      - img [ref=e1066]
+                      - text: about
+                    - generic [ref=e1068]: 评估指标需组合使用，不能只看 Accuracy，应同时看 Accuracy、Precision、Recall、F1、混淆矩阵。
+                    - generic [ref=e1069]: topic_member
+                  - generic [ref=e1070]:
+                    - generic [ref=e1071]:
+                      - img [ref=e1072]
+                      - text: about
+                    - generic [ref=e1074]: 分类任务常用评估指标包括Accuracy、Precision、Recall、F1 Score、Macro F1、Weighted F1和Confusion Matrix。
+                    - generic [ref=e1075]: topic_member
+                  - generic [ref=e1076]:
+                    - generic [ref=e1077]:
+                      - img [ref=e1078]
+                      - text: about
+                    - generic [ref=e1080]: 线上推理验收前应检查典型样本预测正确、边界样本稳定、长文本截断、空文本乱码emoji崩溃、新表达处理、批量推理速度。
+                    - generic [ref=e1081]: topic_member
+                  - generic [ref=e1082]:
+                    - generic [ref=e1083]:
+                      - img [ref=e1084]
+                      - text: about
+                    - generic [ref=e1086]: Loss 只能辅助判断训练状态，不能单独代表业务效果。
+                    - generic [ref=e1087]: topic_member

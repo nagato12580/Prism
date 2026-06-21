@@ -1,4 +1,5 @@
 import json
+import logging
 from types import SimpleNamespace
 
 from backend.app.prompts.asset_parse import (
@@ -138,6 +139,70 @@ def test_parse_ckp_topic_extraction_keeps_valid_topics():
     assert result.topics[0].llm_model == "qwen-plus"
 
 
+def test_build_ckp_parent_topic_assignment_messages_groups_child_topics():
+    from backend.app.prompts.asset_parse import build_ckp_parent_topic_assignment_messages
+
+    system_prompt, user_message = build_ckp_parent_topic_assignment_messages(
+        source_kind="knowledge_item",
+        source_id="item-1",
+        title="LLM fine-tuning guide",
+        summary="LoRA, data preparation, and evaluation practices.",
+        category="AI",
+        tags=["fine-tuning", "LoRA"],
+        child_topics=[
+            {
+                "ref": "child_1",
+                "title": "LoRA fine-tuning methods",
+                "description": "Parameter-efficient methods for adapting LLMs.",
+                "keywords": ["LoRA", "fine-tuning"],
+                "concepts": ["parameter efficient tuning"],
+                "domains": ["AI"],
+                "entities": [],
+                "member_pku_statements": ["LoRA reduces trainable parameters."],
+            }
+        ],
+    )
+
+    request = json.loads(user_message)
+    assert "JSON" in system_prompt
+    assert request["source"]["id"] == "item-1"
+    assert request["child_topics"][0]["ref"] == "child_1"
+    assert request["json_shape"]["parent_topics"][0]["title"] == "Broad topic noun phrase"
+    assert request["json_shape"]["parent_topics"][0]["member_child_refs"] == ["child_1", "child_2"]
+    assert any("parent" in rule.lower() for rule in request["rules"])
+
+
+def test_parse_ckp_parent_topic_assignment_keeps_valid_parent_topics():
+    from backend.app.services import knowledge_governance as kg
+
+    result = kg._parse_ckp_parent_topic_assignment(
+        {
+            "parent_topics": [
+                {
+                    "local_id": "parent_1",
+                    "title": "LLM fine-tuning",
+                    "description": "Methods, rules, and evaluation knowledge for adapting LLMs.",
+                    "keywords": ["fine-tuning", "LoRA"],
+                    "concepts": ["SFT"],
+                    "domains": ["AI"],
+                    "entities": [],
+                    "member_child_refs": ["child_1", "child_2"],
+                    "confidence": 0.9,
+                    "reason": "Both child topics discuss fine-tuning.",
+                },
+                {"local_id": "bad", "title": "", "member_child_refs": ["child_3"]},
+            ]
+        },
+        llm_model="qwen-plus",
+    )
+
+    assert len(result.parent_topics) == 1
+    assert result.parent_topics[0].local_id == "parent_1"
+    assert result.parent_topics[0].title == "LLM fine-tuning"
+    assert result.parent_topics[0].member_child_refs == ["child_1", "child_2"]
+    assert result.parent_topics[0].llm_model == "qwen-plus"
+
+
 def test_extract_ckp_topics_uses_main_llm(monkeypatch):
     from backend.app.services import knowledge_governance as kg
 
@@ -257,6 +322,69 @@ def test_parse_asset_unit_pku_extraction_keeps_valid_pkus_and_relations():
     assert result.relations[0].to_ref == "pku_bad"
 
 
+def test_parse_asset_unit_pku_extraction_logs_rejection_diagnostics(caplog):
+    from backend.app.services.knowledge_governance import _parse_asset_unit_pku_extraction
+
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        result = _parse_asset_unit_pku_extraction(
+            {
+                "knowledge_units": [
+                    {
+                        "id": "ku_1",
+                        "content": "DeepSeek may return a non-standard PKU container.",
+                        "kind": "principle",
+                    }
+                ],
+                "pkus": [
+                    {"local_id": "missing_statement", "unit_type": "rule"},
+                    {"local_id": "bad_type", "statement": "A fact-like item.", "unit_type": "principle"},
+                    "not-a-dict",
+                ],
+            },
+            llm_model="deepseek-v4-flash",
+        )
+
+    assert result.pkus == []
+    record = next(record for record in caplog.records if "asset unit PKU parse produced no PKUs" in record.message)
+    assert record.llm_model == "deepseek-v4-flash"
+    assert record.top_level_keys == ["knowledge_units", "pkus"]
+    assert record.raw_pku_count == 3
+    assert record.parsed_pku_count == 0
+    assert record.rejected_count == 3
+    assert record.reject_reasons == ["missing_statement", "invalid_unit_type", "non_object_item"]
+    assert record.sample_unit_types == ["rule", "principle"]
+
+
+def test_parse_asset_unit_pku_extraction_accepts_unit_type_lists():
+    from backend.app.services.knowledge_governance import _parse_asset_unit_pku_extraction
+
+    result = _parse_asset_unit_pku_extraction(
+        {
+            "pkus": [
+                {
+                    "local_id": "pku_1",
+                    "statement": "Fine-tuning means adapting a pretrained model to a target task.",
+                    "unit_type": ["definition", "concept"],
+                },
+                {
+                    "local_id": "pku_2",
+                    "statement": "Fine-tuning can use LoRA adapters and validation monitoring.",
+                    "unit_type": ["method", "observation"],
+                },
+                {
+                    "local_id": "pku_3",
+                    "statement": "Evaluation should use held-out data.",
+                    "unit_type": ["unknown_type", "rule"],
+                },
+            ]
+        },
+        llm_model="deepseek-v4-flash",
+    )
+
+    assert [pku.local_id for pku in result.pkus] == ["pku_1", "pku_2", "pku_3"]
+    assert [pku.unit_type for pku in result.pkus] == ["definition", "method", "rule"]
+
+
 def test_parse_asset_unit_pku_extraction_accepts_concept_style_llm_output():
     from backend.app.services.knowledge_governance import _parse_asset_unit_pku_extraction
 
@@ -356,6 +484,119 @@ def test_extract_asset_unit_pkus_uses_main_llm(monkeypatch):
     assert result.pkus[0].unit_type == "method"
 
 
+def test_extract_asset_unit_pkus_logs_llm_diagnostics_on_success(monkeypatch, caplog):
+    from backend.app.models import PersonalAssetUnit
+    from backend.app.services import knowledge_governance as kg
+
+    class FakeMessage:
+        content = (
+            '{"pkus":[{"local_id":"pku_1","statement":"PKU extraction diagnostics record parsed counts.",'
+            '"unit_type":"observation","evidence_span":"diagnostics record parsed counts","confidence":0.9}],'
+            '"relations":[]}'
+        )
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return type("Response", (), {"choices": [FakeChoice()]})()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    monkeypatch.setattr(kg.settings, "LLM_API_BASE", "http://llm.local/v1")
+    monkeypatch.setattr(kg.settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(kg.settings, "LLM_MODEL", "qwen-plus")
+    monkeypatch.setattr(kg, "OpenAI", lambda base_url, api_key: FakeClient())
+
+    unit = PersonalAssetUnit(id="unit-1", title="PKU diagnostics", content="diagnostics record parsed counts")
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        result = kg._extract_asset_unit_pkus_with_llm(unit)
+
+    assert len(result.pkus) == 1
+    record = next(record for record in caplog.records if "asset unit PKU LLM extraction completed" in record.message)
+    assert record.elapsed_ms >= 0
+    assert record.model == "qwen-plus"
+    assert record.json_empty is False
+    assert record.pku_count == 1
+
+
+def test_extract_asset_unit_pkus_logs_empty_json_and_zero_pku_count(monkeypatch, caplog):
+    from backend.app.models import PersonalAssetUnit
+    from backend.app.services import knowledge_governance as kg
+
+    class FakeMessage:
+        content = "{}"
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return type("Response", (), {"choices": [FakeChoice()]})()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    monkeypatch.setattr(kg.settings, "LLM_API_BASE", "http://llm.local/v1")
+    monkeypatch.setattr(kg.settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(kg.settings, "LLM_MODEL", "qwen-plus")
+    monkeypatch.setattr(kg, "OpenAI", lambda base_url, api_key: FakeClient())
+
+    unit = PersonalAssetUnit(id="unit-1", title="PKU diagnostics", content="empty extraction")
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        result = kg._extract_asset_unit_pkus_with_llm(unit)
+
+    assert result.pkus == []
+    record = next(record for record in caplog.records if "asset unit PKU LLM extraction completed" in record.message)
+    assert record.elapsed_ms >= 0
+    assert record.model == "qwen-plus"
+    assert record.json_empty is True
+    assert record.pku_count == 0
+
+
+def test_extract_asset_unit_pkus_logs_exception_diagnostics(monkeypatch, caplog):
+    from backend.app.models import PersonalAssetUnit
+    from backend.app.services import knowledge_governance as kg
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            raise TimeoutError("llm request timed out")
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    monkeypatch.setattr(kg.settings, "LLM_API_BASE", "http://llm.local/v1")
+    monkeypatch.setattr(kg.settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(kg.settings, "LLM_MODEL", "qwen-plus")
+    monkeypatch.setattr(kg, "OpenAI", lambda base_url, api_key: FakeClient())
+
+    unit = PersonalAssetUnit(id="unit-1", title="PKU diagnostics", content="timeout case")
+
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        result = kg._extract_asset_unit_pkus_with_llm(unit)
+
+    assert result.pkus == []
+    record = next(record for record in caplog.records if "asset unit PKU LLM extraction failed" in record.message)
+    assert record.elapsed_ms >= 0
+    assert record.model == "qwen-plus"
+    assert record.exception_type == "TimeoutError"
+    assert record.exception_message == "llm request timed out"
+    assert "test-key" not in record.getMessage()
+
+
 def _confirmed_personal_asset_unit(**overrides):
     from backend.app.models import PersonalAssetUnit
 
@@ -372,6 +613,22 @@ def _confirmed_personal_asset_unit(**overrides):
     }
     values.update(overrides)
     return PersonalAssetUnit(**values)
+
+
+def _single_topic_ckp_by_level(db_session, level):
+    from backend.app.models import CanonicalKnowledgePoint
+
+    matches = [
+        ckp
+        for ckp in (
+            db_session.query(CanonicalKnowledgePoint)
+            .filter(CanonicalKnowledgePoint.canonical_type == "topic")
+            .all()
+        )
+        if (ckp.extra_meta or {}).get("topic_level") == level
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_asset_unit_settlement_persists_multiple_llm_pkus(db_session, monkeypatch):
@@ -431,7 +688,7 @@ def test_asset_unit_settlement_persists_multiple_llm_pkus(db_session, monkeypatc
     assert {pku.llm_model for pku in pkus} == {"qwen-plus"}
 
 
-def test_asset_unit_settlement_falls_back_to_summary_when_llm_empty(db_session, monkeypatch):
+def test_asset_unit_settlement_falls_back_to_summary_when_llm_empty(db_session, monkeypatch, caplog):
     from backend.app.models import PersonalKnowledgeUnit
     from backend.app.services import knowledge_governance as kg
 
@@ -448,14 +705,20 @@ def test_asset_unit_settlement_falls_back_to_summary_when_llm_empty(db_session, 
         lambda unit: kg.AssetUnitPKUExtraction(pkus=[], relations=[], llm_model="qwen-plus"),
     )
 
-    result = kg.settle_personal_asset_unit_to_governance(db_session, unit)
-    db_session.commit()
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        result = kg.settle_personal_asset_unit_to_governance(db_session, unit)
+        db_session.commit()
 
     assert result.pku_count == 1
     pku = db_session.query(PersonalKnowledgeUnit).filter_by(source_kind="personal_asset_unit").one()
     assert pku.statement == unit.summary
     assert pku.evidence_span == unit.content
     assert pku.llm_model == ""
+    record = next(record for record in caplog.records if "asset unit PKU fallback activated" in record.message)
+    assert record.unit_id == unit.id
+    assert record.llm_model == "qwen-plus"
+    assert record.llm_pku_count == 0
+    assert record.fallback_created is True
 
 
 def test_asset_unit_settlement_persists_llm_pku_relations(db_session, monkeypatch):
@@ -523,7 +786,7 @@ def test_asset_unit_settlement_persists_llm_pku_relations(db_session, monkeypatc
 
 
 def test_asset_unit_settlement_groups_pkus_under_topic_ckp_with_about_links(db_session, monkeypatch):
-    from backend.app.models import CanonicalKnowledgePoint, PKUCanonicalLink
+    from backend.app.models import CanonicalKnowledgePoint, CanonicalRelation, PKUCanonicalLink
     from backend.app.services import knowledge_governance as kg
 
     unit = _confirmed_personal_asset_unit(
@@ -594,6 +857,28 @@ def test_asset_unit_settlement_groups_pkus_under_topic_ckp_with_about_links(db_s
             llm_model="qwen-plus",
         ),
     )
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment(
+            parent_topics=[
+                kg.ExtractedCKPParentTopic(
+                    local_id="parent_1",
+                    title="LLM fine-tuning note",
+                    description="Broader parent topic for the local fine-tuning topic.",
+                    keywords=["fine-tuning"],
+                    concepts=["LoRA", "validation"],
+                    entities=[],
+                    domains=["AI"],
+                    member_child_refs=["topic_1"],
+                    confidence=0.88,
+                    reason="groups the local topic under the source note",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        ),
+    )
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
 
@@ -601,13 +886,22 @@ def test_asset_unit_settlement_groups_pkus_under_topic_ckp_with_about_links(db_s
     db_session.commit()
 
     assert result.pku_count == 2
-    assert result.canonical_count == 1
-    assert result.link_count == 2
-    ckp = db_session.query(CanonicalKnowledgePoint).one()
-    assert ckp.canonical_type == "topic"
-    assert ckp.title == "LLM fine-tuning"
-    assert ckp.canonical_statement != "LoRA reduces trainable parameters."
-    assert {link.relation_type for link in db_session.query(PKUCanonicalLink).all()} == {"about"}
+    assert result.canonical_count == 2
+    assert result.link_count == 3
+    child_ckp = _single_topic_ckp_by_level(db_session, "child")
+    parent_ckp = _single_topic_ckp_by_level(db_session, "parent")
+    assert child_ckp.title == "LLM fine-tuning"
+    assert child_ckp.canonical_statement != "LoRA reduces trainable parameters."
+    assert parent_ckp.title == "LLM fine-tuning note"
+    pku_links = db_session.query(PKUCanonicalLink).all()
+    assert len(pku_links) == 2
+    assert {link.relation_type for link in pku_links} == {"about"}
+    assert {link.role for link in pku_links} == {"topic_member"}
+    assert {link.canonical_id for link in pku_links} == {child_ckp.id}
+    hierarchy = db_session.query(CanonicalRelation).one()
+    assert hierarchy.source_canonical_id == child_ckp.id
+    assert hierarchy.target_canonical_id == parent_ckp.id
+    assert hierarchy.relation_type == "subtopic_of"
 
 
 def test_asset_unit_settlement_sends_one_topic_ref_per_extracted_pku(db_session, monkeypatch):
@@ -716,10 +1010,15 @@ def test_asset_unit_settlement_reuses_ckp_when_vector_similarity_is_high(db_sess
         ),
     )
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment([], llm_model="qwen-plus"),
+    )
 
     kg.settle_personal_asset_unit_to_governance(db_session, first_unit)
     db_session.flush()
-    existing_ckp = db_session.query(CanonicalKnowledgePoint).one()
+    existing_ckp = _single_topic_ckp_by_level(db_session, "child")
 
     def fake_search_ckp_vectors(*, text, user_id, canonical_type="", top_k=8):
         return [{"ckp_id": existing_ckp.id, "score": 0.83}]
@@ -729,7 +1028,7 @@ def test_asset_unit_settlement_reuses_ckp_when_vector_similarity_is_high(db_sess
     kg.settle_personal_asset_unit_to_governance(db_session, second_unit)
     db_session.commit()
 
-    assert db_session.query(CanonicalKnowledgePoint).count() == 1
+    assert db_session.query(CanonicalKnowledgePoint).count() == 2
     assert db_session.query(PKUCanonicalLink).count() == 2
 
 
@@ -770,10 +1069,15 @@ def test_asset_unit_settlement_uses_llm_for_mid_vector_similarity(db_session, mo
         ),
     )
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment([], llm_model="qwen-plus"),
+    )
 
     kg.settle_personal_asset_unit_to_governance(db_session, first_unit)
     db_session.flush()
-    existing_ckp = db_session.query(CanonicalKnowledgePoint).one()
+    existing_ckp = _single_topic_ckp_by_level(db_session, "child")
 
     monkeypatch.setattr(
         kg,
@@ -794,7 +1098,7 @@ def test_asset_unit_settlement_uses_llm_for_mid_vector_similarity(db_session, mo
     kg.settle_personal_asset_unit_to_governance(db_session, second_unit)
     db_session.commit()
 
-    assert db_session.query(CanonicalKnowledgePoint).count() == 1
+    assert db_session.query(CanonicalKnowledgePoint).count() == 2
     assert db_session.query(PKUCanonicalLink).count() == 2
 
 
@@ -832,10 +1136,15 @@ def test_asset_unit_settlement_creates_new_ckp_when_vector_similarity_is_low(db_
         ),
     )
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment([], llm_model="qwen-plus"),
+    )
 
     kg.settle_personal_asset_unit_to_governance(db_session, first_unit)
     db_session.flush()
-    existing_ckp = db_session.query(CanonicalKnowledgePoint).one()
+    existing_ckp = _single_topic_ckp_by_level(db_session, "child")
     monkeypatch.setattr(
         kg,
         "search_ckp_vectors",
@@ -845,7 +1154,10 @@ def test_asset_unit_settlement_creates_new_ckp_when_vector_similarity_is_low(db_
     kg.settle_personal_asset_unit_to_governance(db_session, second_unit)
     db_session.commit()
 
-    assert db_session.query(CanonicalKnowledgePoint).count() == 2
+    ckps = db_session.query(CanonicalKnowledgePoint).all()
+    assert len(ckps) == 3
+    assert sum(1 for ckp in ckps if (ckp.extra_meta or {}).get("topic_level") == "child") == 2
+    assert sum(1 for ckp in ckps if (ckp.extra_meta or {}).get("topic_level") == "parent") == 1
 
 
 def test_find_existing_ckp_reuses_high_vector_similarity_without_keyword_overlap(db_session, monkeypatch):
@@ -1222,7 +1534,7 @@ def test_create_or_get_topic_link_uses_about_relation(db_session):
 
 
 def test_settle_local_pku_topics_links_members_to_fewer_topic_ckps(db_session, monkeypatch):
-    from backend.app.models import CanonicalKnowledgePoint, PKUCanonicalLink, PersonalKnowledgeUnit
+    from backend.app.models import CanonicalRelation, PKUCanonicalLink, PersonalKnowledgeUnit
     from backend.app.services import knowledge_governance as kg
 
     first = PersonalKnowledgeUnit(
@@ -1280,6 +1592,28 @@ def test_settle_local_pku_topics_links_members_to_fewer_topic_ckps(db_session, m
             llm_model="qwen-plus",
         ),
     )
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment(
+            parent_topics=[
+                kg.ExtractedCKPParentTopic(
+                    local_id="parent_1",
+                    title="Fine-tuning note",
+                    description="Broader parent topic for the source note.",
+                    keywords=["fine-tuning"],
+                    concepts=["LoRA", "validation"],
+                    entities=[],
+                    domains=["AI"],
+                    member_child_refs=["topic_1"],
+                    confidence=0.88,
+                    reason="groups local topic under source note",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        ),
+    )
 
     result = kg._settle_local_pku_topics(
         db_session,
@@ -1298,18 +1632,23 @@ def test_settle_local_pku_topics_links_members_to_fewer_topic_ckps(db_session, m
         reason="Local topic settlement.",
     )
 
-    assert result == (1, 2)
-    ckp = db_session.query(CanonicalKnowledgePoint).one()
-    assert ckp.canonical_type == "topic"
-    assert ckp.title == "LLM fine-tuning"
+    assert result == (2, 3)
+    child_ckp = _single_topic_ckp_by_level(db_session, "child")
+    parent_ckp = _single_topic_ckp_by_level(db_session, "parent")
+    assert child_ckp.title == "LLM fine-tuning"
+    assert parent_ckp.title == "Fine-tuning note"
     links = db_session.query(PKUCanonicalLink).order_by(PKUCanonicalLink.pku_id.asc()).all()
     assert len(links) == 2
     assert {link.relation_type for link in links} == {"about"}
-    assert {link.canonical_id for link in links} == {ckp.id}
+    assert {link.canonical_id for link in links} == {child_ckp.id}
+    hierarchy = db_session.query(CanonicalRelation).one()
+    assert hierarchy.source_canonical_id == child_ckp.id
+    assert hierarchy.target_canonical_id == parent_ckp.id
+    assert hierarchy.relation_type == "subtopic_of"
 
 
 def test_settle_local_pku_topics_uses_fallback_when_llm_refs_are_all_missing(db_session, monkeypatch):
-    from backend.app.models import CanonicalKnowledgePoint, PKUCanonicalLink, PersonalKnowledgeUnit
+    from backend.app.models import CanonicalRelation, PKUCanonicalLink, PersonalKnowledgeUnit
     from backend.app.services import knowledge_governance as kg
 
     first = PersonalKnowledgeUnit(
@@ -1367,6 +1706,28 @@ def test_settle_local_pku_topics_uses_fallback_when_llm_refs_are_all_missing(db_
             llm_model="qwen-plus",
         ),
     )
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment(
+            parent_topics=[
+                kg.ExtractedCKPParentTopic(
+                    local_id="parent_1",
+                    title="General: Fine-tuning note",
+                    description="Broader fallback parent topic for the source note.",
+                    keywords=["fine-tuning"],
+                    concepts=[],
+                    entities=[],
+                    domains=["AI"],
+                    member_child_refs=["fallback_topic"],
+                    confidence=0.7,
+                    reason="groups fallback local topic under source note",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        ),
+    )
 
     result = kg._settle_local_pku_topics(
         db_session,
@@ -1385,14 +1746,20 @@ def test_settle_local_pku_topics_uses_fallback_when_llm_refs_are_all_missing(db_
         reason="Local topic settlement.",
     )
 
-    assert result == (1, 2)
-    ckp = db_session.query(CanonicalKnowledgePoint).one()
-    assert ckp.title == "Fine-tuning note"
-    assert ckp.title != "Hallucinated topic"
+    assert result == (2, 3)
+    child_ckp = _single_topic_ckp_by_level(db_session, "child")
+    parent_ckp = _single_topic_ckp_by_level(db_session, "parent")
+    assert child_ckp.title == "Fine-tuning note"
+    assert child_ckp.title != "Hallucinated topic"
+    assert parent_ckp.title == "General: Fine-tuning note"
     links = db_session.query(PKUCanonicalLink).order_by(PKUCanonicalLink.pku_id.asc()).all()
     assert len(links) == 2
     assert {link.relation_type for link in links} == {"about"}
-    assert {link.canonical_id for link in links} == {ckp.id}
+    assert {link.canonical_id for link in links} == {child_ckp.id}
+    hierarchy = db_session.query(CanonicalRelation).one()
+    assert hierarchy.source_canonical_id == child_ckp.id
+    assert hierarchy.target_canonical_id == parent_ckp.id
+    assert hierarchy.relation_type == "subtopic_of"
 
 
 def test_asset_unit_settlement_does_not_call_ollama_type_classifier(db_session, monkeypatch):

@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.asset import PersonalAssetItem, PersonalAssetUnit
-from ..models.knowledge_governance import CanonicalKnowledgePoint, PKUCanonicalLink, PKURelation, PersonalKnowledgeUnit
+from ..models.knowledge_governance import (
+    CanonicalKnowledgePoint,
+    CanonicalRelation,
+    PKUCanonicalLink,
+    PKURelation,
+    PersonalKnowledgeUnit,
+)
 from ..models.knowledge_item import KnowledgeChunk, KnowledgeItem
 
 
@@ -65,6 +71,12 @@ def _asset_confidence(asset: PersonalAssetItem) -> float | None:
     return None
 
 
+def _ckp_topic_level(canonical: CanonicalKnowledgePoint) -> str:
+    extra_meta = canonical.extra_meta if isinstance(canonical.extra_meta, dict) else {}
+    topic_level = extra_meta.get("topic_level")
+    return topic_level if topic_level in {"parent", "child"} else "child"
+
+
 def _serialize_canonical(canonical: CanonicalKnowledgePoint) -> dict[str, Any]:
     return _node(
         f"ckp:{canonical.id}",
@@ -77,6 +89,7 @@ def _serialize_canonical(canonical: CanonicalKnowledgePoint) -> dict[str, Any]:
         status=canonical.status,
         confidence=canonical.confidence,
         keywords=canonical.keywords or [],
+        topic_level=_ckp_topic_level(canonical),
     )
 
 
@@ -197,6 +210,25 @@ def _source_edge_for_pku(pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
     )
 
 
+def _canonical_relation_edge(relation: CanonicalRelation, parent_to_child: bool = True) -> dict[str, Any]:
+    if parent_to_child:
+        source_id = f"ckp:{relation.target_canonical_id}"
+        target_id = f"ckp:{relation.source_canonical_id}"
+    else:
+        source_id = f"ckp:{relation.source_canonical_id}"
+        target_id = f"ckp:{relation.target_canonical_id}"
+
+    return _edge(
+        f"edge:canonical_relation:{relation.id}",
+        source_id,
+        target_id,
+        "canonical_relation",
+        relation.relation_type,
+        confidence=relation.confidence,
+        reason=relation.reason,
+    )
+
+
 @router.get("/workbench")
 def get_knowledge_graph_workbench(
     q: Optional[str] = Query(None),
@@ -222,6 +254,8 @@ def get_knowledge_graph_workbench(
         return {
             "ckps": [],
             "groups": {},
+            "parents": [],
+            "parent_groups": {},
             "stats": {
                 "ckp_count": 0,
                 "pku_count": 0,
@@ -334,9 +368,115 @@ def get_knowledge_graph_workbench(
         groups[ckp_node_id]["ckp"] = ckp_node
         ckps.append(ckp_node)
 
+    relations = (
+        db.query(CanonicalRelation)
+        .filter(
+            CanonicalRelation.user_id == DEFAULT_USER_ID,
+            CanonicalRelation.relation_type == "subtopic_of",
+            CanonicalRelation.source_canonical_id.in_(canonical_ids),
+        )
+        .order_by(CanonicalRelation.confidence.desc(), CanonicalRelation.created_at.desc())
+        .all()
+    )
+    child_to_relation = {relation.source_canonical_id: relation for relation in relations}
+    parent_ids_with_children = {
+        row[0]
+        for row in db.query(CanonicalRelation.target_canonical_id)
+        .filter(
+            CanonicalRelation.user_id == DEFAULT_USER_ID,
+            CanonicalRelation.relation_type == "subtopic_of",
+            CanonicalRelation.target_canonical_id.in_(canonical_ids),
+        )
+        .distinct()
+        .all()
+    }
+    parent_ids = {relation.target_canonical_id for relation in relations}
+    parents_by_id = (
+        {
+            parent.id: parent
+            for parent in db.query(CanonicalKnowledgePoint)
+            .filter(
+                CanonicalKnowledgePoint.user_id == DEFAULT_USER_ID,
+                CanonicalKnowledgePoint.id.in_(parent_ids),
+                CanonicalKnowledgePoint.status != "deprecated",
+            )
+            .all()
+        }
+        if parent_ids
+        else {}
+    )
+    parent_groups: dict[str, dict[str, Any]] = {}
+    parent_order: list[str] = []
+
+    def ensure_parent_group(parent_node: dict[str, Any]) -> dict[str, Any]:
+        parent_node_id = parent_node["id"]
+        if parent_node_id not in parent_groups:
+            parent_groups[parent_node_id] = {
+                "parent": parent_node,
+                "children": [],
+                "stats": {
+                    "child_count": 0,
+                    "pku_count": 0,
+                    "source_count": 0,
+                },
+            }
+            parent_order.append(parent_node_id)
+        return parent_groups[parent_node_id]
+
+    for canonical in canonicals:
+        child_node_id = f"ckp:{canonical.id}"
+        relation = child_to_relation.get(canonical.id)
+        parent = parents_by_id.get(relation.target_canonical_id) if relation else None
+        if parent:
+            parent_node = _serialize_canonical(parent)
+            parent_link = _canonical_relation_edge(relation)
+        else:
+            if canonical.id in parent_ids_with_children:
+                ensure_parent_group(dict(groups[child_node_id]["ckp"]))
+                continue
+            parent_node = dict(groups[child_node_id]["ckp"])
+            parent_link = None
+
+        parent_group = ensure_parent_group(parent_node)
+        parent_group["children"].append(
+            {
+                **groups[child_node_id],
+                "parent_link": parent_link,
+            }
+        )
+
+    parents = []
+    for parent_node_id in parent_order:
+        parent_group = parent_groups[parent_node_id]
+        child_count = len(parent_group["children"])
+        pku_ids = {
+            entry["pku"]["ref_id"]
+            for child in parent_group["children"]
+            for entry in child["pkus"]
+            if entry["pku"].get("ref_id")
+        }
+        source_ids = {
+            source["node"]["id"]
+            for child in parent_group["children"]
+            for entry in child["pkus"]
+            for source in entry["sources"]
+        }
+        stats = {
+            "child_count": child_count,
+            "pku_count": len(pku_ids),
+            "source_count": len(source_ids),
+        }
+        parent_group["stats"] = stats
+        parent_group["parent"]["child_count"] = child_count
+        parent_group["parent"]["pku_count"] = len(pku_ids)
+        parent_group["parent"]["source_count"] = len(source_ids)
+        parents.append(parent_group["parent"])
+
     return {
         "ckps": ckps,
         "groups": groups,
+        "parents": parents,
+        "parent_groups": parent_groups,
         "stats": {
             "ckp_count": len(ckps),
             "pku_count": len(all_pku_ids),
@@ -447,6 +587,57 @@ def get_knowledge_graph(
                 source_id=relation.source_id,
                 llm_model=relation.llm_model,
             )
+
+    graph_canonical_ids = [
+        node["ref_id"]
+        for node in nodes.values()
+        if node.get("type") == "canonical" and node.get("ref_id")
+    ]
+    if graph_canonical_ids:
+        canonical_relations = (
+            db.query(CanonicalRelation)
+            .filter(
+                CanonicalRelation.user_id == DEFAULT_USER_ID,
+                CanonicalRelation.relation_type == "subtopic_of",
+                or_(
+                    CanonicalRelation.source_canonical_id.in_(graph_canonical_ids),
+                    CanonicalRelation.target_canonical_id.in_(graph_canonical_ids),
+                ),
+            )
+            .order_by(CanonicalRelation.confidence.desc(), CanonicalRelation.created_at.desc())
+            .limit(limit * 4)
+            .all()
+        )
+        related_canonical_ids = {
+            canonical_id
+            for relation in canonical_relations
+            for canonical_id in [relation.source_canonical_id, relation.target_canonical_id]
+        }
+        missing_canonical_ids = [
+            canonical_id
+            for canonical_id in related_canonical_ids
+            if f"ckp:{canonical_id}" not in nodes
+        ]
+        if missing_canonical_ids:
+            missing_canonicals = (
+                db.query(CanonicalKnowledgePoint)
+                .filter(
+                    CanonicalKnowledgePoint.user_id == DEFAULT_USER_ID,
+                    CanonicalKnowledgePoint.id.in_(missing_canonical_ids),
+                    CanonicalKnowledgePoint.status != "deprecated",
+                )
+                .all()
+            )
+            for canonical in missing_canonicals:
+                nodes[f"ckp:{canonical.id}"] = _serialize_canonical(canonical)
+
+        for relation in canonical_relations:
+            source_id = f"ckp:{relation.target_canonical_id}"
+            target_id = f"ckp:{relation.source_canonical_id}"
+            if source_id not in nodes or target_id not in nodes:
+                continue
+            edge_id = f"edge:canonical_relation:{relation.id}"
+            edges[edge_id] = _canonical_relation_edge(relation)
 
     node_counts = Counter(node["type"] for node in nodes.values())
     edge_counts = Counter(edge["type"] for edge in edges.values())

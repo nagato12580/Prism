@@ -554,3 +554,122 @@ def build_ckp_topic_extraction_messages(
             max_statement_length=max_statement_length,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# CKP Parent Topic Assignment (local child topics -> broader parent topics)
+# ---------------------------------------------------------------------------
+
+CKP_PARENT_TOPIC_ASSIGNMENT_SYSTEM_PROMPT = (
+    "You are Prism's CKP parent topic assigner. "
+    "Return strict JSON only. Do not output Markdown."
+)
+
+CKP_PARENT_TOPIC_ASSIGNMENT_TASK = (
+    "Assign local child CKP topics to broader but concrete parent CKP topics. "
+    "A parent topic should be reusable across child topics without becoming vague."
+)
+
+CKP_PARENT_TOPIC_ASSIGNMENT_RULES = [
+    "Use a broad but concrete noun phrase title for each parent topic.",
+    "Prefer fewer meaningful parent topics over many narrow or duplicate parents.",
+    "Each parent topic must reference at least one local child topic.",
+    "Do not reference unknown child topic refs.",
+    "Use source metadata and child topic member PKU statements as context for grouping.",
+    "Return empty parent_topics only when there are no usable child topics.",
+]
+
+JSON_SHAPE_CKP_PARENT_TOPIC_ASSIGNMENT: dict[str, Any] = {
+    "parent_topics": [
+        {
+            "local_id": "parent_1",
+            "title": "Broad topic noun phrase",
+            "description": "Short parent topic description",
+            "keywords": ["keyword"],
+            "concepts": ["concept"],
+            "domains": ["domain"],
+            "entities": ["entity"],
+            "member_child_refs": ["child_1", "child_2"],
+            "confidence": 0.0,
+            "reason": "Short parent grouping reason",
+        }
+    ],
+}
+
+
+def _parent_child_topic_payload(topic: dict[str, Any], max_statement_length: int) -> dict[str, Any]:
+    return {
+        "ref": str(topic.get("ref") or ""),
+        "title": str(topic.get("title") or ""),
+        "description": str(topic.get("description") or ""),
+        "keywords": topic.get("keywords") or [],
+        "concepts": topic.get("concepts") or [],
+        "entities": topic.get("entities") or [],
+        "domains": topic.get("domains") or [],
+        "member_pku_statements": [
+            str(statement or "")[:max_statement_length]
+            for statement in (topic.get("member_pku_statements") or [])
+        ],
+    }
+
+
+def build_ckp_parent_topic_assignment_request(
+    *,
+    source_kind: str,
+    source_id: str,
+    title: str = "",
+    summary: str = "",
+    category: str = "",
+    tags: list[str] | None = None,
+    child_topics: list[dict[str, Any]],
+    max_child_topics: int = 80,
+    max_statement_length: int = 500,
+) -> str:
+    """Build the user message JSON for CKP parent topic assignment."""
+    request = {
+        "task": CKP_PARENT_TOPIC_ASSIGNMENT_TASK,
+        "source": {
+            "kind": source_kind,
+            "id": source_id,
+            "title": title,
+            "summary": summary,
+            "category": category,
+            "tags": tags or [],
+        },
+        "child_topics": [
+            _parent_child_topic_payload(topic, max_statement_length)
+            for topic in child_topics[:max_child_topics]
+        ],
+        "json_shape": JSON_SHAPE_CKP_PARENT_TOPIC_ASSIGNMENT,
+        "rules": CKP_PARENT_TOPIC_ASSIGNMENT_RULES,
+    }
+    return json.dumps(request, ensure_ascii=False)
+
+
+def build_ckp_parent_topic_assignment_messages(
+    *,
+    source_kind: str,
+    source_id: str,
+    title: str = "",
+    summary: str = "",
+    category: str = "",
+    tags: list[str] | None = None,
+    child_topics: list[dict[str, Any]],
+    max_child_topics: int = 80,
+    max_statement_length: int = 500,
+) -> tuple[str, str]:
+    """Build the system and user messages for CKP parent topic assignment."""
+    return (
+        CKP_PARENT_TOPIC_ASSIGNMENT_SYSTEM_PROMPT,
+        build_ckp_parent_topic_assignment_request(
+            source_kind=source_kind,
+            source_id=source_id,
+            title=title,
+            summary=summary,
+            category=category,
+            tags=tags,
+            child_topics=child_topics,
+            max_child_topics=max_child_topics,
+            max_statement_length=max_statement_length,
+        ),
+    )
