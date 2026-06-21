@@ -87,6 +87,69 @@ export interface MemoryEntry {
   updated_at: string
 }
 
+export interface MemorySource {
+  id: string
+  user_id: string
+  source_type: string
+  source_id: string
+  session_id: string
+  message_id: string
+  span_text: string
+  metadata: Record<string, unknown>
+  occurred_at: string
+  created_at: string
+}
+
+export interface MemoryDraft {
+  id: string
+  user_id: string
+  draft_type: string
+  payload: Record<string, unknown>
+  decision_hint: string
+  risk_level: string
+  confidence: number
+  status: string
+  conflict_ids: string[]
+  source?: MemorySource | null
+  reviewed_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MemoryStatement {
+  id: string
+  user_id: string
+  content: string
+  statement_type: string
+  temporal_type: string
+  confidence: number
+  importance: number
+  status: string
+  valid_from: string
+  valid_until?: string | null
+  superseded_by_id: string
+  source?: MemorySource | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MemoryDraftCreate {
+  draft_type: string
+  payload: Record<string, unknown>
+  decision_hint?: string
+  risk_level?: string
+  confidence?: number
+  conflict_ids?: string[]
+  source?: {
+    source_type: string
+    source_id?: string
+    session_id?: string
+    message_id?: string
+    span_text?: string
+    metadata?: Record<string, unknown>
+  } | null
+}
+
 // ── Chat types ────────────────────────────────────────────────
 
 export interface ChatSessionOut {
@@ -240,6 +303,38 @@ export const memoryApi = {
     if (params?.limit) search.set('limit', String(params.limit))
     const qs = search.toString() ? `?${search.toString()}` : ''
     return request<MemoryEntry[]>(`/memories${qs}`)
+  },
+  listDrafts: (params?: { status?: string; draft_type?: string }) => {
+    const search = new URLSearchParams()
+    if (params?.status) search.set('status', params.status)
+    if (params?.draft_type) search.set('draft_type', params.draft_type)
+    const qs = search.toString() ? `?${search.toString()}` : ''
+    return request<MemoryDraft[]>(`/memories/drafts${qs}`)
+  },
+  createDraft: (data: MemoryDraftCreate) =>
+    request<MemoryDraft>('/memories/drafts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  confirmDraft: (id: string) =>
+    request<{ draft: MemoryDraft; statement: MemoryStatement }>(`/memories/drafts/${id}/confirm`, {
+      method: 'POST',
+    }),
+  rejectDraft: (id: string) =>
+    request<MemoryDraft>(`/memories/drafts/${id}/reject`, {
+      method: 'POST',
+    }),
+  supersedeDraft: (id: string, superseded_statement_id: string) =>
+    request<{ draft: MemoryDraft; statement: MemoryStatement }>(`/memories/drafts/${id}/supersede`, {
+      method: 'POST',
+      body: JSON.stringify({ superseded_statement_id }),
+    }),
+  listStatements: (params?: { status?: string; limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.status) search.set('status', params.status)
+    if (params?.limit) search.set('limit', String(params.limit))
+    const qs = search.toString() ? `?${search.toString()}` : ''
+    return request<MemoryStatement[]>(`/memories/statements${qs}`)
   },
 }
 
