@@ -24,6 +24,7 @@ const navItems = [
   { to: '/knowledge', label: '知识库', icon: BookOpen },
   { to: '/graph', label: '图谱', icon: Network },
   { to: '/wiki', label: 'Wiki', icon: BookMarked },
+  { to: '/memory/inbox', label: '记忆审核', icon: Inbox },
   { to: '/memory/profile', label: '用户画像', icon: Fingerprint },
   { to: '/memory/graph', label: '记忆图谱', icon: Waypoints },
 ]
@@ -114,6 +115,14 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
 
       <div className="px-2 text-[11px] font-medium text-slate-500">用户记忆</div>
       <div className="space-y-1">
+        <NavItem
+          to="/memory/inbox"
+          label="记忆审核"
+          icon={Inbox}
+          active={location.pathname === '/memory/inbox'}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
         <NavItem
           to="/memory/profile"
           label="用户画像"
