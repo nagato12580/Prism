@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, RefreshCw, Search, X } from 'lucide-react'
 import { memoryApi, type MemoryDraft } from '@/app/api'
 
@@ -36,7 +36,7 @@ export function MemoryInboxPage() {
     )
   }, [drafts, query])
 
-  const loadDrafts = async () => {
+  const loadDrafts = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -47,11 +47,11 @@ export function MemoryInboxPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [status])
 
   useEffect(() => {
     loadDrafts()
-  }, [status])
+  }, [loadDrafts])
 
   const review = async (draft: MemoryDraft, action: 'confirm' | 'reject') => {
     setError(null)
@@ -85,6 +85,7 @@ export function MemoryInboxPage() {
         <select
           value={status}
           onChange={(event) => setStatus(event.target.value)}
+          aria-label="Filter memory drafts by status"
           className="h-9 rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs"
         >
           <option value="draft">Draft</option>
