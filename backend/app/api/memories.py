@@ -41,6 +41,11 @@ def _create_source(source_in, db: Session) -> MemorySource:
 
 
 def _statement_from_draft(draft: MemoryDraft) -> MemoryStatement:
+    if draft.draft_type != "statement":
+        raise HTTPException(
+            status_code=400,
+            detail="Only statement memory drafts can be confirmed as statements",
+        )
     payload = draft.payload or {}
     raw_content = payload.get("content")
     if not isinstance(raw_content, str):
@@ -213,13 +218,15 @@ def supersede_memory_draft(
 
 @router.get("/statements", response_model=list[MemoryStatementOut])
 def list_memory_statements(
-    status: str = Query(MemoryStatus.CONFIRMED),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     statements = (
         db.query(MemoryStatement)
-        .filter(MemoryStatement.user_id == DEFAULT_USER_ID, MemoryStatement.status == status)
+        .filter(
+            MemoryStatement.user_id == DEFAULT_USER_ID,
+            MemoryStatement.status == MemoryStatus.CONFIRMED,
+        )
         .order_by(MemoryStatement.importance.desc(), MemoryStatement.updated_at.desc())
         .limit(limit)
         .all()

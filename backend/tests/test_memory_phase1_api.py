@@ -179,6 +179,49 @@ def test_supersede_requires_confirmed_existing_statement(client, db_session):
     assert old.status == "draft"
 
 
+def test_confirm_rejects_non_statement_drafts(client, db_session):
+    draft = MemoryDraft(
+        user_id="default-user",
+        draft_type="entity",
+        payload={"content": "Prism memory system"},
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.post(f"/api/v1/memories/drafts/{draft.id}/confirm")
+
+    assert response.status_code == 400
+    assert "statement" in response.json()["detail"]
+    assert db_session.query(MemoryStatement).count() == 0
+
+
+def test_supersede_rejects_non_statement_drafts(client, db_session):
+    old = MemoryStatement(
+        user_id="default-user",
+        content="Confirmed memory",
+        statement_type="fact",
+        status="confirmed",
+    )
+    draft = MemoryDraft(
+        user_id="default-user",
+        draft_type="event",
+        payload={"content": "A non-statement draft should not supersede memory."},
+    )
+    db_session.add_all([old, draft])
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/memories/drafts/{draft.id}/supersede",
+        json={"superseded_statement_id": old.id},
+    )
+
+    assert response.status_code == 400
+    assert "statement" in response.json()["detail"]
+    db_session.refresh(old)
+    assert old.status == "confirmed"
+    assert db_session.query(MemoryStatement).count() == 1
+
+
 def test_list_memory_statements_excludes_superseded_and_drafts(client, db_session):
     db_session.add_all(
         [
@@ -211,3 +254,8 @@ def test_list_memory_statements_excludes_superseded_and_drafts(client, db_sessio
 
     assert response.status_code == 200
     assert [item["content"] for item in response.json()] == ["Confirmed memory"]
+
+    override_response = client.get("/api/v1/memories/statements?status=draft")
+
+    assert override_response.status_code == 200
+    assert [item["content"] for item in override_response.json()] == ["Confirmed memory"]

@@ -82,7 +82,7 @@ Review-required candidates:
 - Inferred preferences or goals not explicitly stated by the user.
 - Candidates that conflict with important existing memory.
 
-The Memory Inbox supports confirm, reject, merge, and supersede operations.
+The Memory Inbox supports confirm, reject, merge, and supersede operations over time. Phase 1 implements confirm, reject, and supersede for statement drafts; merge is deferred to the Memory Inbox enhancement phase.
 
 ### 3.4 Reflection Chain
 
@@ -377,8 +377,8 @@ The first version should support:
 - Show conflicts with existing memory.
 - Confirm draft.
 - Reject draft.
-- Merge with existing memory.
 - Confirm and supersede existing memory.
+- Merge with existing memory in a later enhancement.
 
 The UI should make uncertainty visible. A reviewer should not need to inspect database rows to understand why a draft exists.
 
@@ -470,7 +470,7 @@ Scope:
 
 - Add new memory tables.
 - Keep existing `MemoryEntry` compatibility.
-- Add draft list, confirm, reject, merge, and supersede APIs.
+- Add draft list, confirm, reject, and supersede APIs.
 - Add a minimal Memory Inbox UI for listing drafts, viewing source text, confirming, rejecting, and superseding.
 - Add backend tests for source traceability and state transitions.
 - Add focused frontend tests for the minimal review flow.
@@ -543,7 +543,6 @@ Cover:
 - Model defaults.
 - Draft confirm and reject.
 - Supersede behavior.
-- Merge behavior.
 - Source traceability.
 - Basic conflict detection.
 - Confirmed-only recall filtering.
@@ -568,6 +567,8 @@ Cover:
 - Confirm and reject actions.
 - Supersede conflict flow.
 - Source text display.
+
+Merge behavior remains a planned enhancement after Phase 1.
 
 ## 13. Completion Standard
 

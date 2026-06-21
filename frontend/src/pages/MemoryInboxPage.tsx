@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Loader2, RefreshCw, Search, X } from 'lucide-react'
+import { Check, GitCompareArrows, Loader2, RefreshCw, Search, X } from 'lucide-react'
 import { memoryApi, type MemoryDraft } from '@/app/api'
 
 function draftTitle(draft: MemoryDraft) {
@@ -18,6 +18,7 @@ export function MemoryInboxPage() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [supersededStatementId, setSupersededStatementId] = useState<Record<string, string>>({})
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -53,11 +54,19 @@ export function MemoryInboxPage() {
     loadDrafts()
   }, [loadDrafts])
 
-  const review = async (draft: MemoryDraft, action: 'confirm' | 'reject') => {
+  const review = async (draft: MemoryDraft, action: 'confirm' | 'reject' | 'supersede') => {
     setError(null)
     try {
       if (action === 'confirm') await memoryApi.confirmDraft(draft.id)
-      else await memoryApi.rejectDraft(draft.id)
+      else if (action === 'reject') await memoryApi.rejectDraft(draft.id)
+      else {
+        const targetId = (supersededStatementId[draft.id] || draft.conflict_ids[0] || '').trim()
+        if (!targetId) {
+          setError('Supersede requires an existing statement id.')
+          return
+        }
+        await memoryApi.supersedeDraft(draft.id, targetId)
+      }
       await loadDrafts()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -124,16 +133,22 @@ export function MemoryInboxPage() {
                     {draft.source.span_text}
                   </blockquote>
                 ) : null}
+                {draft.conflict_ids.length > 0 ? (
+                  <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <div className="font-medium">Conflicts</div>
+                    <div className="mt-1 break-all">{draft.conflict_ids.join(', ')}</div>
+                  </div>
+                ) : null}
                 <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
                   {formatPayload(draft.payload)}
                 </pre>
               </div>
               {draft.status === 'draft' ? (
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-col gap-2 md:w-64">
                   <button
                     type="button"
                     onClick={() => review(draft, 'confirm')}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-medium text-white"
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-medium text-white"
                   >
                     <Check size={14} />
                     Confirm
@@ -141,11 +156,34 @@ export function MemoryInboxPage() {
                   <button
                     type="button"
                     onClick={() => review(draft, 'reject')}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--prism-line)] bg-white px-3 text-xs font-medium text-slate-600"
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--prism-line)] bg-white px-3 text-xs font-medium text-slate-600"
                   >
                     <X size={14} />
                     Reject
                   </button>
+                  {draft.conflict_ids.length > 0 ? (
+                    <div className="space-y-2 rounded-md border border-[var(--prism-line)] bg-slate-50 p-2">
+                      <input
+                        value={supersededStatementId[draft.id] ?? draft.conflict_ids[0] ?? ''}
+                        onChange={(event) =>
+                          setSupersededStatementId((current) => ({
+                            ...current,
+                            [draft.id]: event.target.value,
+                          }))
+                        }
+                        aria-label="Statement id to supersede"
+                        className="h-8 w-full rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs outline-none focus:border-[var(--prism-blue)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => review(draft, 'supersede')}
+                        className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-medium text-white"
+                      >
+                        <GitCompareArrows size={14} />
+                        Supersede
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

@@ -12,4 +12,7 @@ assert.match(page, /data-testid="memory-inbox-page"/, 'Memory Inbox page has a s
 assert.match(page, /memoryApi\.listDrafts/, 'Memory Inbox page loads drafts.')
 assert.match(page, /memoryApi\.confirmDraft/, 'Memory Inbox page can confirm drafts.')
 assert.match(page, /memoryApi\.rejectDraft/, 'Memory Inbox page can reject drafts.')
+assert.match(page, /memoryApi\.supersedeDraft/, 'Memory Inbox page can supersede conflicting drafts.')
+assert.match(page, /conflict_ids/, 'Memory Inbox page exposes conflict ids.')
+assert.match(page, /supersededStatementId/, 'Memory Inbox page lets reviewers enter a statement to supersede.')
 assert.match(page, /Source/, 'Memory Inbox page shows source evidence.')
