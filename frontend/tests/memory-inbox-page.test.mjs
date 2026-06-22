@@ -12,6 +12,8 @@ assert.match(page, /data-testid="memory-inbox-page"/, 'Memory Inbox page has a s
 assert.match(page, /chatApi\.listSessions/, 'Memory Inbox page loads chat sessions for manual extraction.')
 assert.match(page, /memoryApi\.extractSession/, 'Memory Inbox page can manually extract memories from a session.')
 assert.match(page, /Extract from session/, 'Memory Inbox page exposes a manual extraction control.')
+assert.match(page, /title=\{session\.title/, 'Memory Inbox session options expose the full chat title.')
+assert.match(page, /\{session\.title \|\| 'Untitled session'\}/, 'Memory Inbox session options display chat titles.')
 assert.match(page, /memoryApi\.listDrafts/, 'Memory Inbox page loads drafts.')
 assert.match(page, /memoryApi\.confirmDraft/, 'Memory Inbox page can confirm drafts.')
 assert.match(page, /memoryApi\.rejectDraft/, 'Memory Inbox page can reject drafts.')

@@ -133,7 +133,7 @@ export function MemoryInboxPage() {
             >
               {sessions.length === 0 ? <option value="">No chat sessions</option> : null}
               {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
+                <option key={session.id} value={session.id} title={session.title || 'Untitled session'}>
                   {session.title || 'Untitled session'}
                 </option>
               ))}
