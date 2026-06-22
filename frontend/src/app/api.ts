@@ -150,6 +150,16 @@ export interface MemoryDraftCreate {
   } | null
 }
 
+export interface MemoryExtractionResult {
+  session_id: string
+  messages_scanned: number
+  candidates_found: number
+  drafts_created: number
+  candidates_skipped: number
+  draft_ids: string[]
+  drafts: MemoryDraft[]
+}
+
 // ── Chat types ────────────────────────────────────────────────
 
 export interface ChatSessionOut {
@@ -315,6 +325,11 @@ export const memoryApi = {
     request<MemoryDraft>('/memories/drafts', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  extractSession: (sessionId: string, data?: { limit?: number }) =>
+    request<MemoryExtractionResult>(`/memories/extract/session/${sessionId}`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
     }),
   confirmDraft: (id: string) =>
     request<{ draft: MemoryDraft; statement: MemoryStatement }>(`/memories/drafts/${id}/confirm`, {

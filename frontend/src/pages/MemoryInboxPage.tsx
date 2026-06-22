@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, GitCompareArrows, Loader2, RefreshCw, Search, X } from 'lucide-react'
-import { memoryApi, type MemoryDraft } from '@/app/api'
+import { BrainCircuit, Check, GitCompareArrows, Loader2, RefreshCw, Search, X } from 'lucide-react'
+import { chatApi, memoryApi, type ChatSessionOut, type MemoryDraft, type MemoryExtractionResult } from '@/app/api'
 
 function draftTitle(draft: MemoryDraft) {
   const content = draft.payload?.content
@@ -14,6 +14,11 @@ function formatPayload(payload: Record<string, unknown>) {
 
 export function MemoryInboxPage() {
   const [drafts, setDrafts] = useState<MemoryDraft[]>([])
+  const [sessions, setSessions] = useState<ChatSessionOut[]>([])
+  const [selectedSessionId, setSelectedSessionId] = useState('')
+  const [extractLimit, setExtractLimit] = useState(20)
+  const [extracting, setExtracting] = useState(false)
+  const [extractionResult, setExtractionResult] = useState<MemoryExtractionResult | null>(null)
   const [status, setStatus] = useState('draft')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -54,6 +59,42 @@ export function MemoryInboxPage() {
     loadDrafts()
   }, [loadDrafts])
 
+  useEffect(() => {
+    let cancelled = false
+    chatApi.listSessions()
+      .then((next) => {
+        if (cancelled) return
+        setSessions(next)
+        setSelectedSessionId((current) => current || next[0]?.id || '')
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const extractFromSession = async () => {
+    const sessionId = selectedSessionId.trim()
+    if (!sessionId) {
+      setError('Select a chat session before extracting memories.')
+      return
+    }
+    setExtracting(true)
+    setError(null)
+    setExtractionResult(null)
+    try {
+      const result = await memoryApi.extractSession(sessionId, { limit: extractLimit })
+      setExtractionResult(result)
+      await loadDrafts()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExtracting(false)
+    }
+  }
+
   const review = async (draft: MemoryDraft, action: 'confirm' | 'reject' | 'supersede') => {
     setError(null)
     try {
@@ -78,6 +119,54 @@ export function MemoryInboxPage() {
       <section className="border-b border-[var(--prism-line)] pb-3">
         <div className="text-xs font-medium text-slate-500">Memory governance</div>
         <h1 className="mt-1 text-2xl font-semibold text-slate-950">Memory Inbox</h1>
+      </section>
+
+      <section className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end">
+          <label className="min-w-0 flex-1">
+            <span className="mb-1 block text-[11px] font-medium text-slate-500">Chat session</span>
+            <select
+              value={selectedSessionId}
+              onChange={(event) => setSelectedSessionId(event.target.value)}
+              aria-label="Chat session for memory extraction"
+              className="h-9 w-full rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs outline-none focus:border-[var(--prism-blue)]"
+            >
+              {sessions.length === 0 ? <option value="">No chat sessions</option> : null}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.title || 'Untitled session'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="w-full md:w-28">
+            <span className="mb-1 block text-[11px] font-medium text-slate-500">Messages</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={extractLimit}
+              onChange={(event) => setExtractLimit(Number(event.target.value) || 20)}
+              aria-label="Messages to scan for memory extraction"
+              className="h-9 w-full rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs outline-none focus:border-[var(--prism-blue)]"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={extractFromSession}
+            disabled={extracting || !selectedSessionId}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {extracting ? <Loader2 size={15} className="animate-spin" /> : <BrainCircuit size={15} />}
+            Extract from session
+          </button>
+        </div>
+        {extractionResult ? (
+          <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Scanned {extractionResult.messages_scanned} messages, found {extractionResult.candidates_found} candidates,
+            created {extractionResult.drafts_created} drafts, skipped {extractionResult.candidates_skipped}.
+          </div>
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-2 rounded-lg border border-[var(--prism-line)] bg-white p-3 md:flex-row md:items-center">
