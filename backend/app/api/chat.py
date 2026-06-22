@@ -18,24 +18,29 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 def _run_memory_extraction_best_effort(session_id: str, limit: int = 20):
-    db = SessionLocal()
+    db = None
     try:
+        db = SessionLocal()
         extract_session_memories(db, session_id=session_id, limit=limit)
     except Exception as exc:
         print(f"[memory_extraction] auto extraction failed: {exc}")
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def _maybe_trigger_memory_extraction(session_id: str, role: str):
     if role != "assistant" or not settings.MEMORY_EXTRACTION_AUTO_ENABLED:
         return
-    thread = threading.Thread(
-        target=_run_memory_extraction_best_effort,
-        args=(session_id,),
-        daemon=True,
-    )
-    thread.start()
+    try:
+        thread = threading.Thread(
+            target=_run_memory_extraction_best_effort,
+            args=(session_id,),
+            daemon=True,
+        )
+        thread.start()
+    except Exception as exc:
+        print(f"[memory_extraction] auto extraction could not start: {exc}")
 
 
 # ── Session CRUD ──────────────────────────────────────────────

@@ -65,6 +65,14 @@ class ImmediateThread:
         self.target(*self.args)
 
 
+class FakeBackgroundSession:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 def test_add_assistant_message_triggers_auto_memory_extraction_when_enabled(
     client,
     db_session,
@@ -78,13 +86,14 @@ def test_add_assistant_message_triggers_auto_memory_extraction_when_enabled(
     db_session.commit()
     session_id = session.id
     calls = []
+    background_session = FakeBackgroundSession()
 
     monkeypatch.setattr(settings, "MEMORY_EXTRACTION_AUTO_ENABLED", True, raising=False)
-    monkeypatch.setattr(chat_api, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(chat_api, "SessionLocal", lambda: background_session)
     monkeypatch.setattr(chat_api.threading, "Thread", ImmediateThread)
 
     def fake_extract(db, session_id, limit=20):
-        calls.append((session_id, limit))
+        calls.append((db, session_id, limit))
 
     monkeypatch.setattr(chat_api, "extract_session_memories", fake_extract)
 
@@ -94,7 +103,8 @@ def test_add_assistant_message_triggers_auto_memory_extraction_when_enabled(
     )
 
     assert response.status_code == 200
-    assert calls == [(session_id, 20)]
+    assert calls == [(background_session, session_id, 20)]
+    assert background_session.closed is True
 
 
 def test_add_assistant_message_ignores_auto_memory_extraction_failures(
@@ -126,3 +136,108 @@ def test_add_assistant_message_ignores_auto_memory_extraction_failures(
 
     assert response.status_code == 200
     assert response.json()["content"] == "This message should still be saved."
+
+
+def test_add_assistant_message_ignores_auto_memory_thread_start_failures(
+    client,
+    db_session,
+    monkeypatch,
+):
+    from backend.app.api import chat as chat_api
+    from backend.app.config import settings
+
+    class FailingThread:
+        def __init__(self, target, args=(), daemon=None):
+            pass
+
+        def start(self):
+            raise RuntimeError("thread unavailable")
+
+    session = ChatSession(user_id="default-user", title="Auto memory")
+    db_session.add(session)
+    db_session.commit()
+    session_id = session.id
+
+    monkeypatch.setattr(settings, "MEMORY_EXTRACTION_AUTO_ENABLED", True, raising=False)
+    monkeypatch.setattr(chat_api.threading, "Thread", FailingThread)
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/messages",
+        json={"role": "assistant", "content": "Thread failure should not fail chat."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "Thread failure should not fail chat."
+
+
+def test_add_message_does_not_trigger_auto_memory_extraction_when_disabled(
+    client,
+    db_session,
+    monkeypatch,
+):
+    from backend.app.api import chat as chat_api
+    from backend.app.config import settings
+
+    session = ChatSession(user_id="default-user", title="Auto memory")
+    db_session.add(session)
+    db_session.commit()
+    session_id = session.id
+    calls = []
+
+    monkeypatch.setattr(settings, "MEMORY_EXTRACTION_AUTO_ENABLED", False, raising=False)
+    monkeypatch.setattr(chat_api.threading, "Thread", ImmediateThread)
+
+    def fake_extract(db, session_id, limit=20):
+        calls.append((session_id, limit))
+
+    monkeypatch.setattr(chat_api, "extract_session_memories", fake_extract)
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/messages",
+        json={"role": "assistant", "content": "Do not extract while disabled."},
+    )
+
+    assert response.status_code == 200
+    assert calls == []
+
+
+def test_add_user_message_does_not_trigger_auto_memory_extraction(
+    client,
+    db_session,
+    monkeypatch,
+):
+    from backend.app.api import chat as chat_api
+    from backend.app.config import settings
+
+    session = ChatSession(user_id="default-user", title="Auto memory")
+    db_session.add(session)
+    db_session.commit()
+    session_id = session.id
+    calls = []
+
+    monkeypatch.setattr(settings, "MEMORY_EXTRACTION_AUTO_ENABLED", True, raising=False)
+    monkeypatch.setattr(chat_api.threading, "Thread", ImmediateThread)
+
+    def fake_extract(db, session_id, limit=20):
+        calls.append((session_id, limit))
+
+    monkeypatch.setattr(chat_api, "extract_session_memories", fake_extract)
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/messages",
+        json={"role": "user", "content": "This is not an assistant reply."},
+    )
+
+    assert response.status_code == 200
+    assert calls == []
+
+
+def test_auto_memory_extraction_ignores_session_open_failures(monkeypatch):
+    from backend.app.api import chat as chat_api
+
+    def fail_session_open():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(chat_api, "SessionLocal", fail_session_open)
+
+    chat_api._run_memory_extraction_best_effort("session-id")
