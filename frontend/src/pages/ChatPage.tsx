@@ -80,12 +80,38 @@ function normalizeSources(value: unknown): Source[] {
     .map((source) => ({
       chunk_id: String(source.chunk_id ?? ''),
       item_id: String(source.item_id ?? ''),
+      source_kind: typeof source.source_kind === 'string' ? source.source_kind : undefined,
+      source_id: typeof source.source_id === 'string' ? source.source_id : undefined,
+      display_type: typeof source.display_type === 'string' ? source.display_type : undefined,
+      display_id: typeof source.display_id === 'string' ? source.display_id : undefined,
+      display_title: typeof source.display_title === 'string' ? source.display_title : undefined,
+      display_label: typeof source.display_label === 'string' ? source.display_label : undefined,
       score: Number(source.score ?? 0),
       raw_score: typeof source.raw_score === 'number' ? source.raw_score : undefined,
       doc_name: typeof source.doc_name === 'string' ? source.doc_name : undefined,
+      title: typeof source.title === 'string' ? source.title : undefined,
+      snippet: typeof source.snippet === 'string' ? source.snippet : undefined,
       text: typeof source.text === 'string' ? source.text : undefined,
     }))
-    .filter((source) => source.chunk_id || source.item_id)
+    .filter((source) => source.chunk_id || source.item_id || source.display_id || source.source_id)
+}
+
+function sourceDisplayTitle(source: Source) {
+  return source.display_title || source.doc_name || source.title || source.item_id || source.display_id || source.source_id || '来源'
+}
+
+function sourceDisplayLabel(source: Source) {
+  if (source.display_label) return source.display_label
+  if (source.display_type === 'knowledge_item') return '知识文档'
+  if (source.display_type === 'personal_asset_unit') return '知识单元'
+  if (source.source_kind === 'document_chunk') return '知识文档'
+  if (source.source_kind === 'personal_asset_unit') return '知识单元'
+  if (source.source_kind === 'personal_asset_item') return '来源碎片'
+  return '来源'
+}
+
+function sourceSnippet(source: Source) {
+  return source.snippet || source.text || ''
 }
 
 function formatSessionTime(dateStr: string) {
@@ -833,20 +859,30 @@ function MessageBlock({
               <div className="mt-2 grid gap-2">
                 {msg.sources.map((source, index) => (
                   <div
-                    key={`${source.chunk_id}-${source.item_id}-${index}`}
+                    key={`${source.display_type || source.source_kind || 'source'}-${source.display_id || source.source_id || source.chunk_id || source.item_id}-${index}`}
                     className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-xs text-slate-600 shadow-sm"
                   >
                     <div className="mb-1.5 flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate font-semibold text-slate-800">
-                        {source.doc_name || source.item_id}
-                      </span>
-                      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
-                        {source.raw_score ? `匹配 ${(source.raw_score * 100).toFixed(0)}%` : `相关度 ${formatScore(source.score)}`}
-                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-800">
+                          {sourceDisplayTitle(source)}
+                        </div>
+                        <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                          {source.display_id || source.item_id || source.source_id}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                          {sourceDisplayLabel(source)}
+                        </span>
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
+                          {source.raw_score ? `匹配 ${(source.raw_score * 100).toFixed(0)}%` : `相关度 ${formatScore(source.score)}`}
+                        </span>
+                      </div>
                     </div>
-                    {source.text && (
+                    {sourceSnippet(source) && (
                       <p className="line-clamp-3 leading-5 text-slate-500">
-                        {source.text.slice(0, 300)}
+                        {sourceSnippet(source).slice(0, 300)}
                       </p>
                     )}
                   </div>

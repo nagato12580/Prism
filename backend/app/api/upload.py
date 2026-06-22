@@ -110,7 +110,7 @@ def _trigger_ingestion(item_id: str):
         def _call():
             try:
                 httpx.post(
-                    f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/ingest",
+                    f"{settings.ENGINE_BASE_URL}/api/v1/ingest",
                     json={"item_id": item_id},
                     timeout=30,
                 )
@@ -194,7 +194,7 @@ def _trigger_wiki_extraction(doc_id: str):
         def _call():
             try:
                 httpx.post(
-                    f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/wiki/extract",
+                    f"{settings.ENGINE_BASE_URL}/api/v1/wiki/extract",
                     json={"doc_id": doc_id},
                     timeout=30,
                 )

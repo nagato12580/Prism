@@ -3,10 +3,14 @@ import uuid
 
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON, CHAR
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import relationship, synonym
 
 from ..database import Base
 from ..utils.time import local_now
+
+
+DocumentText = Text().with_variant(MEDIUMTEXT, "mysql")
 
 
 def _uuid():
@@ -34,7 +38,7 @@ class KnowledgeItem(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     title = Column(String(255), nullable=False, comment="Title")
-    content = Column(Text, comment="Markdown content")
+    content = Column(DocumentText, comment="Markdown content")
     summary = Column(Text, comment="AI generated summary")
     source_type = Column(String(20), default="manual", comment="file/url/chat/manual")
     source_ref = Column(String(500), comment="Original file path, URL, or chat ID")
@@ -87,7 +91,7 @@ class KnowledgeFile(Base):
     tags = Column(JSON, comment="Tags")
     source_type = Column(String(20), default="upload", comment="upload")
     page_count = Column(Integer, nullable=True, comment="Document page count")
-    content_text = Column(Text, comment="Parsed text")
+    content_text = Column(DocumentText, comment="Parsed text")
     uploaded_at = Column(DateTime, default=local_now)
     last_modified_at = Column(DateTime, default=local_now, onupdate=local_now)
     created_at = Column(DateTime, default=local_now)

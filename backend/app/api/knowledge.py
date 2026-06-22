@@ -128,7 +128,7 @@ def _run_resource_ingestion(resource_id: str, item_id: str) -> None:
         error_message = None
         try:
             resp = httpx.post(
-                f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/ingest",
+                f"{settings.ENGINE_BASE_URL}/api/v1/ingest",
                 json={"item_id": item_id},
                 timeout=RESOURCE_INGEST_TIMEOUT_SECONDS,
             )

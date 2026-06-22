@@ -23,7 +23,21 @@ class FakeRagRunner:
 
 
 def test_builtin_registry_contains_initial_tools():
-    assert {"governed_knowledge_search", "knowledge_search", "asset_search", "asset_overview", "asset_related", "memory_search", "clarify_user", "datetime", "web_search"}.issubset(
+    assert {
+        "knowledge_topic_search",
+        "knowledge_evidence_search",
+        "knowledge_material_search",
+        "raw_document_search",
+        "governed_knowledge_search",
+        "knowledge_search",
+        "asset_search",
+        "asset_overview",
+        "asset_related",
+        "memory_search",
+        "clarify_user",
+        "datetime",
+        "web_search",
+    }.issubset(
         BUILTIN_REGISTRY
     )
     assert BUILTIN_REGISTRY["web_search"].default_enabled is False
@@ -33,20 +47,45 @@ def test_build_enabled_tools_skips_disabled_web_search():
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
     tools = build_enabled_tools(ctx)
     names = {tool.name for tool in tools}
-    assert "governed_knowledge_search" in names
-    assert "knowledge_search" in names
-    assert "asset_search" in names
-    assert "asset_overview" in names
-    assert "asset_related" in names
+    assert "knowledge_topic_search" in names
+    assert "knowledge_evidence_search" in names
+    assert "knowledge_material_search" in names
+    assert "raw_document_search" in names
     assert "memory_search" in names
     assert "clarify_user" in names
     assert "datetime" in names
+    assert "governed_knowledge_search" not in names
+    assert "knowledge_search" not in names
+    assert "asset_search" not in names
+    assert "asset_overview" not in names
+    assert "asset_related" not in names
     assert "web_search" not in names
+
+
+def test_model_facing_knowledge_tools_have_clear_task_schemas():
+    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
+    tools = {tool.name: tool for tool in build_enabled_tools(ctx)}
+
+    topic = tools["knowledge_topic_search"]
+    assert "topic" in topic.description.lower()
+    assert {"query", "limit"}.issubset(topic.args)
+
+    evidence = tools["knowledge_evidence_search"]
+    assert "pku" in evidence.description.lower()
+    assert {"query", "evidence_types", "source_kinds", "limit"}.issubset(evidence.args)
+
+    material = tools["knowledge_material_search"]
+    assert "materials" in material.description.lower()
+    assert {"query", "intent", "limit"}.issubset(material.args)
+
+    raw = tools["raw_document_search"]
+    assert "raw" in raw.description.lower()
+    assert {"query"}.issubset(raw.args)
 
 
 def test_knowledge_search_records_sources_and_stats():
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
-    tool = next(t for t in build_enabled_tools(ctx) if t.name == "knowledge_search")
+    tool = BUILTIN_REGISTRY["knowledge_search"].builder(ctx)
 
     text = tool.invoke({"query": "phase 2"})
     payload = json.loads(text)
@@ -88,7 +127,7 @@ def test_asset_search_tool_returns_confirmed_assets(monkeypatch):
     monkeypatch.setattr(asset_tools, "_Session", Session)
 
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
-    tool = next(t for t in build_enabled_tools(ctx) if t.name == "asset_search")
+    tool = BUILTIN_REGISTRY["asset_search"].builder(ctx)
 
     payload = json.loads(tool.invoke({"query": "Agent", "limit": 5}))
 
@@ -136,7 +175,7 @@ def test_memory_search_tool_returns_confirmed_memories(monkeypatch):
 
 def test_knowledge_search_dedupes_shared_citations_across_calls():
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
-    tool = next(t for t in build_enabled_tools(ctx) if t.name == "knowledge_search")
+    tool = BUILTIN_REGISTRY["knowledge_search"].builder(ctx)
 
     first_text = tool.invoke({"query": "phase 2"})
     second_text = tool.invoke({"query": "phase 2"})

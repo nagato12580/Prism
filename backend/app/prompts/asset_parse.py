@@ -314,40 +314,42 @@ def build_asset_unit_pku_extraction_messages(
 # ---------------------------------------------------------------------------
 
 DOCUMENT_CHUNK_PKU_EXTRACTION_SYSTEM_PROMPT = (
-    "You are Prism's document knowledge unit (PKU) extractor. "
-    "Return strict JSON only. Do not output Markdown."
+    "你是 Prism 的文档个人知识单元（PKU）抽取器。"
+    "只返回严格 JSON，不要输出 Markdown。"
+    "JSON key 和枚举值保持英文；statement、normalized_statement、reason、keywords、domains、entities、concepts 等自然语言字段默认使用中文。"
 )
 
 DOCUMENT_CHUNK_PKU_EXTRACTION_TASK = (
-    "Extract reusable atomic PKUs from the anchor document chunk. "
-    "Use neighboring chunks only as context for resolving terms and references."
+    "从 anchor document chunk 中抽取可复用的原子 PKU。"
+    "previous 和 next chunk 只能用于理解术语、指代和上下文，不得作为证据来源。"
 )
 
 DOCUMENT_CHUNK_PKU_EXTRACTION_RULES = [
-    "Every PKU must be atomic, reusable, semantically complete, and supported by the anchor chunk.",
-    "Use previous and next chunks only as context; do not create a PKU whose evidence exists only in a context chunk.",
-    "The evidence field must quote or closely match text from the anchor chunk.",
-    "Do not extract headings, vague summaries, or unsupported conclusions as PKUs.",
-    "unit_type must use one value from allowed_unit_types.",
-    "relation_type must use one value from allowed_relation_types.",
-    "relations may only reference local_id values from this response.",
-    "Return an empty pkus array when the anchor chunk contains no reusable knowledge.",
+    "每个 PKU 必须是原子化、可复用、语义完整，并且能被 anchor chunk 支持的知识陈述。",
+    "自然语言字段默认用中文表达；如果包含专有名词、模型名、算法名、代码/API 名称，可以保留原文术语。",
+    "JSON key 保持英文；unit_type 必须使用 allowed_unit_types 中的英文枚举值。",
+    "relation_type 必须使用 allowed_relation_types 中的英文枚举值。",
+    "evidence 字段必须摘录或紧密贴合 anchor chunk 的原文证据，不翻译、不改写、不从 context chunk 中取证。",
+    "previous 和 next chunk 只能作为语义上下文；不要创建证据只存在于上下文 chunk 的 PKU。",
+    "不要把纯标题、目录、空泛摘要或没有证据支持的推断抽取为 PKU。",
+    "relations 只能引用本次响应中的 local_id；没有明确关系时返回空数组。",
+    "当 anchor chunk 没有可复用知识时，返回空 pkus 数组。",
 ]
 
 JSON_SHAPE_DOCUMENT_CHUNK_PKU_EXTRACTION: dict[str, Any] = {
     "pkus": [
         {
             "local_id": "pku_1",
-            "statement": "Atomic knowledge statement supported by the anchor chunk",
-            "normalized_statement": "Optional normalized statement",
+            "statement": "用中文表达的原子知识陈述",
+            "normalized_statement": "用中文表达的规范化知识陈述",
             "unit_type": ASSET_UNIT_PKU_UNIT_TYPES,
-            "keywords": ["keyword"],
-            "domains": ["domain"],
-            "entities": ["entity"],
-            "concepts": ["concept"],
+            "keywords": ["中文关键词"],
+            "domains": ["中文领域"],
+            "entities": ["中文实体或保留原文专名"],
+            "concepts": ["中文概念或保留原文术语"],
             "confidence": 0.0,
-            "evidence": "Evidence span from the anchor chunk",
-            "reason": "Short extraction reason",
+            "evidence": "来自 anchor chunk 的原文证据摘录，不翻译",
+            "reason": "用中文简述抽取依据",
         }
     ],
     "relations": [
@@ -355,7 +357,7 @@ JSON_SHAPE_DOCUMENT_CHUNK_PKU_EXTRACTION: dict[str, Any] = {
             "source_local_id": "pku_1",
             "target_local_id": "pku_2",
             "relation_type": ASSET_UNIT_PKU_RELATION_TYPES,
-            "reason": "Short relation reason",
+            "reason": "用中文简述关系判断依据",
             "confidence": 0.0,
         }
     ],
@@ -448,37 +450,39 @@ def build_document_chunk_pku_extraction_messages(
 # ---------------------------------------------------------------------------
 
 CKP_TOPIC_EXTRACTION_SYSTEM_PROMPT = (
-    "You are Prism's CKP topic hub builder. "
-    "Return strict JSON only. Do not output Markdown."
+    "你是 Prism 的 CKP 子主题构建器。"
+    "只返回严格 JSON，不要输出 Markdown。"
+    "JSON key、结构字段和枚举/标识保持英文；title、description、reason、keywords、concepts、domains、entities 等自然语言字段默认使用中文。"
 )
 
 CKP_TOPIC_EXTRACTION_TASK = (
-    "Group local PKUs into concise CKP topic hubs. "
-    "A CKP is a reusable topic node, not a restatement of one PKU."
+    "把同一批本地 PKU 归组为简洁、可复用的 CKP 子主题。"
+    "CKP 是主题节点，不是某一条 PKU 的改写。"
 )
 
 CKP_TOPIC_EXTRACTION_RULES = [
-    "Use a concise noun phrase title for each topic.",
-    "Prefer fewer meaningful topic hubs over many narrow or duplicate topics.",
-    "Each topic must reference at least one local PKU.",
-    "Do not reference unknown PKU refs.",
-    "Use source metadata as context for naming and grouping topics.",
-    "Return empty topics only when there are no usable PKUs.",
+    "每个子主题使用简洁的中文名词短语作为 title；可保留必要英文术语、模型名或算法名。",
+    "自然语言字段默认用中文表达；JSON key、local_id、member_pku_refs 等结构字段保持英文格式。",
+    "优先生成少量有意义的主题，不要生成大量过窄、重复或只复述单条 PKU 的主题。",
+    "每个主题必须引用至少一个本地 PKU。",
+    "不要引用未知的 PKU ref。",
+    "可使用 source metadata 辅助命名和分组，但不要编造 PKU 没有支持的主题。",
+    "没有可用 PKU 时返回空 topics 数组。",
 ]
 
 JSON_SHAPE_CKP_TOPIC_EXTRACTION: dict[str, Any] = {
     "topics": [
         {
             "local_id": "topic_1",
-            "title": "Topic noun phrase",
-            "description": "Short topic hub description",
-            "keywords": ["keyword"],
-            "concepts": ["concept"],
-            "domains": ["domain"],
-            "entities": ["entity"],
+            "title": "用中文表达的主题名词短语",
+            "description": "用中文表达的主题说明",
+            "keywords": ["中文关键词"],
+            "concepts": ["中文概念或保留原文术语"],
+            "domains": ["中文领域"],
+            "entities": ["中文实体或保留原文专名"],
             "member_pku_refs": ["pku_1", "pku_2"],
             "confidence": 0.0,
-            "reason": "Short grouping reason",
+            "reason": "用中文简述分组依据",
         }
     ],
 }
@@ -561,37 +565,39 @@ def build_ckp_topic_extraction_messages(
 # ---------------------------------------------------------------------------
 
 CKP_PARENT_TOPIC_ASSIGNMENT_SYSTEM_PROMPT = (
-    "You are Prism's CKP parent topic assigner. "
-    "Return strict JSON only. Do not output Markdown."
+    "你是 Prism 的 CKP 上层主题分配器。"
+    "只返回严格 JSON，不要输出 Markdown。"
+    "JSON key、结构字段和枚举/标识保持英文；title、description、reason、keywords、concepts、domains、entities 等自然语言字段默认使用中文。"
 )
 
 CKP_PARENT_TOPIC_ASSIGNMENT_TASK = (
-    "Assign local child CKP topics to broader but concrete parent CKP topics. "
-    "A parent topic should be reusable across child topics without becoming vague."
+    "把本地子 CKP 主题归入更上层但仍然具体的父 CKP 主题。"
+    "父主题应能跨多个子主题复用，但不能变成空泛分类。"
 )
 
 CKP_PARENT_TOPIC_ASSIGNMENT_RULES = [
-    "Use a broad but concrete noun phrase title for each parent topic.",
-    "Prefer fewer meaningful parent topics over many narrow or duplicate parents.",
-    "Each parent topic must reference at least one local child topic.",
-    "Do not reference unknown child topic refs.",
-    "Use source metadata and child topic member PKU statements as context for grouping.",
-    "Return empty parent_topics only when there are no usable child topics.",
+    "每个父主题使用较宽但具体的中文名词短语作为 title；可保留必要英文术语、模型名或算法名。",
+    "自然语言字段默认用中文表达；JSON key、local_id、member_child_refs 等结构字段保持英文格式。",
+    "优先生成少量有意义的父主题，不要生成大量过窄、重复或空泛的父主题。",
+    "每个父主题必须引用至少一个本地子主题。",
+    "不要引用未知的 child topic ref。",
+    "可使用 source metadata 和子主题成员 PKU 作为分组上下文，但不要编造没有证据支撑的父主题。",
+    "没有可用子主题时返回空 parent_topics 数组。",
 ]
 
 JSON_SHAPE_CKP_PARENT_TOPIC_ASSIGNMENT: dict[str, Any] = {
     "parent_topics": [
         {
             "local_id": "parent_1",
-            "title": "Broad topic noun phrase",
-            "description": "Short parent topic description",
-            "keywords": ["keyword"],
-            "concepts": ["concept"],
-            "domains": ["domain"],
-            "entities": ["entity"],
+            "title": "用中文表达的上层主题名词短语",
+            "description": "用中文表达的上层主题说明",
+            "keywords": ["中文关键词"],
+            "concepts": ["中文概念或保留原文术语"],
+            "domains": ["中文领域"],
+            "entities": ["中文实体或保留原文专名"],
             "member_child_refs": ["child_1", "child_2"],
             "confidence": 0.0,
-            "reason": "Short parent grouping reason",
+            "reason": "用中文简述上层主题分组依据",
         }
     ],
 }

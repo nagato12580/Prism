@@ -18,6 +18,7 @@ class Settings:
     KMC_PORT: int = int(os.getenv("KMC_PORT", "5175"))
     ENGINE_HOST: str = os.getenv("ENGINE_HOST", "0.0.0.0")
     ENGINE_PORT: int = int(os.getenv("ENGINE_PORT", "5180"))
+    ENGINE_BASE_URL: str = os.getenv("ENGINE_BASE_URL", f"http://127.0.0.1:{ENGINE_PORT}")
 
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")

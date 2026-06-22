@@ -48,6 +48,41 @@ def test_build_document_chunk_pku_extraction_messages_include_anchor_context_sch
     assert any("anchor" in rule.lower() for rule in request["rules"])
 
 
+def test_document_chunk_pku_prompt_requires_chinese_natural_language_fields():
+    system_prompt, user_message = build_document_chunk_pku_extraction_messages(
+        item_id="item-1",
+        title="LLM fine-tuning guide",
+        summary="LoRA and evaluation practices.",
+        category="AI",
+        tags=["fine-tuning"],
+        source_type="manual",
+        anchor_chunk={
+            "id": "chunk-1",
+            "text": "LoRA reduces trainable parameters.",
+            "index": 0,
+        },
+    )
+
+    request = json.loads(user_message)
+    contract_text = json.dumps(
+        {
+            "system": system_prompt,
+            "rules": request["rules"],
+            "shape": request["json_shape"],
+        },
+        ensure_ascii=False,
+    )
+
+    assert "自然语言字段" in contract_text
+    assert "中文" in contract_text
+    assert "JSON key" in contract_text
+    assert "枚举" in contract_text
+    assert "证据" in contract_text
+    assert "原文" in contract_text
+    assert request["json_shape"]["pkus"][0]["statement"] == "用中文表达的原子知识陈述"
+    assert request["json_shape"]["pkus"][0]["evidence"] == "来自 anchor chunk 的原文证据摘录，不翻译"
+
+
 def test_extract_document_chunk_pkus_uses_main_llm_and_anchor_context(monkeypatch):
     from backend.app.models import KnowledgeChunk, KnowledgeItem
     from backend.app.services import knowledge_governance as kg

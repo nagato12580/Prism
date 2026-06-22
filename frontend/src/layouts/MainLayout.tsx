@@ -1,7 +1,6 @@
 ﻿import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  BookMarked,
   BookOpen,
   CircleUserRound,
   Fingerprint,
@@ -23,7 +22,6 @@ const navItems = [
   { to: '/assets', label: '资产', icon: BookOpen },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
   { to: '/graph', label: '图谱', icon: Network },
-  { to: '/wiki', label: 'Wiki', icon: BookMarked },
   { to: '/memory/inbox', label: '记忆审核', icon: Inbox },
   { to: '/memory/profile', label: '用户画像', icon: Fingerprint },
   { to: '/memory/graph', label: '记忆图谱', icon: Waypoints },
@@ -100,14 +98,6 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
           label="图谱"
           icon={Network}
           active={location.pathname === '/graph' || location.pathname.startsWith('/graph/')}
-          isDark={isDark}
-          onNavigate={onNavigate}
-        />
-        <NavItem
-          to="/wiki"
-          label="Wiki"
-          icon={BookMarked}
-          active={location.pathname === '/wiki' || location.pathname.startsWith('/wiki/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />

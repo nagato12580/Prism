@@ -99,9 +99,51 @@ def test_build_ckp_topic_extraction_messages_group_pkus_into_topics():
     assert request["source"]["id"] == "item-1"
     assert request["source"]["title"] == "LLM fine-tuning guide"
     assert request["pkus"][0]["ref"] == "pku_1"
-    assert request["json_shape"]["topics"][0]["title"] == "Topic noun phrase"
+    assert request["json_shape"]["topics"][0]["title"] == "用中文表达的主题名词短语"
     assert request["json_shape"]["topics"][0]["member_pku_refs"] == ["pku_1", "pku_2"]
-    assert any("topic" in rule.lower() for rule in request["rules"])
+    assert any("主题" in rule for rule in request["rules"])
+
+
+def test_ckp_topic_prompt_requires_chinese_natural_language_fields():
+    from backend.app.prompts.asset_parse import build_ckp_topic_extraction_messages
+
+    system_prompt, user_message = build_ckp_topic_extraction_messages(
+        source_kind="knowledge_item",
+        source_id="item-1",
+        title="LLM fine-tuning guide",
+        summary="LoRA and evaluation practices.",
+        category="AI",
+        tags=["fine-tuning"],
+        pkus=[
+            {
+                "ref": "pku_1",
+                "statement": "LoRA reduces trainable parameters.",
+                "unit_type": "method",
+                "keywords": ["LoRA"],
+                "concepts": ["fine-tuning"],
+                "entities": [],
+                "domains": ["AI"],
+                "evidence_span": "LoRA reduces trainable parameters.",
+            }
+        ],
+    )
+
+    request = json.loads(user_message)
+    contract_text = json.dumps(
+        {
+            "system": system_prompt,
+            "rules": request["rules"],
+            "shape": request["json_shape"],
+        },
+        ensure_ascii=False,
+    )
+
+    assert "自然语言字段" in contract_text
+    assert "中文" in contract_text
+    assert "JSON key" in contract_text
+    assert "枚举" in contract_text
+    assert request["json_shape"]["topics"][0]["title"] == "用中文表达的主题名词短语"
+    assert request["json_shape"]["topics"][0]["description"] == "用中文表达的主题说明"
 
 
 def test_parse_ckp_topic_extraction_keeps_valid_topics():
@@ -167,9 +209,51 @@ def test_build_ckp_parent_topic_assignment_messages_groups_child_topics():
     assert "JSON" in system_prompt
     assert request["source"]["id"] == "item-1"
     assert request["child_topics"][0]["ref"] == "child_1"
-    assert request["json_shape"]["parent_topics"][0]["title"] == "Broad topic noun phrase"
+    assert request["json_shape"]["parent_topics"][0]["title"] == "用中文表达的上层主题名词短语"
     assert request["json_shape"]["parent_topics"][0]["member_child_refs"] == ["child_1", "child_2"]
-    assert any("parent" in rule.lower() for rule in request["rules"])
+    assert any("父主题" in rule for rule in request["rules"])
+
+
+def test_ckp_parent_topic_prompt_requires_chinese_natural_language_fields():
+    from backend.app.prompts.asset_parse import build_ckp_parent_topic_assignment_messages
+
+    system_prompt, user_message = build_ckp_parent_topic_assignment_messages(
+        source_kind="knowledge_item",
+        source_id="item-1",
+        title="LLM fine-tuning guide",
+        summary="LoRA and evaluation practices.",
+        category="AI",
+        tags=["fine-tuning"],
+        child_topics=[
+            {
+                "ref": "child_1",
+                "title": "LoRA fine-tuning methods",
+                "description": "Parameter-efficient methods for adapting LLMs.",
+                "keywords": ["LoRA"],
+                "concepts": ["fine-tuning"],
+                "domains": ["AI"],
+                "entities": [],
+                "member_pku_statements": ["LoRA reduces trainable parameters."],
+            }
+        ],
+    )
+
+    request = json.loads(user_message)
+    contract_text = json.dumps(
+        {
+            "system": system_prompt,
+            "rules": request["rules"],
+            "shape": request["json_shape"],
+        },
+        ensure_ascii=False,
+    )
+
+    assert "自然语言字段" in contract_text
+    assert "中文" in contract_text
+    assert "JSON key" in contract_text
+    assert "枚举" in contract_text
+    assert request["json_shape"]["parent_topics"][0]["title"] == "用中文表达的上层主题名词短语"
+    assert request["json_shape"]["parent_topics"][0]["description"] == "用中文表达的上层主题说明"
 
 
 def test_parse_ckp_parent_topic_assignment_keeps_valid_parent_topics():

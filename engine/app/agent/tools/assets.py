@@ -374,7 +374,7 @@ register_tool(
         name="asset_search",
         description="Search confirmed personal knowledge assets.",
         builder=_build_asset_search,
-        default_enabled=True,
+        default_enabled=False,
     )
 )
 
@@ -384,7 +384,7 @@ register_tool(
         name="asset_overview",
         description="Overview and group confirmed personal knowledge assets.",
         builder=_build_asset_overview,
-        default_enabled=True,
+        default_enabled=False,
     )
 )
 
@@ -394,6 +394,6 @@ register_tool(
         name="asset_related",
         description="Find confirmed personal assets related to a topic or asset.",
         builder=_build_asset_related,
-        default_enabled=True,
+        default_enabled=False,
     )
 )

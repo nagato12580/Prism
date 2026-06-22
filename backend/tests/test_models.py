@@ -1,6 +1,7 @@
 # prism/backend/tests/test_models.py
 import pytest
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects import mysql
 
 from backend.app.database import Base
 from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeTopic, KnowledgeChunk, ChatSession, ChatMessage
@@ -175,6 +176,11 @@ def test_knowledge_topic_model_has_named_unique_constraint():
     assert "uq_knowledge_topic_user_name" in constraints
 
 
+def test_document_content_columns_use_mysql_mediumtext():
+    assert KnowledgeItem.__table__.columns["content"].type.compile(dialect=mysql.dialect()).lower() == "mediumtext"
+    assert KnowledgeFile.__table__.columns["content_text"].type.compile(dialect=mysql.dialect()).lower() == "mediumtext"
+
+
 def test_auto_migrate_adds_missing_topic_resource_unique_constraints(monkeypatch):
     executed_sql = []
 
@@ -262,3 +268,53 @@ def test_auto_migrate_does_not_add_default_to_text_columns():
     description_column = KnowledgeFile.__table__.columns["description"]
 
     assert auto_migrate_module._infer_default(description_column) == ""
+
+
+def test_auto_migrate_upgrades_existing_text_columns_to_mediumtext(monkeypatch):
+    executed_sql = []
+
+    class FakeInspector:
+        def get_table_names(self):
+            return list(Base.metadata.tables)
+
+        def get_columns(self, table_name):
+            table = Base.metadata.tables[table_name]
+            rows = [{"name": column.name, "type": column.type} for column in table.columns]
+            if table_name == "knowledge_item":
+                for row in rows:
+                    if row["name"] == "content":
+                        row["type"] = mysql.TEXT()
+            if table_name == "knowledge_file":
+                for row in rows:
+                    if row["name"] == "content_text":
+                        row["type"] = mysql.TEXT()
+            return rows
+
+        def get_unique_constraints(self, table_name):
+            return []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, statement):
+            executed_sql.append(str(statement))
+
+        def commit(self):
+            pass
+
+    class FakeEngine:
+        dialect = mysql.dialect()
+
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(auto_migrate_module, "inspect", lambda engine: FakeInspector())
+
+    auto_migrate_module.auto_migrate(Base, FakeEngine())
+
+    assert any("MODIFY COLUMN `content` MEDIUMTEXT" in sql for sql in executed_sql)
+    assert any("MODIFY COLUMN `content_text` MEDIUMTEXT" in sql for sql in executed_sql)

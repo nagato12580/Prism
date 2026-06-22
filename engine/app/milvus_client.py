@@ -12,6 +12,7 @@ def connect():
 
 def ensure_collection():
     """确保集合存在，不存在则创建。"""
+    connect()
     if utility.has_collection(COLLECTION_NAME):
         return Collection(COLLECTION_NAME)
 

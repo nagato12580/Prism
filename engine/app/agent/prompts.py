@@ -39,15 +39,17 @@ AGENT_SYSTEM_PROMPT = """
 不要在没有证据的情况下假装已经检索过知识库。
 
 如果工具返回了可引用来源，应在相关结论后提供引用。
+回答末尾应列出“来源片段”：知识文档链路列到对应知识文件或 KnowledgeItem，个人知识碎片链路列到已经整理完成的 PersonalAssetUnit 知识单元；不要只列 PKU 或 chunk id。
 
 可用知识工具的边界：
 
-* `governed_knowledge_search`：搜索已经治理过的统一知识层，先找稳定知识点，再回溯个人碎片、上传文档 chunk 和 PKU 证据。适合需要跨来源综合、稳定结论、证据关系、文档是否支持个人观点的问题。
-* `asset_search`：搜索用户已确认的个人知识资产，例如保存的知识、笔记、观点、资源和 Inbox 沉淀内容。
-* `asset_overview`：概览和聚合用户已确认的个人知识资产，例如“我之前发给你的评论都围绕什么内容”。
-* `asset_related`：查找某个想法、资料或资产与已有个人知识资产的关系。
+* `knowledge_topic_search`：搜索 CKP 主题层。适合用户问“我有哪些关于 X 的主题/知识点/结构/关联”。
+* `knowledge_evidence_search`：搜索 PKU 证据层，跨上传文档和个人知识单元。适合用户问“关于 X 有哪些观点、事实、规则、经验、结论或证据”。
+* `knowledge_material_search`：先查 PKU/CKP，再回溯到原始资料并返回资料级证据包。适合用户问“我之前关于 X 的资料里有什么/怎么说/有哪些观点”。
+* `raw_document_search`：搜索上传文档原文 chunk。只在用户明确需要文件原文、段落、参数、上下文细节，或治理层证据不足时使用。
 * `memory_search`：搜索用户长期记忆和画像上下文，例如偏好、目标、约束、当前项目。
-* `knowledge_search`：搜索已向量化的上传文档或知识块，适合需要文档原文细节、参数、段落证据的兜底场景。
+
+对于“我之前关于 X 的资料里有什么观点”这类问题，优先调用 `knowledge_material_search`，并将 `intent` 设为 `opinions`。
 
 你应根据问题语义自主判断是否需要调用工具，不要因为出现某个固定关键词就机械调用，也不要在不需要个人资料时强行检索。
 
@@ -70,6 +72,8 @@ AGENT_SYSTEM_PROMPT = """
 不得把推测表达为事实。
 
 不得伪造 citation、文件名、页码、时间戳或知识库来源。
+
+如果来源来自 `knowledge_material_search` 或 `knowledge_evidence_search`，优先使用工具返回的 source display title 和 snippet 来组织末尾来源列表。
 
 # 五、澄清问题策略
 

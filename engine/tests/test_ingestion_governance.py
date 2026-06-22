@@ -192,3 +192,49 @@ def test_ingest_item_uses_positional_chunk_ids_for_duplicate_text(monkeypatch):
         assert es_kwargs["child_id_map_by_position"] == child_ids_by_position
     finally:
         session.close()
+
+
+def test_ingest_item_logs_progress_and_failures(monkeypatch, caplog):
+    import logging
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    session = Session()
+    item = KnowledgeItem(
+        title="Logging notes",
+        content="Logging should reveal the failing ingestion stage.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.commit()
+    item_id = item.id
+    session.close()
+
+    parent = ParentChunk("parent")
+    parent.children = ["child"]
+
+    monkeypatch.setattr(pipeline, "_Session", Session)
+    monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
+
+    def fail_embed(texts):
+        raise RuntimeError("embedding provider unavailable")
+
+    monkeypatch.setattr(pipeline, "embed_texts", fail_embed)
+
+    caplog.set_level(logging.INFO, logger="uvicorn.error")
+
+    try:
+        pipeline.ingest_item(item_id)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    logs = caplog.text
+    assert "[ingest.pipeline] start" in logs
+    assert "stage=embedding" in logs
+    assert "[ingest.pipeline] failed" in logs
+    assert "embedding provider unavailable" in logs

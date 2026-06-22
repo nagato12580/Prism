@@ -112,7 +112,7 @@ def trigger_extraction(payload: WikiExtractRequest, db: Session = Depends(get_db
     def _call_engine():
         try:
             httpx.post(
-                f"http://127.0.0.1:{settings.ENGINE_PORT}/api/v1/wiki/extract",
+                f"{settings.ENGINE_BASE_URL}/api/v1/wiki/extract",
                 json={"doc_id": doc.id, "file_id": doc.file_id},
                 timeout=30,
             )

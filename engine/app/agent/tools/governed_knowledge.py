@@ -210,11 +210,18 @@ def _knowledge_item_fields(item: KnowledgeItem) -> dict[str, str]:
 
 
 def _personal_asset_unit_result(unit: PersonalAssetUnit, score: float, matched_terms: list[str], reasons: list[str]) -> dict[str, Any]:
+    text = unit.summary or unit.content
     return {
         "source_kind": "personal_asset_unit",
         "ref_type": "personal_asset_unit",
         "ref_id": unit.id,
+        "source_id": unit.id,
         "personal_asset_unit_id": unit.id,
+        "display_type": "personal_asset_unit",
+        "display_id": unit.id,
+        "display_title": unit.title,
+        "display_label": "知识单元",
+        "snippet": text,
         "title": unit.title,
         "summary": unit.summary,
         "text": unit.content,
@@ -253,14 +260,20 @@ def _source_for_pku(db, pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
         asset = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == pku.source_id).first()
         if not asset:
             return None
+        text = asset.summary or asset.body or asset.raw_text
         return {
             "source_kind": "personal_asset_item",
             "source_id": asset.id,
             "ref_type": "personal_asset",
             "ref_id": asset.id,
             "asset_id": asset.id,
+            "display_type": "personal_asset_item",
+            "display_id": asset.id,
+            "display_title": asset.title,
+            "display_label": "来源碎片",
+            "snippet": text,
             "title": asset.title,
-            "text": asset.summary or asset.body or asset.raw_text,
+            "text": text,
             "source_type": asset.source_type,
             "source_platform": asset.source_platform,
             "category": asset.category,
@@ -271,14 +284,20 @@ def _source_for_pku(db, pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
         unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == pku.source_id).first()
         if not unit:
             return None
+        text = unit.summary or unit.content
         return {
             "source_kind": "personal_asset_unit",
             "source_id": unit.id,
             "ref_type": "personal_asset_unit",
             "ref_id": unit.id,
             "personal_asset_unit_id": unit.id,
+            "display_type": "personal_asset_unit",
+            "display_id": unit.id,
+            "display_title": unit.title,
+            "display_label": "知识单元",
+            "snippet": text,
             "title": unit.title,
-            "text": unit.summary or unit.content,
+            "text": text,
             "category": unit.category,
             "tags": unit.tags or [],
             "source_asset_ids": unit.source_asset_ids or [],
@@ -289,6 +308,7 @@ def _source_for_pku(db, pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
         if not chunk:
             return None
         item = db.query(KnowledgeItem).filter(KnowledgeItem.id == chunk.item_id).first()
+        title = item.title if item else ""
         return {
             "source_kind": "document_chunk",
             "source_id": chunk.id,
@@ -296,7 +316,12 @@ def _source_for_pku(db, pku: PersonalKnowledgeUnit) -> dict[str, Any] | None:
             "ref_id": chunk.id,
             "chunk_id": chunk.id,
             "item_id": chunk.item_id,
-            "title": item.title if item else "",
+            "display_type": "knowledge_item",
+            "display_id": chunk.item_id,
+            "display_title": title,
+            "display_label": "知识文档",
+            "snippet": chunk.chunk_text,
+            "title": title,
             "text": chunk.chunk_text,
             "chunk_type": chunk.chunk_type,
             "category": item.category if item else "",
@@ -352,6 +377,8 @@ def _build_evidence_bundle(db, ckp: CanonicalKnowledgePoint, score: float, match
         )
         source = _source_for_pku(db, pku)
         if source:
+            source["score"] = max(float(score or 0), float(link.confidence or 0))
+            source["raw_score"] = float(link.confidence or 0)
             source_key = (source["source_kind"], source["source_id"])
             if source_key not in seen_sources:
                 raw_sources.append(source)
@@ -491,6 +518,6 @@ register_tool(
         name=KEY,
         description="Search governed canonical knowledge with PKU and source backtracking.",
         builder=_build_governed_knowledge_search,
-        default_enabled=True,
+        default_enabled=False,
     )
 )

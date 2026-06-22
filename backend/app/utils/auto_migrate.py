@@ -32,9 +32,12 @@ def auto_migrate(Base, engine) -> None:
                 table_obj.create(conn)
             continue
 
-        existing_columns = {col["name"] for col in inspector.get_columns(table_name)}
+        inspected_columns = inspector.get_columns(table_name)
+        existing_columns = {col["name"] for col in inspected_columns}
+        existing_column_map = {col["name"]: col for col in inspected_columns}
         for col in table_obj.columns:
             if col.name in existing_columns:
+                _upgrade_column_type_if_needed(engine, table_name, col, existing_column_map[col.name])
                 continue
             col_type = col.type.compile(dialect=engine.dialect)
             print(f"[auto_migrate] Add column: {table_name}.{col.name} {col_type}")
@@ -93,3 +96,30 @@ def _infer_default(col):
     if isinstance(col_type, String) and not isinstance(col_type, Text):
         return " DEFAULT ''"
     return ""
+
+
+def _upgrade_column_type_if_needed(engine, table_name: str, model_col, existing_col: dict) -> None:
+    model_type = model_col.type
+    target_type = model_type.compile(dialect=engine.dialect)
+    if target_type.lower() != "mediumtext":
+        return
+
+    existing_type = existing_col.get("type")
+    existing_type_name = existing_type.compile(dialect=engine.dialect).lower() if existing_type is not None else ""
+    if existing_type_name == "mediumtext":
+        return
+
+    alter_sql = f"ALTER TABLE `{table_name}` MODIFY COLUMN `{model_col.name}` {target_type}"
+    if model_col.comment:
+        safe_comment = model_col.comment.replace("'", "''")
+        alter_sql += f" COMMENT '{safe_comment}'"
+
+    print(f"[auto_migrate] Modify column: {table_name}.{model_col.name} {target_type}")
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(alter_sql))
+            conn.commit()
+        except Exception as exc:
+            raise RuntimeError(
+                f"[auto_migrate] Failed to modify column {table_name}.{model_col.name}: {exc}"
+            ) from exc
