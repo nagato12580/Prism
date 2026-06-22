@@ -118,3 +118,17 @@ class MemoryDraftConfirmOut(BaseModel):
 
 class MemorySupersedePayload(BaseModel):
     superseded_statement_id: str
+
+
+class MemoryExtractionRequest(BaseModel):
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class MemoryExtractionOut(BaseModel):
+    session_id: str
+    messages_scanned: int
+    candidates_found: int
+    drafts_created: int
+    candidates_skipped: int
+    draft_ids: list[str]
+    drafts: list[MemoryDraftOut]

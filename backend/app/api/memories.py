@@ -10,10 +10,13 @@ from ..schemas.memory import (
     MemoryDraftCreate,
     MemoryDraftOut,
     MemoryEntryOut,
+    MemoryExtractionOut,
+    MemoryExtractionRequest,
     MemoryStatementOut,
     MemorySupersedePayload,
     memory_source_to_out,
 )
+from ..services.memory_extraction import extract_session_memories
 from ..utils.time import local_now
 
 router = APIRouter(prefix="/memories", tags=["memories"])
@@ -156,6 +159,33 @@ def create_memory_draft(payload: MemoryDraftCreate, db: Session = Depends(get_db
     db.commit()
     db.refresh(draft)
     return _draft_to_out(draft)
+
+
+@router.post("/extract/session/{session_id}", response_model=MemoryExtractionOut)
+def extract_memory_from_session(
+    session_id: str,
+    payload: MemoryExtractionRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    limit = payload.limit if payload else 20
+    result = extract_session_memories(db, session_id=session_id, limit=limit)
+    drafts = (
+        db.query(MemoryDraft)
+        .filter(MemoryDraft.id.in_(result.draft_ids))
+        .order_by(MemoryDraft.created_at.desc())
+        .all()
+        if result.draft_ids
+        else []
+    )
+    return MemoryExtractionOut(
+        session_id=result.session_id,
+        messages_scanned=result.messages_scanned,
+        candidates_found=result.candidates_found,
+        drafts_created=result.drafts_created,
+        candidates_skipped=result.candidates_skipped,
+        draft_ids=result.draft_ids,
+        drafts=[_draft_to_out(draft) for draft in drafts],
+    )
 
 
 @router.post("/drafts/{draft_id}/confirm", response_model=MemoryDraftConfirmOut)
