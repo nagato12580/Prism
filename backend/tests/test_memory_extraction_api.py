@@ -54,3 +54,75 @@ def test_extract_session_endpoint_returns_404_for_missing_session(client):
     response = client.post("/api/v1/memories/extract/session/missing-session", json={"limit": 10})
 
     assert response.status_code == 404
+
+
+class ImmediateThread:
+    def __init__(self, target, args=(), daemon=None):
+        self.target = target
+        self.args = args
+
+    def start(self):
+        self.target(*self.args)
+
+
+def test_add_assistant_message_triggers_auto_memory_extraction_when_enabled(
+    client,
+    db_session,
+    monkeypatch,
+):
+    from backend.app.api import chat as chat_api
+    from backend.app.config import settings
+
+    session = ChatSession(user_id="default-user", title="Auto memory")
+    db_session.add(session)
+    db_session.commit()
+    session_id = session.id
+    calls = []
+
+    monkeypatch.setattr(settings, "MEMORY_EXTRACTION_AUTO_ENABLED", True, raising=False)
+    monkeypatch.setattr(chat_api, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(chat_api.threading, "Thread", ImmediateThread)
+
+    def fake_extract(db, session_id, limit=20):
+        calls.append((session_id, limit))
+
+    monkeypatch.setattr(chat_api, "extract_session_memories", fake_extract)
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/messages",
+        json={"role": "assistant", "content": "Remember this durable preference."},
+    )
+
+    assert response.status_code == 200
+    assert calls == [(session_id, 20)]
+
+
+def test_add_assistant_message_ignores_auto_memory_extraction_failures(
+    client,
+    db_session,
+    monkeypatch,
+):
+    from backend.app.api import chat as chat_api
+    from backend.app.config import settings
+
+    session = ChatSession(user_id="default-user", title="Auto memory")
+    db_session.add(session)
+    db_session.commit()
+    session_id = session.id
+
+    monkeypatch.setattr(settings, "MEMORY_EXTRACTION_AUTO_ENABLED", True, raising=False)
+    monkeypatch.setattr(chat_api, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(chat_api.threading, "Thread", ImmediateThread)
+
+    def fake_extract(db, session_id, limit=20):
+        raise RuntimeError("LLM unavailable")
+
+    monkeypatch.setattr(chat_api, "extract_session_memories", fake_extract)
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/messages",
+        json={"role": "assistant", "content": "This message should still be saved."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "This message should still be saved."

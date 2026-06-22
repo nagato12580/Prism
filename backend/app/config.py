@@ -38,6 +38,7 @@ class Settings:
     ES_PASSWORD: str = os.getenv("ES_PASSWORD", "")
 
     JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret")
+    MEMORY_EXTRACTION_AUTO_ENABLED: bool = os.getenv("MEMORY_EXTRACTION_AUTO_ENABLED", "0") == "1"
 
 
 settings = Settings()

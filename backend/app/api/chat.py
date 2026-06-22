@@ -1,17 +1,41 @@
 # prism/backend/app/api/chat.py
+import threading
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..models.chat import ChatSession, ChatMessage
 from ..schemas.chat import (
     ChatSessionCreate, ChatSessionOut, ChatSessionUpdate,
     ChatMessageOut, ChatMessageCreate,
 )
 from ..config import settings
+from ..services.memory_extraction import extract_session_memories
 from ..utils.time import local_now
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+def _run_memory_extraction_best_effort(session_id: str, limit: int = 20):
+    db = SessionLocal()
+    try:
+        extract_session_memories(db, session_id=session_id, limit=limit)
+    except Exception as exc:
+        print(f"[memory_extraction] auto extraction failed: {exc}")
+    finally:
+        db.close()
+
+
+def _maybe_trigger_memory_extraction(session_id: str, role: str):
+    if role != "assistant" or not settings.MEMORY_EXTRACTION_AUTO_ENABLED:
+        return
+    thread = threading.Thread(
+        target=_run_memory_extraction_best_effort,
+        args=(session_id,),
+        daemon=True,
+    )
+    thread.start()
 
 
 # ── Session CRUD ──────────────────────────────────────────────
@@ -84,6 +108,7 @@ def add_message(session_id: str, payload: ChatMessageCreate, db: Session = Depen
     session.updated_at = local_now()
     db.commit()
     db.refresh(msg)
+    _maybe_trigger_memory_extraction(session_id, payload.role)
     return msg
 
 
