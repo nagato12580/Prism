@@ -20,6 +20,28 @@ class TestVoiceToAsset:
         detail = response.json().get("detail", {})
         assert detail.get("code") == "unsupported_audio_format"
 
+    def test_validate_audio_format_with_mime_params(self, client):
+        """Browsers may send content_type with params like 'audio/webm; codecs=opus'.
+        The validator must strip parameters before matching."""
+        from backend.app.api.assets import _validate_audio_format
+
+        # Should not raise — strips "; codecs=opus" before lookup
+        ext = _validate_audio_format("recording.webm", "audio/webm; codecs=opus")
+        assert ext == ".webm"
+
+        # MIME fallback when filename has no recognizable extension
+        ext2 = _validate_audio_format("recording", "audio/mpeg; param=value")
+        assert ext2 == ".mp3"
+
+        # Unrecognized format still raises 400
+        from fastapi import HTTPException
+        try:
+            _validate_audio_format("recording.xyz", "application/json; charset=utf-8")
+            assert False, "Expected HTTPException"
+        except HTTPException as e:
+            assert e.status_code == 400
+            assert e.detail["code"] == "unsupported_audio_format"
+
     def test_voice_creates_asset_item(self, client, monkeypatch):
         """Happy path: upload audio, transcribe, create asset item."""
         # Mock ASR to return fixed text

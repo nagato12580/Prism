@@ -65,8 +65,8 @@ class TestTranscribeDashScope:
 
     @pytest.mark.asyncio
     async def test_transcribe_no_speech(self, monkeypatch):
-        """ASR returns empty text, raise ASRError."""
-        from backend.app.services.asr import transcribe, ASRError
+        """ASR returns empty text, returns empty string — caller decides how to handle."""
+        from backend.app.services.asr import transcribe
 
         submit_response = MagicMock()
         submit_response.status_code = 200
@@ -104,14 +104,13 @@ class TestTranscribeDashScope:
             tmp_path = tf.name
 
         try:
-            with pytest.raises(ASRError) as exc_info:
-                await transcribe(
-                    provider="dashscope",
-                    api_key="sk-test-key",
-                    model="paraformer-v2",
-                    audio_path=tmp_path,
-                )
-            assert "未识别到语音内容" in str(exc_info.value)
+            result = await transcribe(
+                provider="dashscope",
+                api_key="sk-test-key",
+                model="paraformer-v2",
+                audio_path=tmp_path,
+            )
+            assert result == ""
         finally:
             os.unlink(tmp_path)
 

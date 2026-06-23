@@ -155,8 +155,7 @@ async def _extract_dashscope_text(
             if txt:
                 texts.append(txt)
     text = "".join(texts).strip()
-    if not text:
-        raise ASRError("未识别到语音内容，请说清楚后重试")
+    # Return empty string instead of raising — caller decides how to handle no-speech
     return text
 
 

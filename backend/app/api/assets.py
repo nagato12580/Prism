@@ -520,7 +520,7 @@ def _validate_audio_format(filename: str, content_type: str | None) -> str:
         "audio/aac": ".aac",
     }
     if ext not in _ALLOWED_AUDIO_EXTENSIONS and content_type:
-        ext = mime_to_ext.get(content_type, ext)
+        ext = mime_to_ext.get(content_type.split(";")[0].strip(), ext)
     if ext not in _ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -560,7 +560,13 @@ async def voice_to_asset_item(
     # 3) 保存到本地
     audio_name = f"{uuid.uuid4().hex}{ext}"
     audio_path = AUDIO_UPLOAD_DIR / audio_name
-    audio_path.write_bytes(audio_bytes)
+    try:
+        audio_path.write_bytes(audio_bytes)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "file_write_failed", "message": "音频文件保存失败，请稍后重试"},
+        ) from e
 
     # 4) 调用 ASR 转写
     from ..services.asr import transcribe, ASRError
@@ -573,10 +579,20 @@ async def voice_to_asset_item(
             audio_path=str(audio_path),
         )
     except ASRError as exc:
+        try:
+            audio_path.unlink(missing_ok=True)
+        except Exception:
+            pass
         raise HTTPException(
             status_code=500,
             detail={"code": "asr_failed", "message": str(exc)},
         ) from exc
+
+    # 5) 转写成功，删除音频文件（文本已存入数据库）
+    try:
+        audio_path.unlink(missing_ok=True)
+    except Exception:
+        pass
 
     if not text.strip():
         raise HTTPException(
@@ -587,7 +603,7 @@ async def voice_to_asset_item(
             },
         )
 
-    # 5) 走现有资产创建管线
+    # 6) 走现有资产创建管线
     return _create_asset_item_from_raw(
         db=db,
         raw_text=text.strip(),
