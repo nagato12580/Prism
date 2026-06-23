@@ -36,6 +36,7 @@ class Settings:
     ASR_PROVIDER: str = os.getenv("ASR_PROVIDER", "dashscope")
     ASR_API_KEY: str = os.getenv("ASR_API_KEY", "")
     ASR_MODEL: str = os.getenv("ASR_MODEL", "paraformer-v2")
+    WHISPER_SERVICE_URL: str = os.getenv("WHISPER_SERVICE_URL", "http://localhost:5199")
 
     ES_HOST: str = os.getenv("ES_HOST", "http://localhost:9200")
     ES_USERNAME: str = os.getenv("ES_USERNAME", "")

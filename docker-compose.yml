@@ -68,6 +68,18 @@ services:
       timeout: 10s
       retries: 10
 
+  faster-whisper:
+    build: ./docker/faster-whisper
+    image: prism-whisper:latest
+    container_name: prism-whisper
+    ports:
+      - "5199:5199"
+    environment:
+      - WHISPER_MODEL_SIZE=small
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE=int8
+    restart: unless-stopped
+
 volumes:
   mysql_data:
   etcd_data:

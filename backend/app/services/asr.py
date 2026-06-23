@@ -10,6 +10,8 @@ import os
 
 import httpx
 
+from ..config import settings
+
 # DashScope 录音文件识别（异步）端点
 _DASHSCOPE_SUBMIT = (
     "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription"
@@ -33,9 +35,9 @@ async def transcribe(
     """把音频文件转文字。
 
     Args:
-        provider: ASR 服务商，当前仅支持 "dashscope"
-        api_key: DashScope API Key
-        model: 模型名，默认 "paraformer-v2"
+        provider: ASR 服务商，支持 "dashscope" / "faster_whisper"
+        api_key: DashScope API Key（faster_whisper 不需要）
+        model: 模型名（DashScope 用 "paraformer-v2"，faster_whisper 忽略）
         audio_path: 本地音频文件路径
 
     Returns:
@@ -44,7 +46,7 @@ async def transcribe(
     Raises:
         ASRError: 转写失败（中文提示）
     """
-    if provider not in ("dashscope",):
+    if provider not in ("dashscope", "faster_whisper"):
         raise ASRError(f"暂不支持的 ASR 服务商：{provider}")
 
     # 读音频文件，确定 MIME type
@@ -60,6 +62,9 @@ async def transcribe(
 
     with open(audio_path, "rb") as fh:
         audio_bytes = fh.read()
+
+    if provider == "faster_whisper":
+        return await _transcribe_faster_whisper(audio_bytes, os.path.basename(audio_path), mime_type)
 
     return await _transcribe_dashscope(
         api_key, model, audio_bytes,
@@ -157,6 +162,30 @@ async def _extract_dashscope_text(
     text = "".join(texts).strip()
     # Return empty string instead of raising — caller decides how to handle no-speech
     return text
+
+
+async def _transcribe_faster_whisper(
+    audio_bytes: bytes,
+    filename: str,
+    mime_type: str,
+) -> str:
+    """通过 faster-whisper 容器服务转写音频。
+
+    调用 docker-compose 中的 faster-whisper 服务 HTTP 接口。
+    """
+    url = f"{settings.WHISPER_SERVICE_URL}/transcribe"
+    files = {"file": (filename, audio_bytes, mime_type)}
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(url, files=files)
+        if resp.status_code >= 400:
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise ASRError(f"Whisper 服务请求失败（HTTP {e.response.status_code}），请稍后重试") from e
+        data = resp.json()
+        text = (data.get("text") or "").strip()
+        return text  # empty string is OK — caller handles no-speech
 
 
 __all__ = ["transcribe", "ASRError"]

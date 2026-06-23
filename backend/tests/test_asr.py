@@ -45,7 +45,6 @@ class TestTranscribeDashScope:
             lambda **kwargs: mock_client,
         )
 
-        # Create a temp file for the test
         import tempfile, os
         with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
             tf.write(b"fake audio data")
@@ -291,5 +290,121 @@ class TestTranscribeDashScope:
                     audio_path=tmp_path,
                 )
             assert "语音识别失败" in str(exc_info.value)
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestTranscribeFasterWhisper:
+    """Test faster-whisper provider transcription flow."""
+
+    @pytest.mark.asyncio
+    async def test_transcribe_success(self, monkeypatch):
+        """Happy path: POST to whisper service, get text back."""
+        from backend.app.services.asr import transcribe
+
+        whisper_response = MagicMock()
+        whisper_response.status_code = 200
+        whisper_response.json.return_value = {"text": "这是本地 Whisper 转写的结果"}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = whisper_response
+
+        monkeypatch.setattr(
+            "backend.app.services.asr.httpx.AsyncClient",
+            lambda **kwargs: mock_client,
+        )
+
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
+            tf.write(b"fake audio")
+            tmp_path = tf.name
+
+        try:
+            result = await transcribe(
+                provider="faster_whisper",
+                api_key="",
+                model="",
+                audio_path=tmp_path,
+            )
+            assert result == "这是本地 Whisper 转写的结果"
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args[0]
+            assert "/transcribe" in call_args[0]
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_transcribe_empty_result(self, monkeypatch):
+        """Whisper returns empty text — returns empty string, caller handles it."""
+        from backend.app.services.asr import transcribe
+
+        whisper_response = MagicMock()
+        whisper_response.status_code = 200
+        whisper_response.json.return_value = {"text": ""}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = whisper_response
+
+        monkeypatch.setattr(
+            "backend.app.services.asr.httpx.AsyncClient",
+            lambda **kwargs: mock_client,
+        )
+
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
+            tf.write(b"silence")
+            tmp_path = tf.name
+
+        try:
+            result = await transcribe(
+                provider="faster_whisper",
+                api_key="",
+                model="",
+                audio_path=tmp_path,
+            )
+            assert result == ""
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_transcribe_service_error(self, monkeypatch):
+        """Whisper service returns 500, raise ASRError."""
+        from backend.app.services.asr import transcribe, ASRError
+
+        from httpx import HTTPStatusError, Response, Request
+
+        whisper_response = MagicMock()
+        whisper_response.status_code = 500
+        whisper_response.raise_for_status.side_effect = HTTPStatusError(
+            "Server error",
+            request=Request("POST", "http://localhost:5199/transcribe"),
+            response=Response(500),
+        )
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = whisper_response
+
+        monkeypatch.setattr(
+            "backend.app.services.asr.httpx.AsyncClient",
+            lambda **kwargs: mock_client,
+        )
+
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
+            tf.write(b"audio")
+            tmp_path = tf.name
+
+        try:
+            with pytest.raises(ASRError) as exc_info:
+                await transcribe(
+                    provider="faster_whisper",
+                    api_key="",
+                    model="",
+                    audio_path=tmp_path,
+                )
+            assert "Whisper 服务请求失败" in str(exc_info.value)
         finally:
             os.unlink(tmp_path)
