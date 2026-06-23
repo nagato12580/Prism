@@ -207,6 +207,7 @@ def test_document_chunk_settlement_persists_multiple_llm_pkus_from_anchor(db_ses
     )
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(kg, "upsert_pku_vector", lambda pku: f"pku:{pku.id}")
 
     result = kg.settle_document_item_to_governance(db_session, item.id)
     db_session.commit()
@@ -217,6 +218,9 @@ def test_document_chunk_settlement_persists_multiple_llm_pkus_from_anchor(db_ses
     assert {pku.source_id for pku in pkus} == {anchor.id}
     assert {pku.llm_model for pku in pkus} == {"qwen-plus"}
     assert {pku.unit_type for pku in pkus} == {"method"}
+    assert {pku.embedding_ref for pku in pkus} == {f"pku:{pku.id}" for pku in pkus}
+    assert {pku.embedding_model for pku in pkus} == {kg.settings.EMBEDDING_MODEL}
+    assert {pku.embedding_status for pku in pkus} == {"done"}
 
 
 def test_document_chunk_settlement_persists_llm_pku_relations(db_session, monkeypatch):
@@ -282,6 +286,7 @@ def test_document_chunk_settlement_persists_llm_pku_relations(db_session, monkey
     )
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(kg, "upsert_pku_vector", lambda pku: f"pku:{pku.id}")
 
     result = kg.settle_document_item_to_governance(db_session, item.id)
     db_session.commit()
@@ -395,6 +400,29 @@ def test_document_settlement_groups_all_chunk_pkus_under_document_topic_ckp(db_s
     )
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(kg, "upsert_pku_vector", lambda pku: f"pku:{pku.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment(
+            parent_topics=[
+                kg.ExtractedCKPParentTopic(
+                    local_id="parent_without_members",
+                    title="Skipped parent",
+                    description="No referenced children.",
+                    keywords=[],
+                    concepts=[],
+                    entities=[],
+                    domains=[],
+                    member_child_refs=[],
+                    confidence=0.1,
+                    reason="test isolation",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        ),
+    )
 
     result = kg.settle_document_item_to_governance(db_session, item.id)
     db_session.commit()
@@ -491,6 +519,29 @@ def test_document_settlement_qualifies_duplicate_local_ids_across_chunks(db_sess
     monkeypatch.setattr(kg, "_extract_ckp_topics_with_llm", fake_extract_topics)
     monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
     monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(kg, "upsert_pku_vector", lambda pku: f"pku:{pku.id}")
+    monkeypatch.setattr(
+        kg,
+        "_extract_ckp_parent_topics_with_llm",
+        lambda **kwargs: kg.CKPParentTopicAssignment(
+            parent_topics=[
+                kg.ExtractedCKPParentTopic(
+                    local_id="parent_without_members",
+                    title="Skipped parent",
+                    description="No referenced children.",
+                    keywords=[],
+                    concepts=[],
+                    entities=[],
+                    domains=[],
+                    member_child_refs=[],
+                    confidence=0.1,
+                    reason="test isolation",
+                    llm_model="qwen-plus",
+                )
+            ],
+            llm_model="qwen-plus",
+        ),
+    )
 
     result = kg.settle_document_item_to_governance(db_session, item.id)
     db_session.commit()

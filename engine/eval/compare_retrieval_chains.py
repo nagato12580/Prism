@@ -23,7 +23,11 @@ if str(_project_root) not in sys.path:
 
 from backend.app.database import SessionLocal
 from backend.app.models.knowledge_item import KnowledgeChunk
-from engine.app.agent.tools.governed_knowledge import _query_governed_knowledge
+from engine.app.agent.tools.governed_knowledge import (
+    _GOVERNED_EVIDENCE_PKU_VECTOR_WEIGHT as GOVERNED_EVIDENCE_PKU_VECTOR_WEIGHT,
+    _query_governed_evidence,
+    _query_governed_knowledge,
+)
 from engine.app.config import settings
 from engine.app.retrieval.hybrid import BM25_WEIGHT, RRF_K, VECTOR_WEIGHT, hybrid_search
 
@@ -31,8 +35,22 @@ DEFAULT_DATASET = Path(__file__).resolve().parent / "golden_dataset.json"
 EVALUATION_ROOT = _project_root / "evaluation"
 RESULTS_DIR = EVALUATION_ROOT / "runs" / "retrieval"
 K_VALUES = [5, 10, 20]
+GOVERNED_EVIDENCE_PKU_EVIDENCE_BOOST = 0.05
 
 Retriever = Callable[[str, int], list[dict[str, Any]]]
+
+
+def _governed_evidence_params() -> dict[str, Any]:
+    return {
+        "ckp_vector_recall": True,
+        "ckp_lexical_recall": True,
+        "pku_vector_recall": True,
+        "pku_vector_weight": GOVERNED_EVIDENCE_PKU_VECTOR_WEIGHT,
+        "pku_query_aware_rerank": True,
+        "pku_evidence_boost": GOVERNED_EVIDENCE_PKU_EVIDENCE_BOOST,
+        "parent_child_expansion": True,
+        "eval_k_values": K_VALUES,
+    }
 
 
 def _compute_metrics(retrieved_ids: list[str], relevant_ids: set[str], k_values: list[int] = K_VALUES) -> dict[str, Any]:
@@ -183,6 +201,47 @@ def _governed_ckp_pku(query: str, top_k: int) -> list[dict[str, Any]]:
             )
     hits.sort(key=lambda item: (float(item.get("score") or 0.0), -int(item.get("rank_hint") or 0)), reverse=True)
     return _dedupe_hits(hits)[:top_k]
+
+
+def _governed_evidence(query: str, top_k: int) -> list[dict[str, Any]]:
+    _terms, bundles, _knowledge_results = _query_governed_evidence(query, limit=top_k)
+    hits: list[dict[str, Any]] = []
+    for rank, bundle in enumerate(bundles, start=1):
+        bundle_score = float(bundle.get("score") or 0.0)
+        expanded_child_ids = [
+            str(source.get("chunk_id") or source.get("source_id"))
+            for source in bundle.get("expanded_sources", [])
+            if source.get("source_kind") == "document_chunk" and (source.get("chunk_id") or source.get("source_id"))
+        ]
+        sources = bundle.get("raw_sources", [])
+        for source in sources:
+            if source.get("source_kind") != "document_chunk":
+                continue
+            chunk_id = str(source.get("chunk_id") or source.get("source_id") or "")
+            if not chunk_id:
+                continue
+            hits.append(
+                {
+                    "chunk_id": chunk_id,
+                    "item_id": source.get("item_id"),
+                    "score": float(source.get("score") or bundle_score),
+                    "source": "governed_evidence",
+                    "canonical_id": bundle.get("canonical_id"),
+                    "canonical_title": bundle.get("title"),
+                    "rank_hint": rank,
+                    "expanded_child_ids": expanded_child_ids,
+                }
+            )
+    hits.sort(key=lambda item: (float(item.get("score") or 0.0), -int(item.get("rank_hint") or 0)), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
+def _chain_map() -> dict[str, tuple[str, Retriever]]:
+    return {
+        "traditional": ("traditional_hybrid", _traditional_hybrid),
+        "governed": ("governed_ckp_pku", _governed_ckp_pku),
+        "governed_evidence": ("governed_evidence", _governed_evidence),
+    }
 
 
 def _expanded_retrieved_ids(hits: list[dict[str, Any]]) -> list[str]:
@@ -339,7 +398,7 @@ def main() -> None:
     parser.add_argument(
         "--chains",
         nargs="+",
-        choices=["traditional", "governed"],
+        choices=["traditional", "governed", "governed_evidence"],
         default=["traditional", "governed"],
         help="Retrieval chains to evaluate",
     )
@@ -357,10 +416,7 @@ def main() -> None:
     run_dir = output_root / f"{run_ts}_compare"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    chain_map: dict[str, tuple[str, Retriever]] = {
-        "traditional": ("traditional_hybrid", _traditional_hybrid),
-        "governed": ("governed_ckp_pku", _governed_ckp_pku),
-    }
+    chain_map = _chain_map()
 
     print(f"[1/3] Dataset: {dataset_path}")
     print(f"  Queries: {len(queries)}")
@@ -402,6 +458,7 @@ def main() -> None:
                 "bm25_weight": BM25_WEIGHT,
                 "eval_k_values": K_VALUES,
             },
+            "governed_evidence_params": _governed_evidence_params(),
         },
         "chains": {
             report["chain"]: {

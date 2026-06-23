@@ -160,6 +160,510 @@ def test_governed_knowledge_search_returns_synthesized_knowledge_without_ckp(mon
     assert ctx.stats_holder["governed_knowledge_search"]["knowledge_hit_count"] == 1
 
 
+def test_governed_evidence_uses_ckp_vector_candidates(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    item = KnowledgeItem(
+        title="Vector CKP evidence",
+        content="Beam search keeps several candidate sequences.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.flush()
+    parent = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Beam search keeps several candidate sequences.",
+        chunk_type="parent",
+    )
+    session.add(parent)
+    session.flush()
+    child = KnowledgeChunk(
+        item_id=item.id,
+        parent_id=parent.id,
+        chunk_text="Beam search keeps several candidate sequences.",
+        chunk_type="child",
+        chunk_index=0,
+    )
+    ckp = CanonicalKnowledgePoint(
+        title="Sequence decoding strategy",
+        canonical_type="topic",
+        canonical_statement="Decoding strategies maintain candidate sequences.",
+        summary="Beam search evidence.",
+        keywords=["decoding"],
+        concepts=["sequence"],
+        user_id="default-user",
+        confidence=0.9,
+    )
+    session.add_all([child, ckp])
+    session.flush()
+    ckp_id = ckp.id
+    parent_id = parent.id
+    child_id = child.id
+    pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=parent.id,
+        unit_type="claim",
+        statement="Beam search keeps several candidate sequences.",
+        normalized_statement="beam search keeps several candidate sequences",
+        normalized_statement_hash="beam-search-hash",
+        evidence_span="Beam search keeps several candidate sequences.",
+        keywords=["beam", "search"],
+        user_id="default-user",
+        confidence=0.8,
+    )
+    session.add(pku)
+    session.flush()
+    session.add(
+        PKUCanonicalLink(
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+            role="evidence",
+            confidence=0.7,
+            user_id="default-user",
+        )
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+    monkeypatch.setattr(governed_tool, "search_ckp_vectors", lambda **kwargs: [{"ckp_id": ckp_id, "score": 0.92}])
+    monkeypatch.setattr(governed_tool, "search_pku_vectors", lambda **kwargs: [])
+
+    _terms, bundles, _knowledge = governed_tool._query_governed_evidence("beam search candidates", limit=5)
+
+    assert bundles[0]["canonical_id"] == ckp_id
+    assert bundles[0]["retrieval_mode"] == "governed_evidence"
+    assert bundles[0]["raw_sources"][0]["chunk_id"] == parent_id
+    assert bundles[0]["expanded_sources"][0]["chunk_id"] == child_id
+
+
+def test_governed_evidence_falls_back_to_lexical_when_vector_search_fails(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    item = KnowledgeItem(
+        title="Metadata filter reference",
+        content="Metadata filter can restrict retrieval results by source or project.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.flush()
+    chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Metadata filter can restrict retrieval results by source or project.",
+        chunk_type="parent",
+    )
+    ckp = CanonicalKnowledgePoint(
+        title="Metadata filter retrieval",
+        canonical_type="claim",
+        canonical_statement="Metadata filters restrict retrieval results.",
+        summary="Metadata filters scope retrieval.",
+        keywords=["metadata", "filter", "retrieval"],
+        concepts=["metadata filter"],
+        user_id="default-user",
+        confidence=0.86,
+    )
+    session.add_all([chunk, ckp])
+    session.flush()
+    ckp_id = ckp.id
+    pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=chunk.id,
+        unit_type="claim",
+        statement="Metadata filter can restrict retrieval results by source or project.",
+        normalized_statement="metadata filter restricts retrieval results by source or project",
+        normalized_statement_hash="metadata-filter-hash",
+        evidence_span="Metadata filter can restrict retrieval results by source or project.",
+        keywords=["metadata", "filter"],
+        user_id="default-user",
+        confidence=0.8,
+    )
+    session.add(pku)
+    session.flush()
+    session.add(
+        PKUCanonicalLink(
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+            role="evidence",
+            confidence=0.8,
+            user_id="default-user",
+        )
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+
+    def fail_vector_search(**kwargs):
+        raise RuntimeError("milvus down")
+
+    monkeypatch.setattr(governed_tool, "search_ckp_vectors", fail_vector_search)
+    monkeypatch.setattr(governed_tool, "search_pku_vectors", lambda **kwargs: [])
+
+    _terms, bundles, _knowledge = governed_tool._query_governed_evidence("metadata filter", limit=5)
+
+    assert bundles[0]["canonical_id"] == ckp_id
+    assert bundles[0]["retrieval_mode"] == "governed_evidence"
+
+
+def test_governed_evidence_reranks_linked_pkus_by_query_relevance(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    item = KnowledgeItem(
+        title="C++ storage rules",
+        content="Database table storage engine must use InnoDB.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.flush()
+    general_parent = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="General coding guideline.",
+        chunk_type="parent",
+    )
+    relevant_parent = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Database table storage engine must use InnoDB.",
+        chunk_type="parent",
+    )
+    session.add_all([general_parent, relevant_parent])
+    session.flush()
+    relevant_child = KnowledgeChunk(
+        item_id=item.id,
+        parent_id=relevant_parent.id,
+        chunk_text="Database table storage engine must use InnoDB.",
+        chunk_type="child",
+        chunk_index=0,
+    )
+    ckp = CanonicalKnowledgePoint(
+        title="C++ database table storage rules",
+        canonical_type="claim",
+        canonical_statement="Database tables follow storage engine rules.",
+        summary="Database table storage engine rules.",
+        keywords=["database", "storage", "engine"],
+        concepts=["database"],
+        user_id="default-user",
+        confidence=0.9,
+    )
+    session.add_all([relevant_child, ckp])
+    session.flush()
+    general_pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=general_parent.id,
+        unit_type="claim",
+        statement="General coding guideline.",
+        normalized_statement="general coding guideline",
+        normalized_statement_hash="general-guideline-hash",
+        evidence_span="General coding guideline.",
+        keywords=["coding"],
+        user_id="default-user",
+        confidence=0.95,
+    )
+    relevant_pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=relevant_parent.id,
+        unit_type="claim",
+        statement="Database table storage engine must use InnoDB.",
+        normalized_statement="database table storage engine must use innodb",
+        normalized_statement_hash="innodb-hash",
+        evidence_span="Database table storage engine must use InnoDB.",
+        keywords=["database", "storage", "engine", "innodb"],
+        user_id="default-user",
+        confidence=0.6,
+    )
+    session.add_all([general_pku, relevant_pku])
+    session.flush()
+    relevant_pku_id = relevant_pku.id
+    relevant_parent_id = relevant_parent.id
+    relevant_child_id = relevant_child.id
+    session.add_all(
+        [
+            PKUCanonicalLink(
+                pku_id=general_pku.id,
+                canonical_id=ckp.id,
+                relation_type="about",
+                role="high_confidence_irrelevant",
+                confidence=0.95,
+                user_id="default-user",
+            ),
+            PKUCanonicalLink(
+                pku_id=relevant_pku.id,
+                canonical_id=ckp.id,
+                relation_type="about",
+                role="lower_confidence_relevant",
+                confidence=0.6,
+                user_id="default-user",
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+    monkeypatch.setattr(governed_tool, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(governed_tool, "search_pku_vectors", lambda **kwargs: [])
+
+    _terms, bundles, _knowledge = governed_tool._query_governed_evidence("database storage engine innodb", limit=5)
+
+    bundle = bundles[0]
+    assert bundle["linked_pkus"][0]["pku_id"] == relevant_pku_id
+    assert bundle["raw_sources"][0]["chunk_id"] == relevant_parent_id
+    assert bundle["raw_sources"][0]["score"] == bundle["linked_pkus"][0]["evidence_score"]
+    assert bundle["raw_sources"][1]["score"] == bundle["linked_pkus"][1]["evidence_score"]
+    assert bundle["expanded_sources"][0]["source_kind"] == "document_chunk"
+    assert bundle["expanded_sources"][0]["chunk_type"] == "child"
+    assert bundle["expanded_sources"][0]["parent_chunk_id"] == relevant_parent_id
+    assert bundle["expanded_sources"][0]["chunk_id"] == relevant_child_id
+
+
+def test_governed_evidence_recalls_ckp_from_matching_pku_text(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    item = KnowledgeItem(
+        title="Fine grained evidence",
+        content="The minimum viable text classification dataset contains 200 samples.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.flush()
+    parent = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="The minimum viable text classification dataset contains 200 samples.",
+        chunk_type="parent",
+    )
+    session.add(parent)
+    session.flush()
+    child = KnowledgeChunk(
+        item_id=item.id,
+        parent_id=parent.id,
+        chunk_text="The minimum viable text classification dataset contains 200 samples.",
+        chunk_type="child",
+        chunk_index=0,
+    )
+    ckp = CanonicalKnowledgePoint(
+        title="Model adaptation data planning",
+        canonical_type="topic",
+        canonical_statement="Training data planning should match the task.",
+        summary="General guidance about data planning.",
+        keywords=["planning"],
+        concepts=["adaptation"],
+        user_id="default-user",
+        confidence=0.7,
+    )
+    session.add_all([child, ckp])
+    session.flush()
+    ckp_id = ckp.id
+    child_id = child.id
+    pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=parent.id,
+        unit_type="claim",
+        statement="The minimum viable text classification dataset contains 200 samples.",
+        normalized_statement="minimum viable text classification dataset contains 200 samples",
+        normalized_statement_hash="text-classification-200",
+        evidence_span="minimum viable text classification dataset contains 200 samples",
+        keywords=["text", "classification", "dataset", "samples"],
+        user_id="default-user",
+        confidence=0.9,
+    )
+    session.add(pku)
+    session.flush()
+    session.add(
+        PKUCanonicalLink(
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+            role="fine_grained_evidence",
+            confidence=0.8,
+            user_id="default-user",
+        )
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+    monkeypatch.setattr(governed_tool, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(governed_tool, "search_pku_vectors", lambda **kwargs: [])
+
+    _terms, bundles, _knowledge = governed_tool._query_governed_evidence("text classification samples", limit=5)
+
+    assert bundles[0]["canonical_id"] == ckp_id
+    assert bundles[0]["expanded_sources"][0]["chunk_id"] == child_id
+
+
+def test_governed_evidence_uses_pku_vector_hits_to_recall_ckp(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    item = KnowledgeItem(
+        title="Quiet source",
+        content="The source uses terminology that does not overlap the query.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.flush()
+    parent = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="The source uses terminology that does not overlap the query.",
+        chunk_type="parent",
+    )
+    session.add(parent)
+    session.flush()
+    child = KnowledgeChunk(
+        item_id=item.id,
+        parent_id=parent.id,
+        chunk_text="The source uses terminology that does not overlap the query.",
+        chunk_type="child",
+        chunk_index=0,
+    )
+    ckp = CanonicalKnowledgePoint(
+        title="Quiet canonical point",
+        canonical_type="topic",
+        canonical_statement="This canonical point has no lexical overlap.",
+        summary="No lexical overlap here.",
+        keywords=["quiet"],
+        concepts=["quiet"],
+        user_id="default-user",
+        confidence=0.7,
+    )
+    session.add_all([child, ckp])
+    session.flush()
+    pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=parent.id,
+        unit_type="claim",
+        statement="The source uses terminology that does not overlap the query.",
+        normalized_statement="source terminology without query overlap",
+        normalized_statement_hash="pku-vector-only",
+        evidence_span="The source uses terminology that does not overlap the query.",
+        keywords=["quiet"],
+        user_id="default-user",
+        confidence=0.8,
+    )
+    session.add(pku)
+    session.flush()
+    ckp_id = ckp.id
+    pku_id = pku.id
+    child_id = child.id
+    session.add(
+        PKUCanonicalLink(
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+            role="vector_only_evidence",
+            confidence=0.7,
+            user_id="default-user",
+        )
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+    monkeypatch.setattr(governed_tool, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(governed_tool, "search_pku_vectors", lambda **kwargs: [{"pku_id": pku_id, "score": 0.93}])
+
+    _terms, bundles, _knowledge = governed_tool._query_governed_evidence("needle phrase only vector knows", limit=5)
+
+    assert bundles[0]["canonical_id"] == ckp_id
+    assert bundles[0]["linked_pkus"][0]["pku_id"] == pku_id
+    assert bundles[0]["linked_pkus"][0]["pku_vector_score"] == 0.93
+    assert "pku_vector" in " ".join(bundles[0]["match_reasons"])
+    assert bundles[0]["expanded_sources"][0]["chunk_id"] == child_id
+
+
+def test_governed_evidence_degrades_when_pku_vector_search_fails(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    item = KnowledgeItem(
+        title="Metadata filter reference",
+        content="Metadata filter can restrict retrieval results by source or project.",
+        source_type="manual",
+        user_id="default-user",
+    )
+    session.add(item)
+    session.flush()
+    chunk = KnowledgeChunk(
+        item_id=item.id,
+        chunk_text="Metadata filter can restrict retrieval results by source or project.",
+        chunk_type="parent",
+    )
+    ckp = CanonicalKnowledgePoint(
+        title="Metadata filter retrieval",
+        canonical_type="claim",
+        canonical_statement="Metadata filters restrict retrieval results.",
+        summary="Metadata filters scope retrieval.",
+        keywords=["metadata", "filter", "retrieval"],
+        concepts=["metadata filter"],
+        user_id="default-user",
+        confidence=0.86,
+    )
+    session.add_all([chunk, ckp])
+    session.flush()
+    ckp_id = ckp.id
+    pku = PersonalKnowledgeUnit(
+        source_kind="document_chunk",
+        source_id=chunk.id,
+        unit_type="claim",
+        statement="Metadata filter can restrict retrieval results by source or project.",
+        normalized_statement="metadata filter restricts retrieval results by source or project",
+        normalized_statement_hash="metadata-filter-pku-vector-fail",
+        evidence_span="Metadata filter can restrict retrieval results by source or project.",
+        keywords=["metadata", "filter"],
+        user_id="default-user",
+        confidence=0.8,
+    )
+    session.add(pku)
+    session.flush()
+    session.add(
+        PKUCanonicalLink(
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="about",
+            role="evidence",
+            confidence=0.8,
+            user_id="default-user",
+        )
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(governed_tool, "_Session", Session)
+    monkeypatch.setattr(governed_tool, "search_ckp_vectors", lambda **kwargs: [])
+
+    def fail_pku_vector_search(**kwargs):
+        raise RuntimeError("pku vector service unavailable")
+
+    monkeypatch.setattr(governed_tool, "search_pku_vectors", fail_pku_vector_search)
+
+    _terms, bundles, _knowledge = governed_tool._query_governed_evidence("metadata filter", limit=5)
+
+    assert bundles[0]["canonical_id"] == ckp_id
+    assert bundles[0]["retrieval_mode"] == "governed_evidence"
+
+
 def test_knowledge_material_search_backtracks_from_pku_to_source_materials(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)

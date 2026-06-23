@@ -29,6 +29,7 @@ from backend.app.prompts.asset_parse import (
     build_document_chunk_pku_extraction_messages,
 )
 from backend.app.services.ckp_vectors import search_ckp_vectors, upsert_ckp_vector
+from backend.app.services.pku_vectors import upsert_pku_vector
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -1097,6 +1098,20 @@ def _refresh_ckp_vector(ckp: CanonicalKnowledgePoint) -> None:
         ckp.embedding_status = "pending"
 
 
+def _refresh_pku_vector(pku: PersonalKnowledgeUnit) -> None:
+    try:
+        embedding_ref = upsert_pku_vector(pku)
+    except Exception:
+        pku.embedding_status = "failed"
+        return
+    if embedding_ref:
+        pku.embedding_ref = embedding_ref
+        pku.embedding_model = settings.EMBEDDING_MODEL
+        pku.embedding_status = "done"
+    else:
+        pku.embedding_status = "pending"
+
+
 def _create_or_get_asset_pku(
     db: Session,
     *,
@@ -1140,6 +1155,7 @@ def _create_or_get_asset_pku(
     )
     db.add(pku)
     db.flush()
+    _refresh_pku_vector(pku)
     return pku
 
 
@@ -1192,6 +1208,7 @@ def _create_or_get_asset_unit_pku(
     )
     db.add(pku)
     db.flush()
+    _refresh_pku_vector(pku)
     return pku
 
 
@@ -2015,6 +2032,7 @@ def _create_or_get_document_pku_from_extracted(
     )
     db.add(pku)
     db.flush()
+    _refresh_pku_vector(pku)
     return pku
 
 

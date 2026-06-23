@@ -761,6 +761,7 @@ def test_asset_unit_settlement_persists_multiple_llm_pkus(db_session, monkeypatc
             llm_model="qwen-plus",
         ),
     )
+    monkeypatch.setattr(kg, "upsert_pku_vector", lambda pku: f"pku:{pku.id}")
 
     result = kg.settle_personal_asset_unit_to_governance(db_session, unit)
     db_session.commit()
@@ -770,6 +771,9 @@ def test_asset_unit_settlement_persists_multiple_llm_pkus(db_session, monkeypatc
     assert len(pkus) == 2
     assert {pku.unit_type for pku in pkus} == {"method", "rule"}
     assert {pku.llm_model for pku in pkus} == {"qwen-plus"}
+    assert {pku.embedding_ref for pku in pkus} == {f"pku:{pku.id}" for pku in pkus}
+    assert {pku.embedding_model for pku in pkus} == {kg.settings.EMBEDDING_MODEL}
+    assert {pku.embedding_status for pku in pkus} == {"done"}
 
 
 def test_asset_unit_settlement_falls_back_to_summary_when_llm_empty(db_session, monkeypatch, caplog):
