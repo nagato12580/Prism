@@ -1,11 +1,14 @@
 # prism/backend/app/api/assets.py
 import json
+import os
 import re
+import uuid
 from collections import Counter
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from openai import OpenAI
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -485,6 +488,117 @@ def create_asset_item(payload: PersonalAssetItemCreate, db: Session = Depends(ge
         raw_author=payload.raw_author or "",
         raw_tags=payload.raw_tags,
         raw_metadata=payload.raw_metadata,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Voice-to-asset-item
+# ---------------------------------------------------------------------------
+
+AUDIO_UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "voice"
+AUDIO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".webm", ".m4a", ".aac"}
+_MAX_AUDIO_SIZE_MB = 25
+_MAX_AUDIO_SIZE_BYTES = _MAX_AUDIO_SIZE_MB * 1024 * 1024
+
+
+def _validate_audio_format(filename: str, content_type: str | None) -> str:
+    """Validate audio file extension and return lowercase extension.
+
+    Raises HTTPException(400) on unsupported format.
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+    # Fallback: try to infer extension from MIME type
+    mime_to_ext = {
+        "audio/webm": ".webm",
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/wav": ".wav",
+        "audio/wave": ".wav",
+        "audio/x-m4a": ".m4a",
+        "audio/mp4": ".m4a",
+        "audio/aac": ".aac",
+    }
+    if ext not in _ALLOWED_AUDIO_EXTENSIONS and content_type:
+        ext = mime_to_ext.get(content_type, ext)
+    if ext not in _ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "unsupported_audio_format",
+                "message": f"不支持的音频格式：{ext or '未知'}，支持 mp3/wav/webm/m4a/aac",
+            },
+        )
+    return ext
+
+
+@router.post("/voice", response_model=PersonalAssetItemOut, status_code=201)
+async def voice_to_asset_item(
+    audio_file: UploadFile = File(...),
+    source_type: str = Form("recording"),
+    db: Session = Depends(get_db),
+):
+    """语音转写并创建资产碎片。
+
+    接收音频文件，通过 DashScope ASR 转写为文字，然后走
+    _create_asset_item_from_raw() 进行 AI 解析并放入收件箱。
+    """
+    # 1) 验证文件大小（读入内存校验）
+    audio_bytes = await audio_file.read()
+    if len(audio_bytes) > _MAX_AUDIO_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "file_too_large",
+                "message": f"音频文件不能超过 {_MAX_AUDIO_SIZE_MB}MB",
+            },
+        )
+
+    # 2) 验证格式
+    ext = _validate_audio_format(audio_file.filename or "", audio_file.content_type)
+
+    # 3) 保存到本地
+    audio_name = f"{uuid.uuid4().hex}{ext}"
+    audio_path = AUDIO_UPLOAD_DIR / audio_name
+    audio_path.write_bytes(audio_bytes)
+
+    # 4) 调用 ASR 转写
+    from ..services.asr import transcribe, ASRError
+
+    try:
+        text = await transcribe(
+            provider=settings.ASR_PROVIDER,
+            api_key=settings.ASR_API_KEY,
+            model=settings.ASR_MODEL,
+            audio_path=str(audio_path),
+        )
+    except ASRError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "asr_failed", "message": str(exc)},
+        ) from exc
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "no_speech_detected",
+                "message": "未检测到语音内容，请重新录制",
+            },
+        )
+
+    # 5) 走现有资产创建管线
+    return _create_asset_item_from_raw(
+        db=db,
+        raw_text=text.strip(),
+        raw_source_type="voice",
+        raw_source_platform=source_type,  # "recording" or "upload"
+        raw_metadata={
+            "audio_path": str(audio_path.relative_to(AUDIO_UPLOAD_DIR.parent)),
+            "audio_filename": audio_file.filename,
+            "audio_content_type": audio_file.content_type,
+            "audio_size_bytes": len(audio_bytes),
+        },
     )
 
 
