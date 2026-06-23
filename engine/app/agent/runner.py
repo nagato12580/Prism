@@ -21,6 +21,7 @@ from .events import (
     tool_result_event,
 )
 from .prompts import AGENT_SYSTEM_PROMPT
+from .active_recall import recall_memory_context
 from ..observability import logger, quoted
 
 
@@ -295,6 +296,13 @@ class LangChainAgentRunner:
 
     def _build_messages(self, query: str, history: list[dict[str, Any]]) -> list[Any]:
         messages: list[Any] = [SystemMessage(content=self.system_prompt)]
+        try:
+            recall_block = recall_memory_context(query)
+            if recall_block:
+                messages.append(SystemMessage(content=recall_block))
+                logger.info("[agent] active_recall injected chars=%s", len(recall_block))
+        except Exception as exc:
+            logger.warning("[agent] active_recall failed (ignored): %s", quoted(str(exc), limit=200))
         for item in history:
             role = item.get("role")
             content = item.get("content", "")
