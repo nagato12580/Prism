@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Brain, CircleDot, Loader2, RefreshCw, ShieldCheck, Sparkles, Target } from 'lucide-react'
-import { memoryApi, type MemoryEntry } from '@/app/api'
+import { Brain, CircleDot, Loader2, MessageSquareText, Package, RefreshCw, ShieldCheck, Sparkles, Target } from 'lucide-react'
+import { memoryApi, type MemoryStatement } from '@/app/api'
 import { cn } from '@/lib/utils'
-import { formatDate, getMemoryMeta, groupMemories, importantTags, memoryTypeMeta } from './memoryUtils'
+import { type MemoryView, entryToView, formatDate, getMemoryMeta, groupMemories, importantTags, memoryTypeMeta, statementToView } from './memoryUtils'
 
 export function UserProfilePage() {
-  const [memories, setMemories] = useState<MemoryEntry[]>([])
+  const [memories, setMemories] = useState<MemoryView[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -19,7 +19,15 @@ export function UserProfilePage() {
     setLoading(true)
     setError(null)
     try {
-      setMemories(await memoryApi.list({ limit: 160 }))
+      const [entries, statements] = await Promise.all([
+        memoryApi.list({ limit: 160 }),
+        memoryApi.listStatements({ limit: 200 }).catch(() => [] as MemoryStatement[]),
+      ])
+      const views = [
+        ...entries.map(entryToView),
+        ...statements.map(statementToView),
+      ].sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0))
+      setMemories(views)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -62,7 +70,7 @@ export function UserProfilePage() {
       {loading && memories.length === 0 ? (
         <EmptyState text="正在读取用户记忆。" />
       ) : memories.length === 0 ? (
-        <EmptyState text="还没有用户记忆。确认碎片时开启记忆写入后，这里会形成画像。" />
+        <EmptyState text="还没有用户记忆。确认碎片时开启记忆写入或从对话提取确认后，这里会形成画像。" />
       ) : (
         <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
           <aside className="space-y-3">
@@ -117,7 +125,7 @@ export function UserProfilePage() {
   )
 }
 
-function MemorySection({ type, items }: { type: string; items: MemoryEntry[] }) {
+function MemorySection({ type, items }: { type: string; items: MemoryView[] }) {
   const meta = getMemoryMeta(type)
   return (
     <section className="min-h-[16rem] rounded-lg border border-[var(--prism-line)] bg-white p-3">
@@ -140,7 +148,7 @@ function MemorySection({ type, items }: { type: string; items: MemoryEntry[] }) 
   )
 }
 
-function MemoryCard({ item, featured = false }: { item: MemoryEntry; featured?: boolean }) {
+function MemoryCard({ item, featured = false }: { item: MemoryView; featured?: boolean }) {
   const meta = getMemoryMeta(item.memory_type)
   return (
     <article className={cn('rounded-lg border bg-white p-3', featured ? 'border-blue-100' : 'border-slate-100')}>
@@ -155,6 +163,10 @@ function MemoryCard({ item, featured = false }: { item: MemoryEntry; featured?: 
         <span className="inline-flex items-center gap-1">
           <CircleDot size={10} />
           {item.category || meta.label}
+        </span>
+        <span className="inline-flex items-center gap-1" title={item.origin === 'conversation' ? '对话提取记忆' : '资产沉淀记忆'}>
+          {item.origin === 'conversation' ? <MessageSquareText size={10} /> : <Package size={10} />}
+          {item.origin === 'conversation' ? '对话' : '资产'}
         </span>
         <span>{formatDate(item.updated_at)}</span>
       </div>

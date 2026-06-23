@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BrainCircuit, Loader2, RefreshCw, Search } from 'lucide-react'
-import { memoryApi, type MemoryEntry } from '@/app/api'
+import { memoryApi, type MemoryStatement } from '@/app/api'
 import { cn } from '@/lib/utils'
-import { formatDate, getMemoryMeta, groupMemories, memoryTypeMeta } from './memoryUtils'
+import { type MemoryView, entryToView, formatDate, getMemoryMeta, groupMemories, memoryTypeMeta, statementToView } from './memoryUtils'
 
 type GraphNode = {
   id: string
@@ -10,13 +10,13 @@ type GraphNode = {
   kind: 'self' | 'type' | 'memory'
   x: number
   y: number
-  item?: MemoryEntry
+  item?: MemoryView
 }
 
 type GraphEdge = { from: string; to: string }
 
 export function MemoryGraphPage() {
-  const [memories, setMemories] = useState<MemoryEntry[]>([])
+  const [memories, setMemories] = useState<MemoryView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -37,9 +37,16 @@ export function MemoryGraphPage() {
     setLoading(true)
     setError(null)
     try {
-      const next = await memoryApi.list({ limit: 180 })
-      setMemories(next)
-      setSelectedId((current) => (current && next.some((item) => item.id === current) ? current : next[0]?.id ?? null))
+      const [entries, statements] = await Promise.all([
+        memoryApi.list({ limit: 180 }),
+        memoryApi.listStatements({ limit: 200 }).catch(() => [] as MemoryStatement[]),
+      ])
+      const views = [
+        ...entries.map(entryToView),
+        ...statements.map(statementToView),
+      ].sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0))
+      setMemories(views)
+      setSelectedId((current) => (current && views.some((item) => item.id === current) ? current : views[0]?.id ?? null))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -149,7 +156,7 @@ export function MemoryGraphPage() {
   )
 }
 
-function buildGraph(items: MemoryEntry[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+function buildGraph(items: MemoryView[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const groups = groupMemories(items)
   const typeOrder = Object.keys(memoryTypeMeta).filter((type) => groups[type]?.length)
   const nodes: GraphNode[] = [{ id: 'self', label: '用户', kind: 'self', x: 490, y: 310 }]
@@ -228,7 +235,7 @@ function GraphNodeShape({ node, active, onSelect }: { node: GraphNode; active: b
   )
 }
 
-function MemoryDetail({ item }: { item: MemoryEntry }) {
+function MemoryDetail({ item }: { item: MemoryView }) {
   const meta = getMemoryMeta(item.memory_type)
   return (
     <article className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
@@ -248,7 +255,7 @@ function MemoryDetail({ item }: { item: MemoryEntry }) {
   )
 }
 
-function RelationList({ selected, items }: { selected: MemoryEntry; items: MemoryEntry[] }) {
+function RelationList({ selected, items }: { selected: MemoryView; items: MemoryView[] }) {
   const related = items
     .filter((item) => item.id !== selected.id)
     .map((item) => ({

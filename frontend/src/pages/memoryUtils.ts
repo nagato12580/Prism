@@ -1,25 +1,66 @@
-import type { MemoryEntry } from '@/app/api'
+import type { MemoryEntry, MemoryStatement } from '@/app/api'
+
+export interface MemoryView {
+  id: string
+  title: string
+  content: string
+  memory_type: string
+  category: string
+  tags: string[]
+  importance: number
+  updated_at: string
+  origin: 'asset' | 'conversation'
+}
 
 export const memoryTypeMeta: Record<string, { label: string; tone: string; short: string }> = {
   preference: { label: '偏好', short: 'P', tone: 'border-blue-100 bg-blue-50 text-blue-700' },
   goal: { label: '目标', short: 'G', tone: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
   fact: { label: '事实', short: 'F', tone: 'border-violet-100 bg-violet-50 text-violet-700' },
   context: { label: '上下文', short: 'C', tone: 'border-amber-100 bg-amber-50 text-amber-700' },
+  habit: { label: '习惯', short: 'H', tone: 'border-cyan-100 bg-cyan-50 text-cyan-700' },
 }
 
 export function getMemoryMeta(type: string) {
   return memoryTypeMeta[type] ?? { label: type || '记忆', short: 'M', tone: 'border-slate-200 bg-slate-100 text-slate-600' }
 }
 
-export function groupMemories(items: MemoryEntry[]) {
-  return items.reduce<Record<string, MemoryEntry[]>>((groups, item) => {
+export function entryToView(item: MemoryEntry): MemoryView {
+  return {
+    id: item.id,
+    title: item.title,
+    content: item.content,
+    memory_type: item.memory_type || 'context',
+    category: item.category,
+    tags: item.tags ?? [],
+    importance: Number(item.importance || 0),
+    updated_at: item.updated_at,
+    origin: 'asset',
+  }
+}
+
+export function statementToView(item: MemoryStatement): MemoryView {
+  return {
+    id: item.id,
+    title: item.content.slice(0, 80),
+    content: item.content,
+    memory_type: item.statement_type || 'fact',
+    category: item.temporal_type || '',
+    tags: [],
+    importance: Number(item.importance || 0),
+    updated_at: item.updated_at,
+    origin: 'conversation',
+  }
+}
+
+export function groupMemories(items: MemoryView[]) {
+  return items.reduce<Record<string, MemoryView[]>>((groups, item) => {
     const key = item.memory_type || 'context'
     groups[key] = [...(groups[key] ?? []), item]
     return groups
   }, {})
 }
 
-export function importantTags(items: MemoryEntry[], limit = 8) {
+export function importantTags(items: MemoryView[], limit = 8) {
   const counts = new Map<string, number>()
   for (const item of items) {
     for (const tag of item.tags ?? []) {
