@@ -729,6 +729,16 @@ export const assetApi = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
+  createVoice: async (
+    audio: Blob,
+    filename: string,
+    sourceType: 'recording' | 'upload' = 'recording',
+  ): Promise<AssetDraft> => {
+    const form = new FormData()
+    form.append('audio_file', audio, filename)
+    form.append('source_type', sourceType)
+    return uploadRequest<AssetDraft>('/assets/voice', form)
+  },
 }
 
 // ── Knowledge governance graph ───────────────────────────────
