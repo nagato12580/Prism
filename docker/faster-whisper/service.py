@@ -60,6 +60,10 @@ async def transcribe_endpoint(file: UploadFile = File(...)):
         )
         text = "".join(seg.text for seg in segments).strip()
         return {"text": text}
+    except ValueError:
+        # faster-whisper language detection fails on silence/very short audio
+        # (max() on empty detection scores). Return empty text.
+        return {"text": ""}
     finally:
         os.unlink(tmp_path)
 
