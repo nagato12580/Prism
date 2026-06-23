@@ -95,7 +95,11 @@ async def _transcribe_dashscope(
         )
         if resp.status_code in (401, 403):
             raise ASRError("ASR 模型 API Key 无效或无权限")
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise ASRError(f"ASR 服务请求失败（HTTP {e.response.status_code}），请稍后重试") from e
         task_id = (resp.json().get("output") or {}).get("task_id")
         if not task_id:
             raise ASRError("ASR 任务提交失败，请稍后重试")
@@ -108,7 +112,11 @@ async def _transcribe_dashscope(
                 task_url,
                 headers={"Authorization": f"Bearer {api_key}"},
             )
-            poll.raise_for_status()
+            if poll.status_code >= 400:
+                try:
+                    poll.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    raise ASRError(f"ASR 服务请求失败（HTTP {e.response.status_code}），请稍后重试") from e
             output = poll.json().get("output") or {}
             status = output.get("task_status")
             if status == "SUCCEEDED":
@@ -116,7 +124,7 @@ async def _transcribe_dashscope(
             if status in ("FAILED", "CANCELED"):
                 msg = output.get("message") or "识别失败"
                 raise ASRError(f"语音识别失败：{msg}")
-        raise ASRError("语音识别超时，请重试或缩短录音")
+        raise ASRError("语音识别超时，请稍后重试")
 
 
 async def _extract_dashscope_text(
@@ -136,7 +144,11 @@ async def _extract_dashscope_text(
         if not url:
             continue
         r = await client.get(url, timeout=20)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise ASRError(f"ASR 服务请求失败（HTTP {e.response.status_code}），请稍后重试") from e
         data = r.json()
         for t in data.get("transcripts") or []:
             txt = (t.get("text") or "").strip()

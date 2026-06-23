@@ -173,3 +173,124 @@ class TestTranscribeDashScope:
                 audio_path="/tmp/test.webm",
             )
         assert "暂不支持的 ASR 服务商" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_transcribe_auth_failed(self, monkeypatch):
+        """Mock 401 response, verify ASRError with API Key 无效."""
+        from backend.app.services.asr import transcribe, ASRError
+
+        submit_response = MagicMock()
+        submit_response.status_code = 401
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = submit_response
+
+        monkeypatch.setattr(
+            "backend.app.services.asr.httpx.AsyncClient",
+            lambda **kwargs: mock_client,
+        )
+
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
+            tf.write(b"fake audio data")
+            tmp_path = tf.name
+
+        try:
+            with pytest.raises(ASRError) as exc_info:
+                await transcribe(
+                    provider="dashscope",
+                    api_key="sk-bad-key",
+                    model="paraformer-v2",
+                    audio_path=tmp_path,
+                )
+            assert "API Key 无效" in str(exc_info.value)
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_transcribe_poll_timeout(self, monkeypatch):
+        """Mock all polls return PENDING, verify ASRError with 语音识别超时."""
+        from backend.app.services.asr import transcribe, ASRError
+
+        submit_response = MagicMock()
+        submit_response.status_code = 200
+        submit_response.json.return_value = {"output": {"task_id": "task-timeout"}}
+
+        poll_pending = MagicMock()
+        poll_pending.status_code = 200
+        poll_pending.json.return_value = {
+            "output": {"task_status": "PENDING"}
+        }
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = submit_response
+        mock_client.get.return_value = poll_pending
+
+        monkeypatch.setattr(
+            "backend.app.services.asr.httpx.AsyncClient",
+            lambda **kwargs: mock_client,
+        )
+
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
+            tf.write(b"fake audio data")
+            tmp_path = tf.name
+
+        try:
+            with pytest.raises(ASRError) as exc_info:
+                await transcribe(
+                    provider="dashscope",
+                    api_key="sk-test-key",
+                    model="paraformer-v2",
+                    audio_path=tmp_path,
+                )
+            assert "语音识别超时" in str(exc_info.value)
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_transcribe_task_cancelled(self, monkeypatch):
+        """Mock poll returns CANCELED status, verify ASRError."""
+        from backend.app.services.asr import transcribe, ASRError
+
+        submit_response = MagicMock()
+        submit_response.status_code = 200
+        submit_response.json.return_value = {"output": {"task_id": "task-cancel"}}
+
+        poll_cancelled = MagicMock()
+        poll_cancelled.status_code = 200
+        poll_cancelled.json.return_value = {
+            "output": {
+                "task_status": "CANCELED",
+                "message": "Task cancelled by user",
+            }
+        }
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = submit_response
+        mock_client.get.return_value = poll_cancelled
+
+        monkeypatch.setattr(
+            "backend.app.services.asr.httpx.AsyncClient",
+            lambda **kwargs: mock_client,
+        )
+
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tf:
+            tf.write(b"fake audio data")
+            tmp_path = tf.name
+
+        try:
+            with pytest.raises(ASRError) as exc_info:
+                await transcribe(
+                    provider="dashscope",
+                    api_key="sk-test-key",
+                    model="paraformer-v2",
+                    audio_path=tmp_path,
+                )
+            assert "语音识别失败" in str(exc_info.value)
+        finally:
+            os.unlink(tmp_path)
