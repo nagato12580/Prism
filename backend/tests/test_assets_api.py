@@ -72,6 +72,28 @@ def test_asset_draft_can_be_edited_and_confirmed_to_personal_asset(client, monke
     assert assets[0]["title"] == "Agent tool registry reference"
 
 
+def test_confirm_asset_with_create_memory_maps_kind_to_memory_type(client, monkeypatch):
+    monkeypatch.setattr("backend.app.api.assets._ai_parse_asset", lambda **kwargs: None)
+
+    draft = client.post(
+        "/api/v1/assets/drafts",
+        json={"content": "The user wants to ship Prism v2 by August.", "title": "Ship Prism v2"},
+    ).json()
+    client.put(
+        f"/api/v1/assets/drafts/{draft['id']}",
+        json={"title": "Ship Prism v2", "asset_kind": "goal", "summary": "User goal: ship Prism v2."},
+    )
+
+    response = client.post(f"/api/v1/assets/drafts/{draft['id']}/confirm", json={"create_memory": True})
+
+    assert response.status_code == 200
+    memories = client.get("/api/v1/memories").json()
+    assert len(memories) == 1
+    assert memories[0]["title"] == "Ship Prism v2"
+    assert memories[0]["memory_type"] == "goal"
+    assert memories[0]["source_review_id"] == draft["id"]
+
+
 def test_asset_overview_groups_confirmed_assets(client, monkeypatch):
     monkeypatch.setattr("backend.app.api.assets._ai_parse_asset", lambda **kwargs: None)
 

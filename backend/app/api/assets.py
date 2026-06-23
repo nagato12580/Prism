@@ -70,6 +70,18 @@ def _clean_dict_list(value: Any) -> list[dict[str, Any]]:
     return result
 
 
+_MEMORY_TYPE_BY_KIND = {
+    "preference": "preference",
+    "goal": "goal",
+    "fact": "fact",
+}
+
+
+def _memory_type_from_kind(asset_kind: str | None) -> str:
+    normalized = (asset_kind or "").strip().lower()
+    return _MEMORY_TYPE_BY_KIND.get(normalized, "context")
+
+
 def _merge_confirmed_extensions(
     current: Any,
     confirmed: list[dict[str, Any]],
@@ -595,7 +607,7 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
                 user_id=DEFAULT_USER_ID,
                 title=item.title,
                 content=item.summary or item.raw_text,
-                memory_type="context",
+                memory_type=_memory_type_from_kind(item.asset_kind),
                 category=item.category,
                 tags=item.tags or [],
                 importance=max(0.6, float((item.confidence or {}).get("overall", 0.6) or 0.6)),
