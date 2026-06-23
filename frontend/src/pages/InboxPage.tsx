@@ -140,14 +140,18 @@ export function InboxPage() {
     }
   }
 
-  const confirmActive = async () => {
+  const confirmActive = async (opts: { create_memory: boolean }) => {
     if (!active) return
     setSaving(true)
     setError(null)
     try {
-      await assetApi.confirmItem(active.id)
+      await assetApi.confirmItem(active.id, { create_memory: opts.create_memory })
       removeItemFromList(active.id)
-      setNotice('已确认入库，碎片已进入资产层和知识治理层。')
+      setNotice(
+        opts.create_memory
+          ? '已确认入库，碎片已进入资产层、知识治理层并沉淀为长期记忆。'
+          : '已确认入库，碎片已进入资产层和知识治理层。',
+      )
     } catch (err) {
       setError(`确认失败：${getErrorMessage(err)}`)
     } finally {
@@ -302,7 +306,7 @@ function EditorPanel({
   item: AssetDraft | null
   saving: boolean
   onSave: (patch: Partial<AssetDraft>) => void
-  onConfirm: () => void
+  onConfirm: (opts: { create_memory: boolean }) => void
   onReject: () => void
 }) {
   const [title, setTitle] = useState('')
@@ -312,6 +316,7 @@ function EditorPanel({
   const [category, setCategory] = useState('')
   const [assetKind, setAssetKind] = useState('')
   const [tags, setTags] = useState('')
+  const [createMemory, setCreateMemory] = useState(false)
 
   useEffect(() => {
     setTitle(item?.title ?? '')
@@ -321,6 +326,7 @@ function EditorPanel({
     setCategory(item?.category ?? '')
     setAssetKind(item?.asset_kind ?? '')
     setTags(joinTags(item?.tags))
+    setCreateMemory((item?.asset_kind ?? '').trim().toLowerCase() === 'memory')
   }, [item?.id])
 
   if (!item) {
@@ -374,7 +380,7 @@ function EditorPanel({
           <button
             type="button"
             disabled={saving}
-            onClick={onConfirm}
+            onClick={() => onConfirm({ create_memory: createMemory })}
             className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-[var(--prism-blue)] px-2.5 text-xs font-medium text-white transition hover:brightness-95 disabled:opacity-50"
           >
             {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
@@ -383,10 +389,32 @@ function EditorPanel({
         </div>
       </div>
 
+      <div className="mb-4 flex items-center gap-2 border-b border-[var(--prism-line)] pb-4">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={createMemory}
+            onChange={(event) => setCreateMemory(event.target.checked)}
+            className="h-3.5 w-3.5 rounded border-[var(--prism-line)] text-[var(--prism-blue)] focus:ring-blue-100"
+          />
+          同时沉淀为长期记忆
+        </label>
+        {createMemory ? (
+          <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700">
+            确认后写入用户画像记忆
+          </span>
+        ) : null}
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="grid gap-3 2xl:grid-cols-2">
           <LabeledInput label="标题" value={title} onChange={setTitle} />
-          <LabeledInput label="类型" value={assetKind} onChange={setAssetKind} placeholder="idea/opinion/knowledge/resource" />
+          <LabeledInput
+            label="类型"
+            value={assetKind}
+            onChange={setAssetKind}
+            placeholder="idea/opinion/knowledge/resource/memory"
+          />
           <LabeledInput label="分类" value={category} onChange={setCategory} />
           <LabeledInput label="标签" value={tags} onChange={setTags} icon={<Tags size={15} />} />
         </div>
