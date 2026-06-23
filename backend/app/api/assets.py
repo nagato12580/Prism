@@ -19,6 +19,7 @@ from ..prompts.asset_parse import (
 from ..models.asset import AssetRelation, AssetUsageEvent, ExtensionPoint, PersonalAsset, PersonalAssetItem, PersonalAssetUnit
 from ..models.memory import MemoryEntry
 from ..services.knowledge_governance import GovernanceResult, settle_personal_asset_unit_to_governance
+from ..services.memory_context import recall_preference_context
 from ..services.memory_vectors import upsert_entry_vector
 from ..utils.time import local_now
 from ..schemas.asset import (
@@ -232,6 +233,7 @@ def _ai_parse_asset(
     source_type: str = "manual",
     source_platform: str = "",
     source_url: str = "",
+    user_preferences: str = "",
 ) -> dict[str, Any] | None:
     if not settings.LLM_API_BASE or not settings.LLM_API_KEY:
         return None
@@ -242,6 +244,7 @@ def _ai_parse_asset(
         source_type=source_type,
         source_platform=source_platform,
         source_url=source_url,
+        user_preferences=user_preferences,
     )
     try:
         resp = client.chat.completions.create(
@@ -431,12 +434,19 @@ def _create_asset_item_from_raw(
     if not raw_text:
         raise HTTPException(status_code=400, detail={"code": "empty_content", "message": "Content is required"})
 
+    user_preferences = ""
+    try:
+        user_preferences = recall_preference_context(db, raw_text)
+    except Exception:
+        user_preferences = ""
+
     parsed = _ai_parse_asset(
         content=raw_text,
         title=raw_title,
         source_type=raw_source_type,
         source_platform=raw_source_platform,
         source_url=raw_source_url,
+        user_preferences=user_preferences,
     )
     data = _normalize_parse(
         content=raw_text,
