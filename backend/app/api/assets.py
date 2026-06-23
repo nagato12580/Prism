@@ -19,6 +19,7 @@ from ..prompts.asset_parse import (
 from ..models.asset import AssetRelation, AssetUsageEvent, ExtensionPoint, PersonalAsset, PersonalAssetItem, PersonalAssetUnit
 from ..models.memory import MemoryEntry
 from ..services.knowledge_governance import GovernanceResult, settle_personal_asset_unit_to_governance
+from ..services.memory_vectors import upsert_entry_vector
 from ..utils.time import local_now
 from ..schemas.asset import (
     AssetConfirmRequest,
@@ -80,6 +81,20 @@ _MEMORY_TYPE_BY_KIND = {
 def _memory_type_from_kind(asset_kind: str | None) -> str:
     normalized = (asset_kind or "").strip().lower()
     return _MEMORY_TYPE_BY_KIND.get(normalized, "context")
+
+
+def _index_entry_vector(entry: MemoryEntry) -> None:
+    """资产沉淀记忆写入后建向量索引；失败不阻塞入库，仅标记 pending 供回填。"""
+    try:
+        vector_id = upsert_entry_vector(entry)
+    except Exception:
+        vector_id = ""
+    if vector_id:
+        entry.embedding_ref = vector_id
+        entry.embedding_model = settings.EMBEDDING_MODEL
+        entry.embedding_status = "done"
+    else:
+        entry.embedding_status = "pending"
 
 
 def _merge_confirmed_extensions(
@@ -601,25 +616,30 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
         confirmed_at=reviewed_at,
     )
 
+    memory_entry = None
     if payload.create_memory:
-        db.add(
-            MemoryEntry(
-                user_id=DEFAULT_USER_ID,
-                title=item.title,
-                content=item.summary or item.raw_text,
-                memory_type=_memory_type_from_kind(item.asset_kind),
-                category=item.category,
-                tags=item.tags or [],
-                importance=max(0.6, float((item.confidence or {}).get("overall", 0.6) or 0.6)),
-                source_raw_item_id=item.id,
-                source_review_id=item.id,
-            )
+        memory_entry = MemoryEntry(
+            user_id=DEFAULT_USER_ID,
+            title=item.title,
+            content=item.summary or item.raw_text,
+            memory_type=_memory_type_from_kind(item.asset_kind),
+            category=item.category,
+            tags=item.tags or [],
+            importance=max(0.6, float((item.confidence or {}).get("overall", 0.6) or 0.6)),
+            source_raw_item_id=item.id,
+            source_review_id=item.id,
         )
+        db.add(memory_entry)
+        db.flush()
 
     item.status = "confirmed"
     item.reviewed_at = reviewed_at
     item.confirmed_at = reviewed_at
     governance = GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
+
+    if memory_entry is not None:
+        _index_entry_vector(memory_entry)
+
     db.commit()
     db.refresh(item)
     return AssetConfirmResponse(
