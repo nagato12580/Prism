@@ -231,7 +231,57 @@ def test_memory_search_tool_recalls_confirmed_statements_and_skips_drafts(monkey
     assert ctx.stats_holder["memory_search"]["hit_count"] == 1
 
 
-def test_knowledge_search_dedupes_shared_citations_across_calls():
+def test_memory_search_prefers_vector_recall_and_propagates_score(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from backend.app.database import Base
+    from backend.app.models import MemoryEntry, MemoryStatement
+    from backend.app.models.memory import MemoryStatus
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    entry = MemoryEntry(
+        title="偏好深色主题",
+        content="用户偏好深色主题进行夜间阅读。",
+        memory_type="preference",
+        user_id="default-user",
+        importance=0.5,
+    )
+    statement = MemoryStatement(
+        user_id="default-user",
+        content="用户每天早上复习前一天的知识。",
+        statement_type="habit",
+        temporal_type="stable",
+        importance=0.9,
+        status=MemoryStatus.CONFIRMED,
+    )
+    session.add_all([entry, statement])
+    session.commit()
+    statement_id = statement.id
+    entry_id = entry.id
+    session.close()
+    monkeypatch.setattr(memory_tools, "_Session", Session)
+
+    def fake_vector_search(*, text, user_id, top_k):
+        return [{"memory_id": statement_id, "kind": "statement", "memory_type": "habit", "score": 0.82}]
+
+    monkeypatch.setattr(memory_tools, "search_memory_vectors", fake_vector_search)
+
+    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
+    tool = next(t for t in build_enabled_tools(ctx) if t.name == "memory_search")
+
+    payload = json.loads(tool.invoke({"query": "复习习惯", "limit": 5}))
+
+    assert payload["status"] == "success"
+    assert len(payload["memories"]) == 1
+    hit = payload["memories"][0]
+    assert "复习" in hit["content"]
+    assert hit["source"] == "conversation"
+    assert abs(hit["score"] - 0.82) < 1e-6
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
     tool = BUILTIN_REGISTRY["knowledge_search"].builder(ctx)
 

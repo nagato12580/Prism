@@ -67,6 +67,7 @@ def build_asset_parse_request(
     source_platform: str = "",
     source_url: str = "",
     max_content_length: int = 6000,
+    user_preferences: str = "",
 ) -> str:
     """Build the user message JSON for asset parsing."""
     request = {
@@ -81,6 +82,8 @@ def build_asset_parse_request(
         "json_shape": JSON_SHAPE_ASSET_PARSE,
         "rules": ASSET_PARSE_RULES,
     }
+    if user_preferences:
+        request["user_preferences"] = user_preferences
     return json.dumps(request, ensure_ascii=False)
 
 
@@ -92,6 +95,7 @@ def build_asset_parse_messages(
     source_platform: str = "",
     source_url: str = "",
     max_content_length: int = 6000,
+    user_preferences: str = "",
 ) -> tuple[str, str]:
     """Build the system and user messages for asset parsing."""
     return (
@@ -103,6 +107,7 @@ def build_asset_parse_messages(
             source_platform=source_platform,
             source_url=source_url,
             max_content_length=max_content_length,
+            user_preferences=user_preferences,
         ),
     )
 

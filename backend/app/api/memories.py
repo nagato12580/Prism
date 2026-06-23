@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..config import settings
 from ..models.memory import MemoryDraft, MemoryEntry, MemorySource, MemoryStatement, MemoryStatus
 from ..schemas.memory import (
     MemoryDraftConfirmOut,
@@ -17,6 +18,7 @@ from ..schemas.memory import (
     memory_source_to_out,
 )
 from ..services.memory_extraction import extract_session_memories
+from ..services.memory_vectors import upsert_statement_vector
 from ..utils.time import local_now
 
 router = APIRouter(prefix="/memories", tags=["memories"])
@@ -127,6 +129,20 @@ def _ensure_draft_reviewable(draft: MemoryDraft) -> None:
         raise HTTPException(status_code=400, detail="Memory draft has already been reviewed")
 
 
+def _index_statement_vector(statement: MemoryStatement) -> None:
+    """确认后为 statement 建向量索引；失败不阻塞审阅，仅标记 pending 供回填。"""
+    try:
+        vector_id = upsert_statement_vector(statement)
+    except Exception:
+        vector_id = ""
+    if vector_id:
+        statement.embedding_ref = vector_id
+        statement.embedding_model = settings.EMBEDDING_MODEL
+        statement.embedding_status = "done"
+    else:
+        statement.embedding_status = "pending"
+
+
 @router.get("/drafts", response_model=list[MemoryDraftOut])
 def list_memory_drafts(
     status: Optional[str] = Query(None),
@@ -196,6 +212,8 @@ def confirm_memory_draft(draft_id: str, db: Session = Depends(get_db)):
     draft.status = MemoryStatus.CONFIRMED
     draft.reviewed_at = local_now()
     db.add(statement)
+    db.flush()
+    _index_statement_vector(statement)
     db.commit()
     db.refresh(draft)
     db.refresh(statement)
@@ -239,6 +257,7 @@ def supersede_memory_draft(
     old_statement.status = MemoryStatus.SUPERSEDED
     db.add(statement)
     db.flush()
+    _index_statement_vector(statement)
     old_statement.superseded_by_id = statement.id
     db.commit()
     db.refresh(draft)

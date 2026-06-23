@@ -72,6 +72,56 @@ def test_asset_draft_can_be_edited_and_confirmed_to_personal_asset(client, monke
     assert assets[0]["title"] == "Agent tool registry reference"
 
 
+def test_create_asset_draft_injects_user_preferences_into_parse(client, monkeypatch):
+    captured_prefs = {}
+
+    def fake_parse(**kwargs):
+        captured_prefs["user_preferences"] = kwargs.get("user_preferences", "")
+        return {
+            "title": "Lightweight design",
+            "asset_kind": "opinion",
+            "summary": "Prefers lightweight.",
+            "tags": ["design"],
+            "confidence": {"overall": 0.8, "classification": 0.8, "source": 0.7, "extraction": 0.8},
+        }
+
+    monkeypatch.setattr("backend.app.api.assets._ai_parse_asset", fake_parse)
+    monkeypatch.setattr(
+        "backend.app.api.assets.recall_preference_context",
+        lambda db, content, **kw: "【偏好】用户偏好轻量方案",
+    )
+
+    response = client.post(
+        "/api/v1/assets/drafts",
+        json={"content": "Design a new feature with minimal dependencies."},
+    )
+
+    assert response.status_code == 200
+    assert captured_prefs["user_preferences"] == "【偏好】用户偏好轻量方案"
+
+
+def test_create_asset_draft_skips_preferences_when_recall_empty(client, monkeypatch):
+    captured_prefs = {}
+
+    def fake_parse(**kwargs):
+        captured_prefs["user_preferences"] = kwargs.get("user_preferences", "")
+        return {
+            "title": "t",
+            "asset_kind": "idea",
+            "summary": "s",
+            "tags": [],
+            "confidence": {"overall": 0.5, "classification": 0.5, "source": 0.5, "extraction": 0.5},
+        }
+
+    monkeypatch.setattr("backend.app.api.assets._ai_parse_asset", fake_parse)
+    monkeypatch.setattr("backend.app.api.assets.recall_preference_context", lambda db, content, **kw: "")
+
+    response = client.post("/api/v1/assets/drafts", json={"content": "Some content."})
+
+    assert response.status_code == 200
+    assert captured_prefs["user_preferences"] == ""
+
+
 def test_confirm_asset_with_create_memory_maps_kind_to_memory_type(client, monkeypatch):
     monkeypatch.setattr("backend.app.api.assets._ai_parse_asset", lambda **kwargs: None)
 
