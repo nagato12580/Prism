@@ -4,9 +4,17 @@ import type { ChatSessionOut, ChatMessageOut, ResourceMediaType } from './api'
 export interface Source {
   chunk_id: string
   item_id: string
+  source_kind?: string
+  source_id?: string
+  display_type?: string
+  display_id?: string
+  display_title?: string
+  display_label?: string
   score: number
   raw_score?: number
   doc_name?: string
+  title?: string
+  snippet?: string
   text?: string
 }
 

@@ -1,4 +1,10 @@
 # prism/engine/run.py
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 import uvicorn
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +13,7 @@ from engine.app.milvus_client import connect, ensure_collection
 from engine.app.es_client import ensure_index
 from engine.app.api.ingest import router as ingest_router
 from engine.app.api.chat import router as chat_router
+from engine.app.api.wiki import router as wiki_router
 
 
 def create_app():
@@ -18,6 +25,7 @@ def create_app():
     prefixed = APIRouter(prefix="/api/v1")
     prefixed.include_router(ingest_router)
     prefixed.include_router(chat_router)
+    prefixed.include_router(wiki_router)
     app.include_router(prefixed)
 
     @app.get("/health")

@@ -1,0 +1,417 @@
+{
+  "meta": {
+    "dataset": "H:\\Agent\\Project\\Prism\\prism\\engine\\eval\\golden_dataset.json",
+    "run_at": "2026-06-22T06:21:17.470926+00:00",
+    "total_queries": 60,
+    "chains": [
+      "traditional",
+      "governed"
+    ],
+    "llm_model": "deepseek-v4-flash",
+    "embedding_model": "jina-embeddings-v3",
+    "traditional_hybrid_params": {
+      "rrf_k": 60,
+      "vector_weight": 0.6,
+      "bm25_weight": 0.4,
+      "eval_k_values": [
+        5,
+        10,
+        20
+      ]
+    }
+  },
+  "chains": {
+    "traditional_hybrid": {
+      "evaluated": 60,
+      "failed": 0,
+      "exact": {
+        "recall@5": {
+          "mean": 0.2034,
+          "median": 0.2,
+          "std": 0.2143,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "recall@10": {
+          "mean": 0.2637,
+          "median": 0.2,
+          "std": 0.2502,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "recall@20": {
+          "mean": 0.3308,
+          "median": 0.25,
+          "std": 0.3005,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "precision@5": {
+          "mean": 0.2,
+          "median": 0.2,
+          "std": 0.1966,
+          "min": 0.0,
+          "max": 0.6
+        },
+        "precision@10": {
+          "mean": 0.1283,
+          "median": 0.1,
+          "std": 0.1198,
+          "min": 0.0,
+          "max": 0.5
+        },
+        "precision@20": {
+          "mean": 0.0775,
+          "median": 0.05,
+          "std": 0.0698,
+          "min": 0.0,
+          "max": 0.25
+        },
+        "hit@5": {
+          "mean": 0.6,
+          "median": 1.0,
+          "std": 0.4899,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "hit@10": {
+          "mean": 0.6833,
+          "median": 1.0,
+          "std": 0.4652,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "hit@20": {
+          "mean": 0.7167,
+          "median": 1.0,
+          "std": 0.4506,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "ndcg@5": {
+          "mean": 0.2639,
+          "median": 0.3392,
+          "std": 0.2521,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "ndcg@10": {
+          "mean": 0.2845,
+          "median": 0.3392,
+          "std": 0.2543,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "ndcg@20": {
+          "mean": 0.3096,
+          "median": 0.3392,
+          "std": 0.2626,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "mrr": {
+          "mean": 0.5314,
+          "median": 0.5,
+          "std": 0.4488,
+          "min": 0.0,
+          "max": 1.0
+        }
+      },
+      "expanded": {
+        "recall@5": {
+          "mean": 0.5032,
+          "median": 0.5714,
+          "std": 0.4636,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "recall@10": {
+          "mean": 0.6147,
+          "median": 1.0,
+          "std": 0.4647,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "recall@20": {
+          "mean": 0.6489,
+          "median": 1.0,
+          "std": 0.4663,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "precision@5": {
+          "mean": 0.5033,
+          "median": 0.8,
+          "std": 0.464,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "precision@10": {
+          "mean": 0.31,
+          "median": 0.4,
+          "std": 0.2461,
+          "min": 0.0,
+          "max": 0.7
+        },
+        "precision@20": {
+          "mean": 0.1658,
+          "median": 0.25,
+          "std": 0.128,
+          "min": 0.0,
+          "max": 0.4
+        },
+        "hit@5": {
+          "mean": 0.5833,
+          "median": 1.0,
+          "std": 0.493,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "hit@10": {
+          "mean": 0.6667,
+          "median": 1.0,
+          "std": 0.4714,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "hit@20": {
+          "mean": 0.6833,
+          "median": 1.0,
+          "std": 0.4652,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "ndcg@5": {
+          "mean": 0.526,
+          "median": 0.6844,
+          "std": 0.4726,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "ndcg@10": {
+          "mean": 0.5726,
+          "median": 0.9133,
+          "std": 0.4553,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "ndcg@20": {
+          "mean": 0.5892,
+          "median": 0.9133,
+          "std": 0.4512,
+          "min": 0.0,
+          "max": 1.0
+        },
+        "mrr": {
+          "mean": 0.5639,
+          "median": 1.0,
+          "std": 0.4663,
+          "min": 0.0,
+          "max": 1.0
+        }
+      },
+      "overview": {
+        "exact_hit@10_rate": 0.6833,
+        "expanded_hit@10_rate": 0.6667,
+        "expanded_mrr_zero_count": 19
+      },
+      "failures": []
+    },
+    "governed_ckp_pku": {
+      "evaluated": 60,
+      "failed": 0,
+      "exact": {
+        "recall@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "mrr": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      },
+      "expanded": {
+        "recall@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "mrr": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      },
+      "overview": {
+        "exact_hit@10_rate": 0.0,
+        "expanded_hit@10_rate": 0.0,
+        "expanded_mrr_zero_count": 60
+      },
+      "failures": []
+    }
+  }
+}

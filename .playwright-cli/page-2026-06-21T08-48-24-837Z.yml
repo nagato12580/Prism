@@ -1,0 +1,192 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+        - link "Wiki" [ref=e41] [cursor=pointer]:
+          - /url: /wiki
+          - img [ref=e42]
+          - generic [ref=e45]: Wiki
+      - generic [ref=e46]: 用户记忆
+      - generic [ref=e47]:
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e91]: 知识治理图谱
+            - heading "CKP 与 PKU 治理网络" [level=1] [ref=e92]
+          - generic [ref=e797]:
+            - generic [ref=e798]:
+              - img
+              - textbox "搜索 CKP 或 PKU" [ref=e799]
+            - button "重排" [ref=e800] [cursor=pointer]:
+              - img [ref=e801]
+              - text: 重排
+            - button "刷新" [ref=e804] [cursor=pointer]:
+              - img [ref=e805]
+              - text: 刷新
+        - generic [ref=e93]:
+          - button "CKP Workbench" [ref=e94] [cursor=pointer]
+          - button "全局网络" [ref=e95] [cursor=pointer]
+        - generic [ref=e810]:
+          - generic [ref=e811]:
+            - generic [ref=e812]:
+              - generic [ref=e813]:
+                - img [ref=e814]
+                - generic [ref=e819]:
+                  - generic [ref=e820]: 全局 CKP 主题网络
+                  - generic [ref=e821]: 点击子 CKP 进入它的 PKU 网络
+              - generic [ref=e822]:
+                - img [ref=e823]
+                - generic [ref=e825]: CKP
+                - generic [ref=e826]: "13"
+              - generic [ref=e827]:
+                - img [ref=e828]
+                - generic [ref=e838]: PKU
+                - generic [ref=e839]: "-"
+            - generic [ref=e840]:
+              - generic [ref=e841]:
+                - button "缩小画布" [ref=e842] [cursor=pointer]:
+                  - img [ref=e843]
+                - generic [ref=e846]: 115%
+                - button "放大画布" [active] [ref=e847] [cursor=pointer]:
+                  - img [ref=e848]
+                - button "重置画布缩放" [ref=e851] [cursor=pointer]:
+                  - img [ref=e852]
+              - img "全局 CKP 主题网络" [ref=e857]:
+                - generic [ref=e858]:
+                  - generic [ref=e859]: 父 CKP
+                  - generic [ref=e860]: 子 CKP
+                - generic [ref=e862]:
+                  - generic [ref=e863]:
+                    - generic: 模型评估与推理部署
+                    - generic: 父 CKP
+                  - generic [ref=e865]:
+                    - generic: 微调方法与训练配置
+                    - generic: 父 CKP
+                  - generic [ref=e867]:
+                    - generic: 数据准备与预处理
+                    - generic: 父 CKP
+                  - generic [ref=e869]:
+                    - generic: 微调总体原则与最佳实践
+                    - generic: 父 CKP
+                  - generic [ref=e871]:
+                    - generic: 常见问题排查与最佳实践
+                    - generic: CKP
+                  - generic [ref=e873]:
+                    - generic: 模型评估与推理部署
+                    - generic: CKP
+                  - generic [ref=e875]:
+                    - generic: 模型加载与数据预处理
+                    - generic: CKP
+                  - generic [ref=e877]:
+                    - generic: 数据准备与数据集划分
+                    - generic: CKP
+                  - generic [ref=e879]:
+                    - generic: 参数高效微调技术
+                    - generic: 父 CKP
+                  - generic [ref=e881]:
+                    - generic: 微调流程与全参数微调
+                    - generic: 父 CKP
+                  - generic [ref=e883]:
+                    - generic: 参数高效微调方法选型
+                    - generic: CKP
+                  - generic [ref=e885]:
+                    - generic: 全参数微调
+                    - generic: CKP
+                  - generic [ref=e887]:
+                    - generic: 微调基础与流程
+                    - generic: CKP
+          - complementary [ref=e889]:
+            - generic [ref=e890]:
+              - generic [ref=e891]:
+                - img [ref=e893]
+                - generic [ref=e895]:
+                  - generic [ref=e896]: CKP
+                  - heading "模型评估与推理部署" [level=2] [ref=e897]
+              - button "编辑节点" [ref=e898] [cursor=pointer]:
+                - img [ref=e899]
+            - generic [ref=e902]:
+              - generic [ref=e903]:
+                - generic [ref=e904]: 内容
+                - paragraph [ref=e905]: 涵盖评估指标、混淆矩阵、基线比较、推理流程、置信度阈值设置和线上验收检查
+              - generic [ref=e906]:
+                - generic [ref=e907]:
+                  - generic [ref=e908]: 类型
+                  - generic [ref=e909]: topic
+                - generic [ref=e910]:
+                  - generic [ref=e911]: 置信度
+                  - generic [ref=e912]: "0.90"
+              - generic [ref=e913]:
+                - generic [ref=e914]:
+                  - generic [ref=e915]: 分类
+                  - generic [ref=e916]: "-"
+                - generic [ref=e917]:
+                  - generic [ref=e918]: 状态
+                  - generic [ref=e919]: draft
+              - generic [ref=e920]:
+                - generic [ref=e921]: 关键词
+                - generic [ref=e922]:
+                  - generic [ref=e923]: 评估指标
+                  - generic [ref=e924]: Accuracy
+                  - generic [ref=e925]: F1
+                  - generic [ref=e926]: 混淆矩阵
+                  - generic [ref=e927]: 推理
+                  - generic [ref=e928]: 置信度阈值
+              - generic [ref=e929]:
+                - heading "CKP 层级关系" [level=3] [ref=e930]
+                - generic [ref=e932]:
+                  - generic [ref=e933]:
+                    - img [ref=e934]
+                    - text: subtopic_of
+                  - generic [ref=e936]: 模型评估与推理部署
+                  - generic [ref=e937]: 该子主题全面覆盖模型评估、推理和部署环节，构成独立的父主题

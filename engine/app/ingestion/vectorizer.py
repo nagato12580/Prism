@@ -1,25 +1,62 @@
 # prism/engine/app/ingestion/vectorizer.py
-"""调用 embedding API 将文本转为向量。"""
+"""Embedding API wrapper for ingestion and retrieval."""
+
+from collections.abc import Iterator
+
 from openai import OpenAI
+
 from ..config import settings
 
 _client = None
 
 
+class EmbeddingProviderError(RuntimeError):
+    pass
+
+
 def _get_client():
     global _client
     if _client is None:
-        _client = OpenAI(base_url=settings.EMBEDDING_API_BASE, api_key=settings.EMBEDDING_API_KEY)
+        _client = OpenAI(
+            base_url=settings.EMBEDDING_API_BASE,
+            api_key=settings.EMBEDDING_API_KEY,
+            timeout=settings.EMBEDDING_TIMEOUT_SECONDS,
+            max_retries=settings.EMBEDDING_MAX_RETRIES,
+        )
     return _client
 
 
+def _batches(texts: list[str], size: int) -> Iterator[list[str]]:
+    batch_size = max(1, size)
+    for start in range(0, len(texts), batch_size):
+        yield texts[start : start + batch_size]
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """批量向量化。"""
+    """Embed texts in bounded batches and preserve input order."""
+    if not texts:
+        return []
+
     client = _get_client()
-    resp = client.embeddings.create(model=settings.EMBEDDING_MODEL, input=texts)
-    return [item.embedding for item in resp.data]
+    embeddings: list[list[float]] = []
+    batches = list(_batches(texts, settings.EMBEDDING_BATCH_SIZE))
+
+    for index, batch in enumerate(batches, start=1):
+        try:
+            resp = client.embeddings.create(model=settings.EMBEDDING_MODEL, input=batch)
+        except Exception as exc:
+            raise EmbeddingProviderError(
+                "Embedding request failed "
+                f"(endpoint={settings.EMBEDDING_API_BASE}, "
+                f"model={settings.EMBEDDING_MODEL}, "
+                f"batch {index}/{len(batches)}, "
+                f"batch_size={len(batch)}): {exc}"
+            ) from exc
+        embeddings.extend(item.embedding for item in resp.data)
+
+    return embeddings
 
 
 def embed_query(text: str) -> list[float]:
-    """单条查询向量化。"""
+    """Embed a single query string."""
     return embed_texts([text])[0]

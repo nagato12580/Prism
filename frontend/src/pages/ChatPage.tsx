@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowRight,
   BookOpen,
+  Check,
   ChevronDown,
   ChevronUp,
   FileText,
@@ -16,6 +17,7 @@ import {
   Loader2,
   MessageSquarePlus,
   Music,
+  Pencil,
   Plus,
   Search,
   Send,
@@ -80,12 +82,38 @@ function normalizeSources(value: unknown): Source[] {
     .map((source) => ({
       chunk_id: String(source.chunk_id ?? ''),
       item_id: String(source.item_id ?? ''),
+      source_kind: typeof source.source_kind === 'string' ? source.source_kind : undefined,
+      source_id: typeof source.source_id === 'string' ? source.source_id : undefined,
+      display_type: typeof source.display_type === 'string' ? source.display_type : undefined,
+      display_id: typeof source.display_id === 'string' ? source.display_id : undefined,
+      display_title: typeof source.display_title === 'string' ? source.display_title : undefined,
+      display_label: typeof source.display_label === 'string' ? source.display_label : undefined,
       score: Number(source.score ?? 0),
       raw_score: typeof source.raw_score === 'number' ? source.raw_score : undefined,
       doc_name: typeof source.doc_name === 'string' ? source.doc_name : undefined,
+      title: typeof source.title === 'string' ? source.title : undefined,
+      snippet: typeof source.snippet === 'string' ? source.snippet : undefined,
       text: typeof source.text === 'string' ? source.text : undefined,
     }))
-    .filter((source) => source.chunk_id || source.item_id)
+    .filter((source) => source.chunk_id || source.item_id || source.display_id || source.source_id)
+}
+
+function sourceDisplayTitle(source: Source) {
+  return source.display_title || source.doc_name || source.title || source.item_id || source.display_id || source.source_id || '来源'
+}
+
+function sourceDisplayLabel(source: Source) {
+  if (source.display_label) return source.display_label
+  if (source.display_type === 'knowledge_item') return '知识文档'
+  if (source.display_type === 'personal_asset_unit') return '知识单元'
+  if (source.source_kind === 'document_chunk') return '知识文档'
+  if (source.source_kind === 'personal_asset_unit') return '知识单元'
+  if (source.source_kind === 'personal_asset_item') return '来源碎片'
+  return '来源'
+}
+
+function sourceSnippet(source: Source) {
+  return source.snippet || source.text || ''
 }
 
 function formatSessionTime(dateStr: string) {
@@ -110,10 +138,17 @@ function historyContent(message: Message) {
   return message.content
 }
 
+function shouldAutoGenerateTitle(title?: string | null) {
+  const normalized = (title || '').trim()
+  return !normalized || normalized === '新对话' || normalized === 'New conversation' || normalized === 'Untitled session'
+}
+
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingSessionTitle, setEditingSessionTitle] = useState('')
   const messages = useChatStore((s) => s.messages)
   const selectedTopicId = useChatStore((s) => s.selectedTopicId)
   const selectedTopicName = useChatStore((s) => s.selectedTopicName)
@@ -268,8 +303,7 @@ export function ChatPage() {
     addMessage({ id: crypto.randomUUID(), role: 'user', content: query })
     addMessage({ id: crypto.randomUUID(), role: 'assistant', content: '', streaming: true })
 
-    // 用户消息即刻持久化（fire-and-forget）
-    persistUserMessage(sessionId, query)
+    const userPersistPromise = persistUserMessage(sessionId, query)
 
     const handleStreamLine = (line: string) => {
       if (!line.trim()) return
@@ -358,28 +392,31 @@ export function ChatPage() {
         const msgs = useChatStore.getState().messages
         const aiMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && !m.streaming)
         if (aiMsg) {
-          chatApi.addMessage(sessionId, {
-            role: 'assistant',
-            content: aiMsg.content,
-            sources: aiMsg.sources || undefined,
-            clarify: aiMsg.clarify || undefined,
-          }).catch(() => { })
+          try {
+            await userPersistPromise
+            await chatApi.addMessage(sessionId, {
+              role: 'assistant',
+              content: aiMsg.content,
+              sources: aiMsg.sources || undefined,
+              clarify: aiMsg.clarify || undefined,
+            })
+          } catch { /* persistence is best-effort for the chat UI */ }
         }
         // 首轮问答后自动生成标题
         const userCount = msgs.filter((m) => m.role === 'user').length
         const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
-        if (userCount === 1 && session?.title === '新对话') {
-          chatApi.generateTitle(sessionId).then((updated) => {
+        if (userCount === 1 && shouldAutoGenerateTitle(session?.title)) {
+          try {
+            const updated = await chatApi.generateTitle(sessionId)
             updateSessionTitle(sessionId, updated.title)
-          }).catch(() => { })
+          } catch { /* title generation is best-effort */ }
         }
       }
     }
   }
 
-  // 持久化用户消息（fire-and-forget，不阻塞流式响应）
   const persistUserMessage = (sessionId: string, content: string) => {
-    chatApi.addMessage(sessionId, { role: 'user', content }).catch(() => { })
+    return chatApi.addMessage(sessionId, { role: 'user', content }).catch(() => undefined)
   }
 
   const sendClarifyFollowup = (value: string) => {
@@ -439,6 +476,30 @@ export function ChatPage() {
     } catch { /* silent */ }
   }
 
+  const startEditingSessionTitle = (sessionId: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingSessionId(sessionId)
+    setEditingSessionTitle(title)
+  }
+
+  const cancelEditingSessionTitle = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setEditingSessionId(null)
+    setEditingSessionTitle('')
+  }
+
+  const saveSessionTitle = async (sessionId: string, e: React.FormEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const title = editingSessionTitle.trim()
+    if (!title) return
+    try {
+      const updated = await chatApi.updateSession(sessionId, { title })
+      updateSessionTitle(sessionId, updated.title)
+      cancelEditingSessionTitle()
+    } catch { /* keep editing so the user can retry */ }
+  }
+
   return (
     <div className="grid h-full min-h-0 w-full gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
       <aside className="flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white shadow-[0_18px_48px_-40px_rgba(15,23,42,0.35)]">
@@ -475,43 +536,93 @@ export function ChatPage() {
               {sessions.map((session) => {
                 const active = currentSessionId === session.id
                 const time = formatSessionTime(session.updated_at)
+                const editing = editingSessionId === session.id
                 return (
                   <div key={session.id} className="group relative">
-                    <button
-                      type="button"
-                      onClick={() => switchSession(session.id)}
-                      className={cn(
-                        'w-full rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]',
-                        active
-                          ? 'border-blue-200 bg-blue-50 shadow-sm'
-                          : 'border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white',
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={cn(
-                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                            active ? 'bg-[var(--prism-blue)] text-white' : 'bg-white text-slate-400',
-                          )}
-                        >
-                          <MessageSquarePlus size={15} />
+                    {editing ? (
+                      <form
+                        onSubmit={(e) => saveSessionTitle(session.id, e)}
+                        className={cn(
+                          'w-full rounded-xl border p-3 text-left transition focus-within:ring-2 focus-within:ring-[var(--prism-cyan)]',
+                          active
+                            ? 'border-blue-200 bg-blue-50 shadow-sm'
+                            : 'border-slate-200 bg-white',
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={editingSessionTitle}
+                            onChange={(event) => setEditingSessionTitle(event.target.value)}
+                            aria-label="Session title"
+                            className="min-w-0 flex-1 rounded-md border border-[var(--prism-line)] bg-white px-2 py-1.5 text-sm font-semibold text-slate-950 outline-none focus:border-[var(--prism-blue)]"
+                            autoFocus
+                          />
+                          <button
+                            type="submit"
+                            aria-label="保存会话标题"
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--prism-blue)] text-white"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditingSessionTitle}
+                            aria-label="取消编辑会话标题"
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--prism-line)] bg-white text-slate-400"
+                          >
+                            <X size={13} />
+                          </button>
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-slate-950">
-                            {session.title}
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => switchSession(session.id)}
+                        className={cn(
+                          'w-full rounded-xl border p-3 pr-16 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]',
+                          active
+                            ? 'border-blue-200 bg-blue-50 shadow-sm'
+                            : 'border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white',
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={cn(
+                              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                              active ? 'bg-[var(--prism-blue)] text-white' : 'bg-white text-slate-400',
+                            )}
+                          >
+                            <MessageSquarePlus size={15} />
                           </div>
-                          <div className="mt-1 text-[11px] text-slate-400">{time}</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-slate-950">
+                              {session.title}
+                            </div>
+                            <div className="mt-1 text-[11px] text-slate-400">{time}</div>
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => deleteSession(session.id, e)}
-                      className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-red-50 hover:text-red-500 group-hover:flex"
-                      aria-label={`删除 ${session.title}`}
-                    >
-                      <X size={13} />
-                    </button>
+                      </button>
+                    )}
+                    {!editing ? (
+                      <button
+                        type="button"
+                        onClick={(e) => startEditingSessionTitle(session.id, session.title, e)}
+                        className="absolute right-8 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-blue-50 hover:text-[var(--prism-blue)] group-hover:flex"
+                        aria-label={`编辑 ${session.title}`}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    ) : null}
+                    {!editing ? (
+                      <button
+                        type="button"
+                        onClick={(e) => deleteSession(session.id, e)}
+                        className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-red-50 hover:text-red-500 group-hover:flex"
+                        aria-label={`删除 ${session.title}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    ) : null}
                   </div>
                 )
               })}
@@ -833,20 +944,30 @@ function MessageBlock({
               <div className="mt-2 grid gap-2">
                 {msg.sources.map((source, index) => (
                   <div
-                    key={`${source.chunk_id}-${source.item_id}-${index}`}
+                    key={`${source.display_type || source.source_kind || 'source'}-${source.display_id || source.source_id || source.chunk_id || source.item_id}-${index}`}
                     className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-xs text-slate-600 shadow-sm"
                   >
                     <div className="mb-1.5 flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate font-semibold text-slate-800">
-                        {source.doc_name || source.item_id}
-                      </span>
-                      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
-                        {source.raw_score ? `匹配 ${(source.raw_score * 100).toFixed(0)}%` : `相关度 ${formatScore(source.score)}`}
-                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-800">
+                          {sourceDisplayTitle(source)}
+                        </div>
+                        <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                          {source.display_id || source.item_id || source.source_id}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                          {sourceDisplayLabel(source)}
+                        </span>
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
+                          {source.raw_score ? `匹配 ${(source.raw_score * 100).toFixed(0)}%` : `相关度 ${formatScore(source.score)}`}
+                        </span>
+                      </div>
                     </div>
-                    {source.text && (
+                    {sourceSnippet(source) && (
                       <p className="line-clamp-3 leading-5 text-slate-500">
-                        {source.text.slice(0, 300)}
+                        {sourceSnippet(source).slice(0, 300)}
                       </p>
                     )}
                   </div>

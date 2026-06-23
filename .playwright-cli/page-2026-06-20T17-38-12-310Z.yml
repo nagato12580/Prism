@@ -1,0 +1,631 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+        - link "Wiki" [ref=e41] [cursor=pointer]:
+          - /url: /wiki
+          - img [ref=e42]
+          - generic [ref=e45]: Wiki
+      - generic [ref=e46]: 用户记忆
+      - generic [ref=e47]:
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e82]:
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - img [ref=e86]
+            - generic [ref=e91]: 知识治理图谱
+          - heading "CKP、PKU 与来源证据" [level=1] [ref=e92]
+        - generic [ref=e93]:
+          - button "CKP Workbench" [ref=e94] [cursor=pointer]
+          - button "全局网络" [ref=e95] [cursor=pointer]
+        - generic [ref=e97]:
+          - complementary [ref=e98]:
+            - generic [ref=e99]:
+              - img
+              - textbox "搜索 CKP" [ref=e100]
+            - generic [ref=e102]: 60 个 CKP
+            - generic [ref=e108]:
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e109] [cursor=pointer]:
+                - generic [ref=e110]: 大模型微调指南
+                - generic [ref=e111]:
+                  - generic [ref=e112]: rule
+                  - generic [ref=e113]: 1 PKU
+                  - generic [ref=e114]: 1 来源
+                  - generic [ref=e115]: "0.90"
+                  - generic [ref=e116]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 0.90 draft" [ref=e117] [cursor=pointer]:
+                - generic [ref=e118]: 大模型微调指南
+                - generic [ref=e119]:
+                  - generic [ref=e120]: method
+                  - generic [ref=e121]: 1 PKU
+                  - generic [ref=e122]: 1 来源
+                  - generic [ref=e123]: "0.90"
+                  - generic [ref=e124]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e125] [cursor=pointer]:
+                - generic [ref=e126]: 大模型微调指南
+                - generic [ref=e127]:
+                  - generic [ref=e128]: rule
+                  - generic [ref=e129]: 1 PKU
+                  - generic [ref=e130]: 1 来源
+                  - generic [ref=e131]: "0.90"
+                  - generic [ref=e132]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 0.90 draft" [ref=e133] [cursor=pointer]:
+                - generic [ref=e134]: 大模型微调指南
+                - generic [ref=e135]:
+                  - generic [ref=e136]: method
+                  - generic [ref=e137]: 1 PKU
+                  - generic [ref=e138]: 1 来源
+                  - generic [ref=e139]: "0.90"
+                  - generic [ref=e140]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e141] [cursor=pointer]:
+                - generic [ref=e142]: 大模型微调指南
+                - generic [ref=e143]:
+                  - generic [ref=e144]: rule
+                  - generic [ref=e145]: 1 PKU
+                  - generic [ref=e146]: 1 来源
+                  - generic [ref=e147]: "0.90"
+                  - generic [ref=e148]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.85 draft" [ref=e149] [cursor=pointer]:
+                - generic [ref=e150]: 大模型微调指南
+                - generic [ref=e151]:
+                  - generic [ref=e152]: rule
+                  - generic [ref=e153]: 1 PKU
+                  - generic [ref=e154]: 1 来源
+                  - generic [ref=e155]: "0.85"
+                  - generic [ref=e156]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e157] [cursor=pointer]:
+                - generic [ref=e158]: 大模型微调指南
+                - generic [ref=e159]:
+                  - generic [ref=e160]: rule
+                  - generic [ref=e161]: 1 PKU
+                  - generic [ref=e162]: 1 来源
+                  - generic [ref=e163]: "0.90"
+                  - generic [ref=e164]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 0.95 draft" [ref=e165] [cursor=pointer]:
+                - generic [ref=e166]: 大模型微调指南
+                - generic [ref=e167]:
+                  - generic [ref=e168]: method
+                  - generic [ref=e169]: 1 PKU
+                  - generic [ref=e170]: 1 来源
+                  - generic [ref=e171]: "0.95"
+                  - generic [ref=e172]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e173] [cursor=pointer]:
+                - generic [ref=e174]: 大模型微调指南
+                - generic [ref=e175]:
+                  - generic [ref=e176]: rule
+                  - generic [ref=e177]: 1 PKU
+                  - generic [ref=e178]: 1 来源
+                  - generic [ref=e179]: "0.90"
+                  - generic [ref=e180]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e181] [cursor=pointer]:
+                - generic [ref=e182]: 大模型微调指南
+                - generic [ref=e183]:
+                  - generic [ref=e184]: rule
+                  - generic [ref=e185]: 1 PKU
+                  - generic [ref=e186]: 1 来源
+                  - generic [ref=e187]: "0.90"
+                  - generic [ref=e188]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 0.90 draft" [ref=e189] [cursor=pointer]:
+                - generic [ref=e190]: 大模型微调指南
+                - generic [ref=e191]:
+                  - generic [ref=e192]: method
+                  - generic [ref=e193]: 1 PKU
+                  - generic [ref=e194]: 1 来源
+                  - generic [ref=e195]: "0.90"
+                  - generic [ref=e196]: draft
+              - button "大模型微调指南 claim 1 PKU 1 来源 0.90 draft" [ref=e197] [cursor=pointer]:
+                - generic [ref=e198]: 大模型微调指南
+                - generic [ref=e199]:
+                  - generic [ref=e200]: claim
+                  - generic [ref=e201]: 1 PKU
+                  - generic [ref=e202]: 1 来源
+                  - generic [ref=e203]: "0.90"
+                  - generic [ref=e204]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e205] [cursor=pointer]:
+                - generic [ref=e206]: 大模型微调指南
+                - generic [ref=e207]:
+                  - generic [ref=e208]: rule
+                  - generic [ref=e209]: 1 PKU
+                  - generic [ref=e210]: 1 来源
+                  - generic [ref=e211]: "0.90"
+                  - generic [ref=e212]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e213] [cursor=pointer]:
+                - generic [ref=e214]: 大模型微调指南
+                - generic [ref=e215]:
+                  - generic [ref=e216]: rule
+                  - generic [ref=e217]: 1 PKU
+                  - generic [ref=e218]: 1 来源
+                  - generic [ref=e219]: "0.90"
+                  - generic [ref=e220]: draft
+              - button "大模型微调指南 method 2 PKU 1 来源 1.00 draft" [ref=e221] [cursor=pointer]:
+                - generic [ref=e222]: 大模型微调指南
+                - generic [ref=e223]:
+                  - generic [ref=e224]: method
+                  - generic [ref=e225]: 2 PKU
+                  - generic [ref=e226]: 1 来源
+                  - generic [ref=e227]: "1.00"
+                  - generic [ref=e228]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 1.00 draft" [ref=e229] [cursor=pointer]:
+                - generic [ref=e230]: 大模型微调指南
+                - generic [ref=e231]:
+                  - generic [ref=e232]: rule
+                  - generic [ref=e233]: 0 PKU
+                  - generic [ref=e234]: 0 来源
+                  - generic [ref=e235]: "1.00"
+                  - generic [ref=e236]: draft
+              - button "大模型微调指南 problem 0 PKU 0 来源 0.90 draft" [ref=e237] [cursor=pointer]:
+                - generic [ref=e238]: 大模型微调指南
+                - generic [ref=e239]:
+                  - generic [ref=e240]: problem
+                  - generic [ref=e241]: 0 PKU
+                  - generic [ref=e242]: 0 来源
+                  - generic [ref=e243]: "0.90"
+                  - generic [ref=e244]: draft
+              - button "大模型微调指南 problem 0 PKU 0 来源 0.90 draft" [ref=e245] [cursor=pointer]:
+                - generic [ref=e246]: 大模型微调指南
+                - generic [ref=e247]:
+                  - generic [ref=e248]: problem
+                  - generic [ref=e249]: 0 PKU
+                  - generic [ref=e250]: 0 来源
+                  - generic [ref=e251]: "0.90"
+                  - generic [ref=e252]: draft
+              - button "大模型微调指南 problem 0 PKU 0 来源 0.90 draft" [ref=e253] [cursor=pointer]:
+                - generic [ref=e254]: 大模型微调指南
+                - generic [ref=e255]:
+                  - generic [ref=e256]: problem
+                  - generic [ref=e257]: 0 PKU
+                  - generic [ref=e258]: 0 来源
+                  - generic [ref=e259]: "0.90"
+                  - generic [ref=e260]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e261] [cursor=pointer]:
+                - generic [ref=e262]: 大模型微调指南
+                - generic [ref=e263]:
+                  - generic [ref=e264]: rule
+                  - generic [ref=e265]: 0 PKU
+                  - generic [ref=e266]: 0 来源
+                  - generic [ref=e267]: "0.90"
+                  - generic [ref=e268]: draft
+              - button "大模型微调指南 observation 0 PKU 0 来源 0.90 draft" [ref=e269] [cursor=pointer]:
+                - generic [ref=e270]: 大模型微调指南
+                - generic [ref=e271]:
+                  - generic [ref=e272]: observation
+                  - generic [ref=e273]: 0 PKU
+                  - generic [ref=e274]: 0 来源
+                  - generic [ref=e275]: "0.90"
+                  - generic [ref=e276]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e277] [cursor=pointer]:
+                - generic [ref=e278]: 大模型微调指南
+                - generic [ref=e279]:
+                  - generic [ref=e280]: rule
+                  - generic [ref=e281]: 0 PKU
+                  - generic [ref=e282]: 0 来源
+                  - generic [ref=e283]: "0.90"
+                  - generic [ref=e284]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e285] [cursor=pointer]:
+                - generic [ref=e286]: 大模型微调指南
+                - generic [ref=e287]:
+                  - generic [ref=e288]: rule
+                  - generic [ref=e289]: 0 PKU
+                  - generic [ref=e290]: 0 来源
+                  - generic [ref=e291]: "0.90"
+                  - generic [ref=e292]: draft
+              - button "大模型微调指南 method 0 PKU 0 来源 0.90 draft" [ref=e293] [cursor=pointer]:
+                - generic [ref=e294]: 大模型微调指南
+                - generic [ref=e295]:
+                  - generic [ref=e296]: method
+                  - generic [ref=e297]: 0 PKU
+                  - generic [ref=e298]: 0 来源
+                  - generic [ref=e299]: "0.90"
+                  - generic [ref=e300]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e301] [cursor=pointer]:
+                - generic [ref=e302]: 大模型微调指南
+                - generic [ref=e303]:
+                  - generic [ref=e304]: rule
+                  - generic [ref=e305]: 0 PKU
+                  - generic [ref=e306]: 0 来源
+                  - generic [ref=e307]: "0.90"
+                  - generic [ref=e308]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e309] [cursor=pointer]:
+                - generic [ref=e310]: 大模型微调指南
+                - generic [ref=e311]:
+                  - generic [ref=e312]: rule
+                  - generic [ref=e313]: 0 PKU
+                  - generic [ref=e314]: 0 来源
+                  - generic [ref=e315]: "0.90"
+                  - generic [ref=e316]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e317] [cursor=pointer]:
+                - generic [ref=e318]: 大模型微调指南
+                - generic [ref=e319]:
+                  - generic [ref=e320]: rule
+                  - generic [ref=e321]: 0 PKU
+                  - generic [ref=e322]: 0 来源
+                  - generic [ref=e323]: "0.90"
+                  - generic [ref=e324]: draft
+              - button "大模型微调指南 claim 0 PKU 0 来源 0.95 draft" [ref=e325] [cursor=pointer]:
+                - generic [ref=e326]: 大模型微调指南
+                - generic [ref=e327]:
+                  - generic [ref=e328]: claim
+                  - generic [ref=e329]: 0 PKU
+                  - generic [ref=e330]: 0 来源
+                  - generic [ref=e331]: "0.95"
+                  - generic [ref=e332]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.95 draft" [ref=e333] [cursor=pointer]:
+                - generic [ref=e334]: 大模型微调指南
+                - generic [ref=e335]:
+                  - generic [ref=e336]: rule
+                  - generic [ref=e337]: 0 PKU
+                  - generic [ref=e338]: 0 来源
+                  - generic [ref=e339]: "0.95"
+                  - generic [ref=e340]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.85 draft" [ref=e341] [cursor=pointer]:
+                - generic [ref=e342]: 大模型微调指南
+                - generic [ref=e343]:
+                  - generic [ref=e344]: rule
+                  - generic [ref=e345]: 0 PKU
+                  - generic [ref=e346]: 0 来源
+                  - generic [ref=e347]: "0.85"
+                  - generic [ref=e348]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.95 draft" [ref=e349] [cursor=pointer]:
+                - generic [ref=e350]: 大模型微调指南
+                - generic [ref=e351]:
+                  - generic [ref=e352]: rule
+                  - generic [ref=e353]: 1 PKU
+                  - generic [ref=e354]: 1 来源
+                  - generic [ref=e355]: "0.95"
+                  - generic [ref=e356]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 0.90 draft" [ref=e357] [cursor=pointer]:
+                - generic [ref=e358]: 大模型微调指南
+                - generic [ref=e359]:
+                  - generic [ref=e360]: method
+                  - generic [ref=e361]: 1 PKU
+                  - generic [ref=e362]: 1 来源
+                  - generic [ref=e363]: "0.90"
+                  - generic [ref=e364]: draft
+              - button "大模型微调指南 claim 0 PKU 0 来源 0.85 draft" [ref=e365] [cursor=pointer]:
+                - generic [ref=e366]: 大模型微调指南
+                - generic [ref=e367]:
+                  - generic [ref=e368]: claim
+                  - generic [ref=e369]: 0 PKU
+                  - generic [ref=e370]: 0 来源
+                  - generic [ref=e371]: "0.85"
+                  - generic [ref=e372]: draft
+              - button "大模型微调指南 pattern 1 PKU 1 来源 0.80 draft" [ref=e373] [cursor=pointer]:
+                - generic [ref=e374]: 大模型微调指南
+                - generic [ref=e375]:
+                  - generic [ref=e376]: pattern
+                  - generic [ref=e377]: 1 PKU
+                  - generic [ref=e378]: 1 来源
+                  - generic [ref=e379]: "0.80"
+                  - generic [ref=e380]: draft
+              - button "大模型微调指南 pattern 1 PKU 1 来源 0.80 draft" [ref=e381] [cursor=pointer]:
+                - generic [ref=e382]: 大模型微调指南
+                - generic [ref=e383]:
+                  - generic [ref=e384]: pattern
+                  - generic [ref=e385]: 1 PKU
+                  - generic [ref=e386]: 1 来源
+                  - generic [ref=e387]: "0.80"
+                  - generic [ref=e388]: draft
+              - button "大模型微调指南 claim 0 PKU 0 来源 0.90 draft" [ref=e389] [cursor=pointer]:
+                - generic [ref=e390]: 大模型微调指南
+                - generic [ref=e391]:
+                  - generic [ref=e392]: claim
+                  - generic [ref=e393]: 0 PKU
+                  - generic [ref=e394]: 0 来源
+                  - generic [ref=e395]: "0.90"
+                  - generic [ref=e396]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e397] [cursor=pointer]:
+                - generic [ref=e398]: 大模型微调指南
+                - generic [ref=e399]:
+                  - generic [ref=e400]: rule
+                  - generic [ref=e401]: 1 PKU
+                  - generic [ref=e402]: 1 来源
+                  - generic [ref=e403]: "0.90"
+                  - generic [ref=e404]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.95 draft" [ref=e405] [cursor=pointer]:
+                - generic [ref=e406]: 大模型微调指南
+                - generic [ref=e407]:
+                  - generic [ref=e408]: rule
+                  - generic [ref=e409]: 0 PKU
+                  - generic [ref=e410]: 0 来源
+                  - generic [ref=e411]: "0.95"
+                  - generic [ref=e412]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e413] [cursor=pointer]:
+                - generic [ref=e414]: 大模型微调指南
+                - generic [ref=e415]:
+                  - generic [ref=e416]: rule
+                  - generic [ref=e417]: 0 PKU
+                  - generic [ref=e418]: 0 来源
+                  - generic [ref=e419]: "0.90"
+                  - generic [ref=e420]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e421] [cursor=pointer]:
+                - generic [ref=e422]: 大模型微调指南
+                - generic [ref=e423]:
+                  - generic [ref=e424]: rule
+                  - generic [ref=e425]: 0 PKU
+                  - generic [ref=e426]: 0 来源
+                  - generic [ref=e427]: "0.90"
+                  - generic [ref=e428]: draft
+              - button "大模型微调指南 definition 1 PKU 1 来源 0.95 draft" [ref=e429] [cursor=pointer]:
+                - generic [ref=e430]: 大模型微调指南
+                - generic [ref=e431]:
+                  - generic [ref=e432]: definition
+                  - generic [ref=e433]: 1 PKU
+                  - generic [ref=e434]: 1 来源
+                  - generic [ref=e435]: "0.95"
+                  - generic [ref=e436]: draft
+              - button "大模型微调指南 method 0 PKU 0 来源 0.95 draft" [ref=e437] [cursor=pointer]:
+                - generic [ref=e438]: 大模型微调指南
+                - generic [ref=e439]:
+                  - generic [ref=e440]: method
+                  - generic [ref=e441]: 0 PKU
+                  - generic [ref=e442]: 0 来源
+                  - generic [ref=e443]: "0.95"
+                  - generic [ref=e444]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 0.90 draft" [ref=e445] [cursor=pointer]:
+                - generic [ref=e446]: 大模型微调指南
+                - generic [ref=e447]:
+                  - generic [ref=e448]: rule
+                  - generic [ref=e449]: 0 PKU
+                  - generic [ref=e450]: 0 来源
+                  - generic [ref=e451]: "0.90"
+                  - generic [ref=e452]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e453] [cursor=pointer]:
+                - generic [ref=e454]: 大模型微调指南
+                - generic [ref=e455]:
+                  - generic [ref=e456]: rule
+                  - generic [ref=e457]: 1 PKU
+                  - generic [ref=e458]: 1 来源
+                  - generic [ref=e459]: "0.90"
+                  - generic [ref=e460]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 0.90 draft" [ref=e461] [cursor=pointer]:
+                - generic [ref=e462]: 大模型微调指南
+                - generic [ref=e463]:
+                  - generic [ref=e464]: rule
+                  - generic [ref=e465]: 1 PKU
+                  - generic [ref=e466]: 1 来源
+                  - generic [ref=e467]: "0.90"
+                  - generic [ref=e468]: draft
+              - button "大模型微调指南 definition 1 PKU 1 来源 0.72 draft" [ref=e469] [cursor=pointer]:
+                - generic [ref=e470]: 大模型微调指南
+                - generic [ref=e471]:
+                  - generic [ref=e472]: definition
+                  - generic [ref=e473]: 1 PKU
+                  - generic [ref=e474]: 1 来源
+                  - generic [ref=e475]: "0.72"
+                  - generic [ref=e476]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 1.00 draft" [ref=e477] [cursor=pointer]:
+                - generic [ref=e478]: 大模型微调指南
+                - generic [ref=e479]:
+                  - generic [ref=e480]: rule
+                  - generic [ref=e481]: 0 PKU
+                  - generic [ref=e482]: 0 来源
+                  - generic [ref=e483]: "1.00"
+                  - generic [ref=e484]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 1.00 draft" [ref=e485] [cursor=pointer]:
+                - generic [ref=e486]: 大模型微调指南
+                - generic [ref=e487]:
+                  - generic [ref=e488]: rule
+                  - generic [ref=e489]: 1 PKU
+                  - generic [ref=e490]: 1 来源
+                  - generic [ref=e491]: "1.00"
+                  - generic [ref=e492]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 1.00 draft" [ref=e493] [cursor=pointer]:
+                - generic [ref=e494]: 大模型微调指南
+                - generic [ref=e495]:
+                  - generic [ref=e496]: rule
+                  - generic [ref=e497]: 1 PKU
+                  - generic [ref=e498]: 1 来源
+                  - generic [ref=e499]: "1.00"
+                  - generic [ref=e500]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 1.00 draft" [ref=e501] [cursor=pointer]:
+                - generic [ref=e502]: 大模型微调指南
+                - generic [ref=e503]:
+                  - generic [ref=e504]: rule
+                  - generic [ref=e505]: 0 PKU
+                  - generic [ref=e506]: 0 来源
+                  - generic [ref=e507]: "1.00"
+                  - generic [ref=e508]: draft
+              - button "大模型微调指南 rule 0 PKU 0 来源 1.00 draft" [ref=e509] [cursor=pointer]:
+                - generic [ref=e510]: 大模型微调指南
+                - generic [ref=e511]:
+                  - generic [ref=e512]: rule
+                  - generic [ref=e513]: 0 PKU
+                  - generic [ref=e514]: 0 来源
+                  - generic [ref=e515]: "1.00"
+                  - generic [ref=e516]: draft
+              - button "大模型微调指南 claim 1 PKU 1 来源 1.00 draft" [ref=e517] [cursor=pointer]:
+                - generic [ref=e518]: 大模型微调指南
+                - generic [ref=e519]:
+                  - generic [ref=e520]: claim
+                  - generic [ref=e521]: 1 PKU
+                  - generic [ref=e522]: 1 来源
+                  - generic [ref=e523]: "1.00"
+                  - generic [ref=e524]: draft
+              - button "大模型微调指南 problem 1 PKU 1 来源 1.00 draft" [ref=e525] [cursor=pointer]:
+                - generic [ref=e526]: 大模型微调指南
+                - generic [ref=e527]:
+                  - generic [ref=e528]: problem
+                  - generic [ref=e529]: 1 PKU
+                  - generic [ref=e530]: 1 来源
+                  - generic [ref=e531]: "1.00"
+                  - generic [ref=e532]: draft
+              - button "大模型微调指南 problem 1 PKU 1 来源 1.00 draft" [ref=e533] [cursor=pointer]:
+                - generic [ref=e534]: 大模型微调指南
+                - generic [ref=e535]:
+                  - generic [ref=e536]: problem
+                  - generic [ref=e537]: 1 PKU
+                  - generic [ref=e538]: 1 来源
+                  - generic [ref=e539]: "1.00"
+                  - generic [ref=e540]: draft
+              - button "大模型微调指南 problem 1 PKU 1 来源 1.00 draft" [ref=e541] [cursor=pointer]:
+                - generic [ref=e542]: 大模型微调指南
+                - generic [ref=e543]:
+                  - generic [ref=e544]: problem
+                  - generic [ref=e545]: 1 PKU
+                  - generic [ref=e546]: 1 来源
+                  - generic [ref=e547]: "1.00"
+                  - generic [ref=e548]: draft
+              - button "大模型微调指南 problem 1 PKU 1 来源 1.00 draft" [ref=e549] [cursor=pointer]:
+                - generic [ref=e550]: 大模型微调指南
+                - generic [ref=e551]:
+                  - generic [ref=e552]: problem
+                  - generic [ref=e553]: 1 PKU
+                  - generic [ref=e554]: 1 来源
+                  - generic [ref=e555]: "1.00"
+                  - generic [ref=e556]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 1.00 draft" [ref=e557] [cursor=pointer]:
+                - generic [ref=e558]: 大模型微调指南
+                - generic [ref=e559]:
+                  - generic [ref=e560]: method
+                  - generic [ref=e561]: 1 PKU
+                  - generic [ref=e562]: 1 来源
+                  - generic [ref=e563]: "1.00"
+                  - generic [ref=e564]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 1.00 draft" [ref=e565] [cursor=pointer]:
+                - generic [ref=e566]: 大模型微调指南
+                - generic [ref=e567]:
+                  - generic [ref=e568]: rule
+                  - generic [ref=e569]: 1 PKU
+                  - generic [ref=e570]: 1 来源
+                  - generic [ref=e571]: "1.00"
+                  - generic [ref=e572]: draft
+              - button "大模型微调指南 method 1 PKU 1 来源 1.00 draft" [ref=e573] [cursor=pointer]:
+                - generic [ref=e574]: 大模型微调指南
+                - generic [ref=e575]:
+                  - generic [ref=e576]: method
+                  - generic [ref=e577]: 1 PKU
+                  - generic [ref=e578]: 1 来源
+                  - generic [ref=e579]: "1.00"
+                  - generic [ref=e580]: draft
+              - button "大模型微调指南 rule 1 PKU 1 来源 1.00 draft" [ref=e581] [cursor=pointer]:
+                - generic [ref=e582]: 大模型微调指南
+                - generic [ref=e583]:
+                  - generic [ref=e584]: rule
+                  - generic [ref=e585]: 1 PKU
+                  - generic [ref=e586]: 1 来源
+                  - generic [ref=e587]: "1.00"
+                  - generic [ref=e588]: draft
+          - main [ref=e105]:
+            - generic [ref=e590]:
+              - img [ref=e592]
+              - generic [ref=e594]:
+                - generic [ref=e595]: 当前 CKP
+                - heading "大模型微调指南" [level=2] [ref=e596]
+                - paragraph [ref=e597]: 微调成功的基本判断标准包括：核心指标比基线提升、训练结果波动小、典型样本正确、线上样本无崩坏、少数类指标未恶化、推理速度和成本可接受。
+                - generic [ref=e598]:
+                  - generic [ref=e599]: 1 个 PKU
+                  - generic [ref=e600]: 1 个来源
+                  - generic [ref=e601]: 置信度 0.90
+                  - generic [ref=e602]: rule
+                - generic [ref=e603]:
+                  - generic [ref=e604]: 微调成功
+                  - generic [ref=e605]: 判断标准
+                  - generic [ref=e606]: 核心指标
+                  - generic [ref=e607]: 少数类
+            - generic [ref=e608]:
+              - button "证据链" [ref=e609] [cursor=pointer]
+              - button "PKU 关系" [ref=e610] [cursor=pointer]
+            - article [ref=e612]:
+              - button "PKU rule same_as external_reference 0.90 微调成功的基本判断标准包括：核心指标比基线提升、训练结果波动小、典型样本正确、线上样本无崩坏、少数类指标未恶化、推理速度和成本可接受。 Settlement from document chunk PKU extraction." [ref=e613] [cursor=pointer]:
+                - generic [ref=e614]:
+                  - img
+                  - generic [ref=e624]: PKU
+                  - generic [ref=e625]: rule
+                  - generic [ref=e626]: same_as
+                  - generic [ref=e627]: external_reference
+                  - generic [ref=e628]: "0.90"
+                - paragraph [ref=e629]: 微调成功的基本判断标准包括：核心指标比基线提升、训练结果波动小、典型样本正确、线上样本无崩坏、少数类指标未恶化、推理速度和成本可接受。
+                - paragraph [ref=e630]: Settlement from document chunk PKU extraction.
+              - button "文档块 大模型微调指南 评估时一定要看混淆矩阵。示例：| 真实 \\ 预测 | 物流 | 退款 | 账号 || ----------- | ---- | ---- | ---- || 物流 | 90 | 5 | 5 || 退款 ..." [active] [ref=e632] [cursor=pointer]:
+                - generic [ref=e633]:
+                  - img [ref=e634]
+                  - text: 文档块
+                - generic [ref=e637]: 大模型微调指南
+                - generic [ref=e638]: 评估时一定要看混淆矩阵。示例：| 真实 \ 预测 | 物流 | 退款 | 账号 || ----------- | ---- | ---- | ---- || 物流 | 90 | 5 | 5 || 退款 ...
+          - complementary [ref=e107]:
+            - generic [ref=e639]:
+              - generic [ref=e640]:
+                - generic [ref=e641]: 文档块
+                - heading "大模型微调指南" [level=2] [ref=e690]
+              - button "编辑节点" [ref=e643] [cursor=pointer]:
+                - img [ref=e644]
+            - generic [ref=e647]:
+              - generic [ref=e648]:
+                - generic [ref=e649]: 内容
+                - paragraph [ref=e650]: "评估时一定要看混淆矩阵。示例：| 真实 \\ 预测 | 物流 | 退款 | 账号 || ----------- | ---- | ---- | ---- || 物流 | 90 | 5 | 5 || 退款 | 12 | 80 | 8 || 账号 | 3 | 4 | 93 |从混淆矩阵可以看出：```text退款问题经常被模型预测成物流问题。```接下来应该回到数据中检查：```text- 退款和物流标签定义是否重叠- 是否存在错标- 是否需要增加区分性样本- 是否需要优化 prompt 或输入字段```------## 5.建立基线不要只看微调后的绝对指标，要和基线比较。常见基线：```text- 原始大模型 zero-shot- 原始大模型 few-shot- 传统机器学习模型，如 TF-IDF + LR- 旧线上模型- 人工规则系统```成功不是“模型训练完了”，而是：```text微调模型稳定超过基线。```------# 第五阶段：推理落地## 1.单条预测分类任务推理流程：```text输入文本→ tokenizer→ model→ logits→ softmax→ 取最大概率类别→ id2label 转回标签```示例输出：```json{\"text\": \"我的快递为什么还没到？\",\"pred_label\": \"物流问题\",\"confidence\": 0.93}```------## 2.批量预测批量预测要注意：```text- 使用 batch 推理提高吞吐- 设置 max_length- 避免一次性加载过大文件- 保存预测标签、概率、原始文本- 保留低置信度样本供人工复核```推荐输出格式：```csvtext,pred_label,confidence\"我的快递为什么还没到？\",\"物流问题\",0.93\"我要退款\",\"退款问题\",0.96```------## 3.置信度阈值不要所有预测都直接自动处理。可以设置规则：```textconfidence >= 0.90：自动处理0.60 <= confidence < 0.90：进入人工复核confidence < 0.60：返回兜底标签或转人工```------## 4.线上推理验收上线前至少检查：```text- 典型样本是否预测正确- 边界样本是否稳定- 长文本是否截断严重- 空文本、乱码、emoji 是否崩溃- 未见过的新表达是否还能合理处理- 批量推理速度是否满足业务要求```------# 第六阶段：成功判断标准满足以下 3 条即可认为一次微调基本成功：1.核心指标比基线提升2.多次训练结果波动小3.典型样本预测正确4.线上或模拟线上样本无明显崩坏5.少数类指标没有明显恶化6.推理速度和显存成本可接受更严格的标准：```text- 验证集和测试集指标接近- Macro F1、关键类别 Recall 达标- 错误样本可解释- 人工抽检通过- 灰度上线表现稳定```------# 第七阶段：新手最容易忽略的基础点## 1.标签必须来自真实标签列错误：```text从 text、title、category_name 等输入字段复制标签。```正确：```text从人工标注列、业务结果列或审核后的 label 列读取标签。```------"
+              - generic [ref=e683]:
+                - generic [ref=e684]:
+                  - generic [ref=e685]: 关系
+                  - generic [ref=e686]: document_chunk
+                - generic [ref=e687]:
+                  - generic [ref=e688]: 角色
+                  - generic [ref=e689]: "-"
+              - generic [ref=e651]:
+                - generic [ref=e652]:
+                  - generic [ref=e653]: 类型
+                  - generic [ref=e654]: document_chunk
+                - generic [ref=e655]:
+                  - generic [ref=e656]: 置信度
+                  - generic [ref=e657]: "-"
+              - generic [ref=e658]:
+                - generic [ref=e659]:
+                  - generic [ref=e660]: 来源类型
+                  - generic [ref=e661]: document_chunk
+                - generic [ref=e662]:
+                  - generic [ref=e663]: 来源 ID
+                  - generic [ref=e664]: b75a95b0-94e1-44b8-96e9-d6cb7e6237b9
+              - generic [ref=e665]:
+                - generic [ref=e666]:
+                  - generic [ref=e667]: 分类
+                  - generic [ref=e668]: 微调
+                - generic [ref=e669]:
+                  - generic [ref=e670]: 状态
+                  - generic [ref=e671]: "-"

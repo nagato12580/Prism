@@ -1,6 +1,25 @@
 # prism/backend/app/models/__init__.py
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
 from .chat import ChatSession, ChatMessage
+from .wiki import WikiDocument, WikiConcept, WikiKnowledgePoint, WikiKnowledgeRelation, WikiImage, WikiExtractionLog
+from .memory import (
+    MemoryDraft,
+    MemoryEntity,
+    MemoryEntry,
+    MemoryEvent,
+    MemoryInsight,
+    MemoryRelation,
+    MemorySource,
+    MemoryStatement,
+)
+from .asset import PersonalAsset, PersonalAssetItem, PersonalAssetUnit, AssetRelation, ExtensionPoint, AssetUsageEvent
+from .knowledge_governance import (
+    CanonicalKnowledgePoint,
+    CanonicalRelation,
+    PKUCanonicalLink,
+    PKURelation,
+    PersonalKnowledgeUnit,
+)
 
 __all__ = [
     "KnowledgeTopic",
@@ -9,4 +28,29 @@ __all__ = [
     "KnowledgeFile",
     "ChatSession",
     "ChatMessage",
+    "WikiDocument",
+    "WikiConcept",
+    "WikiKnowledgePoint",
+    "WikiKnowledgeRelation",
+    "WikiImage",
+    "WikiExtractionLog",
+    "MemoryDraft",
+    "MemoryEntity",
+    "MemoryEntry",
+    "MemoryEvent",
+    "MemoryInsight",
+    "MemoryRelation",
+    "MemorySource",
+    "MemoryStatement",
+    "PersonalAsset",
+    "PersonalAssetItem",
+    "AssetRelation",
+    "ExtensionPoint",
+    "AssetUsageEvent",
+    "PersonalAssetUnit",
+    "PersonalKnowledgeUnit",
+    "CanonicalKnowledgePoint",
+    "PKUCanonicalLink",
+    "PKURelation",
+    "CanonicalRelation",
 ]

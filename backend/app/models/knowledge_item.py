@@ -1,12 +1,16 @@
 # prism/backend/app/models/knowledge_item.py
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON, CHAR
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import relationship, synonym
 
 from ..database import Base
+from ..utils.time import local_now
+
+
+DocumentText = Text().with_variant(MEDIUMTEXT, "mysql")
 
 
 def _uuid():
@@ -23,8 +27,8 @@ class KnowledgeTopic(Base):
     user_id = Column(CHAR(36), default="default-user", nullable=False, comment="User id")
     name = Column(String(255), nullable=False, comment="Topic name")
     description = Column(Text, comment="Topic description")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     resources = relationship("KnowledgeFile", back_populates="topic", cascade="all, delete-orphan")
 
@@ -34,7 +38,7 @@ class KnowledgeItem(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     title = Column(String(255), nullable=False, comment="Title")
-    content = Column(Text, comment="Markdown content")
+    content = Column(DocumentText, comment="Markdown content")
     summary = Column(Text, comment="AI generated summary")
     source_type = Column(String(20), default="manual", comment="file/url/chat/manual")
     source_ref = Column(String(500), comment="Original file path, URL, or chat ID")
@@ -42,8 +46,8 @@ class KnowledgeItem(Base):
     category = Column(String(255), comment="Category path")
     status = Column(String(20), default="published", comment="draft/published/archived")
     user_id = Column(CHAR(36), default="default-user", comment="User id")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     chunks = relationship("KnowledgeChunk", back_populates="item", cascade="all, delete-orphan")
 
@@ -59,7 +63,7 @@ class KnowledgeChunk(Base):
     parent_id = Column(CHAR(36), nullable=True, default=None, comment="子块指向父块 ID")
     embedding_id = Column(String(100), comment="Milvus vector ID")
     extra_meta = Column(JSON, comment="Page, position, and other metadata")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=local_now)
 
     item = relationship("KnowledgeItem", back_populates="chunks")
 
@@ -87,11 +91,11 @@ class KnowledgeFile(Base):
     tags = Column(JSON, comment="Tags")
     source_type = Column(String(20), default="upload", comment="upload")
     page_count = Column(Integer, nullable=True, comment="Document page count")
-    content_text = Column(Text, comment="Parsed text")
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
-    last_modified_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    content_text = Column(DocumentText, comment="Parsed text")
+    uploaded_at = Column(DateTime, default=local_now)
+    last_modified_at = Column(DateTime, default=local_now, onupdate=local_now)
+    created_at = Column(DateTime, default=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
     error_message = Column(Text, comment="Processing error")
 
     topic = relationship("KnowledgeTopic", back_populates="resources")

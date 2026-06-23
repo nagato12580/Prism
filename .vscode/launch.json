@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Prism Backend",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "backend.run",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "SKIP_ENGINE": "1"
+      },
+      "justMyCode": false
+    },
+    {
+      "name": "Prism Engine",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "engine.run",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": false
+    }
+  ]
+}
