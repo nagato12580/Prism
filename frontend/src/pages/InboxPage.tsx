@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Inbox, Loader2, Plus, RefreshCw, Save, Search, Tags, X } from 'lucide-react'
+import VoiceRecordButton from '@/components/VoiceRecordButton'
 import { assetApi, type AssetDraft } from '@/app/api'
 import { cn } from '@/lib/utils'
 
@@ -267,6 +268,18 @@ export function InboxPage() {
         />
 
         <section className="prism-panel flex min-h-0 flex-col rounded-lg p-3">
+          {/* Voice recording / upload area */}
+          <div className="mb-3">
+            <VoiceRecordButton
+              onResult={(item) => {
+                setItems((current) => [item, ...current])
+                setActiveId(item.id)
+                setNotice('语音已转写并放入收件箱，等待确认入库。')
+              }}
+              onError={(msg) => setError(msg)}
+            />
+          </div>
+
           <div className="mb-3 flex items-center gap-2">
             <Plus size={16} className="text-[var(--prism-blue)]" />
             <h2 className="text-sm font-semibold text-slate-950">添加碎片</h2>
