@@ -729,13 +729,10 @@ export const assetApi = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
-  createVoice: async (
-    audio: Blob,
-    filename: string,
-    sourceType: 'recording' | 'upload' = 'recording',
-  ): Promise<AssetDraft> => {
+  /** Upload audio for voice transcription → creates an inbox asset item. */
+  createVoice: (blob: Blob, filename: string, sourceType: string = 'recording'): Promise<AssetDraft> => {
     const form = new FormData()
-    form.append('audio_file', audio, filename)
+    form.append('audio_file', blob, filename)
     form.append('source_type', sourceType)
     return uploadRequest<AssetDraft>('/assets/voice', form)
   },
