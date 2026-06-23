@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.models.chat import ChatMessage, ChatSession
-from backend.app.models.memory import MemoryDraft, MemorySource, MemoryStatement
+from backend.app.models.memory import MemoryDraft, MemorySource, MemoryStatement, MemoryStatus
 from backend.app.prompts.memory_extraction import build_memory_extraction_messages
 
 DEFAULT_USER_ID = "default-user"
@@ -104,6 +104,55 @@ def _normalize_content(content: str) -> str:
     return re.sub(r"\s+", " ", (content or "").strip()).lower()
 
 
+def _tokenize(content: str) -> set[str]:
+    """中文按字符 bigram，英文按词切分，混合用于重叠比对。"""
+    norm = _normalize_content(content)
+    tokens: set[str] = set()
+    # 英文/数字词
+    for tok in re.findall(r"[a-z0-9]{2,}", norm):
+        tokens.add(tok)
+    # 中文字符 bigram（剔除空白与 ASCII）
+    cjk = re.sub(r"[^\u4e00-\u9fff]", "", norm)
+    for i in range(len(cjk) - 1):
+        tokens.add(cjk[i : i + 2])
+    return tokens
+
+
+def _existing_confirmed_statements(db: Session) -> list[tuple[str, str, str]]:
+    rows = (
+        db.query(MemoryStatement.id, MemoryStatement.content, MemoryStatement.statement_type)
+        .filter(MemoryStatement.user_id == DEFAULT_USER_ID, MemoryStatement.status == MemoryStatus.CONFIRMED)
+        .all()
+    )
+    return [(str(r[0]), str(r[1] or ""), str(r[2] or "")) for r in rows]
+
+
+def _detect_conflicts(
+    candidate: MemoryCandidate,
+    confirmed: list[tuple[str, str, str]],
+    min_overlap: float = 0.5,
+) -> list[str]:
+    """检测与已有确认 Statement 的潜在冲突：同类型 + 高词重叠。
+    返回可能冲突的 statement_id 列表，供草稿审阅时提示。
+    """
+    if not confirmed:
+        return []
+    cand_tokens = _tokenize(candidate.content)
+    if not cand_tokens:
+        return []
+    conflicts: list[str] = []
+    for sid, content, stype in confirmed:
+        if stype and candidate.statement_type and stype != candidate.statement_type:
+            continue
+        other_tokens = _tokenize(content)
+        if not other_tokens:
+            continue
+        overlap = len(cand_tokens & other_tokens) / min(len(cand_tokens), len(other_tokens))
+        if overlap >= min_overlap:
+            conflicts.append(sid)
+    return conflicts
+
+
 def _existing_memory_contents(db: Session) -> set[str]:
     contents: set[str] = set()
     statements = db.query(MemoryStatement.content).filter(MemoryStatement.user_id == DEFAULT_USER_ID).all()
@@ -141,6 +190,7 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
 
     by_id = {message.id: message for message in messages}
     existing = _existing_memory_contents(db)
+    confirmed_statements = _existing_confirmed_statements(db)
 
     for candidate in candidates:
         normalized = _normalize_content(candidate.content)
@@ -157,6 +207,7 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
             span_text=evidence.content or "",
             source_metadata={"extractor": "conversation_memory_phase2"},
         )
+        conflict_ids = _detect_conflicts(candidate, confirmed_statements)
         draft = MemoryDraft(
             user_id=DEFAULT_USER_ID,
             draft_type="statement",
@@ -169,7 +220,7 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
             decision_hint=candidate.decision_hint,
             risk_level=candidate.risk_level,
             confidence=candidate.confidence,
-            conflict_ids=[],
+            conflict_ids=conflict_ids,
             source=source,
         )
         db.add_all([source, draft])

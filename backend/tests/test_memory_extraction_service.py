@@ -162,3 +162,72 @@ def test_extract_session_memories_skips_duplicate_drafts_and_statements(db_sessi
     assert result.drafts_created == 0
     assert result.candidates_skipped == 1
     assert db_session.query(MemoryDraft).count() == 0
+
+
+def test_extract_session_memories_detects_conflicts_with_existing_statements(db_session, monkeypatch):
+    from backend.app.models.memory import MemoryStatus
+
+    session = ChatSession(user_id="default-user", title="Pref shift")
+    db_session.add(session)
+    db_session.flush()
+    message = ChatMessage(session_id=session.id, role="user", content="我现在改成用深色主题了。")
+    source = MemorySource(
+        user_id="default-user",
+        source_type="chat_message",
+        source_id=message.id,
+        session_id=session.id,
+        message_id=message.id,
+        span_text=message.content,
+    )
+    existing = MemoryStatement(
+        user_id="default-user",
+        content="用户偏好使用浅色主题阅读。",
+        statement_type="preference",
+        temporal_type="stable",
+        status=MemoryStatus.CONFIRMED,
+        source=source,
+    )
+    db_session.add_all([message, source, existing])
+    db_session.commit()
+    existing_id = existing.id
+
+    def fake_llm(prompt_messages):
+        return json.dumps(
+            {
+                "candidates": [
+                    {
+                        "content": "用户偏好使用深色主题阅读。",
+                        "statement_type": "preference",
+                        "confidence": 0.85,
+                        "evidence_message_id": message.id,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr(svc, "_call_memory_extraction_llm", fake_llm)
+
+    result = svc.extract_session_memories(db_session, session.id)
+
+    assert result.drafts_created == 1
+    draft = db_session.query(MemoryDraft).one()
+    assert existing_id in (draft.conflict_ids or [])
+
+
+def test_detect_conflicts_ignores_different_statement_types():
+    from backend.app.services.memory_extraction import MemoryCandidate, _detect_conflicts
+
+    candidate = MemoryCandidate(content="用户偏好深色主题", statement_type="preference")
+    confirmed = [("s1", "用户偏好深色主题阅读", "goal")]
+
+    assert _detect_conflicts(candidate, confirmed) == []
+
+
+def test_detect_conflicts_requires_sufficient_overlap():
+    from backend.app.services.memory_extraction import MemoryCandidate, _detect_conflicts
+
+    candidate = MemoryCandidate(content="用户喜欢深夜整理碎片", statement_type="habit")
+    confirmed = [("s1", "用户偏好深色主题阅读", "habit")]
+
+    assert _detect_conflicts(candidate, confirmed) == []
