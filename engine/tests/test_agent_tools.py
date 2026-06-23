@@ -173,6 +173,64 @@ def test_memory_search_tool_returns_confirmed_memories(monkeypatch):
     assert ctx.stats_holder["memory_search"]["hit_count"] == 1
 
 
+def test_memory_search_tool_recalls_confirmed_statements_and_skips_drafts(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from backend.app.database import Base
+    from backend.app.models import MemoryStatement
+    from backend.app.models.memory import MemoryStatus
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    session.add_all(
+        [
+            MemoryStatement(
+                user_id="default-user",
+                content="用户每天早上用 Prism 复习前一天的知识。",
+                statement_type="habit",
+                temporal_type="stable",
+                importance=0.8,
+                status=MemoryStatus.CONFIRMED,
+            ),
+            MemoryStatement(
+                user_id="default-user",
+                content="用户喜欢深夜用 Prism 整理碎片。",
+                statement_type="habit",
+                temporal_type="stable",
+                importance=0.5,
+                status=MemoryStatus.DRAFT,
+            ),
+            MemoryStatement(
+                user_id="default-user",
+                content="用户已弃用 Prism 旧版偏好。",
+                statement_type="fact",
+                temporal_type="stable",
+                importance=0.4,
+                status=MemoryStatus.SUPERSEDED,
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+    monkeypatch.setattr(memory_tools, "_Session", Session)
+
+    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
+    tool = next(t for t in build_enabled_tools(ctx) if t.name == "memory_search")
+
+    payload = json.loads(tool.invoke({"query": "复习", "limit": 10}))
+
+    assert payload["status"] == "success"
+    titles = [m["title"] for m in payload["memories"]]
+    assert any("复习" in t for t in titles)
+    assert all("弃用" not in t for t in titles)
+    assert all("深夜" not in t for t in titles)
+    assert ctx.stats_holder["memory_search"]["hit_count"] == 1
+
+
 def test_knowledge_search_dedupes_shared_citations_across_calls():
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
     tool = BUILTIN_REGISTRY["knowledge_search"].builder(ctx)
