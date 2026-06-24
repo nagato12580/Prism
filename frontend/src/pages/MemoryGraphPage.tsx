@@ -99,7 +99,7 @@ export function MemoryGraphPage() {
           ) : filtered.length === 0 ? (
             <GraphEmpty text="没有匹配的记忆。清空搜索后可以查看完整图谱。" />
           ) : (
-            <svg viewBox="0 0 980 620" className="h-full min-h-[34rem] w-full">
+            <svg viewBox="0 0 1200 720" className="h-full min-h-[36rem] w-full">
               <defs>
                 <filter id="memoryShadow" x="-20%" y="-20%" width="140%" height="140%">
                   <feDropShadow dx="0" dy="10" stdDeviation="12" floodColor="#0f172a" floodOpacity="0.12" />
@@ -159,29 +159,45 @@ export function MemoryGraphPage() {
 function buildGraph(items: MemoryView[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const groups = groupMemories(items)
   const typeOrder = Object.keys(memoryTypeMeta).filter((type) => groups[type]?.length)
-  const nodes: GraphNode[] = [{ id: 'self', label: '用户', kind: 'self', x: 490, y: 310 }]
+  const centerX = 600
+  const centerY = 360
+  const nodes: GraphNode[] = [{ id: 'self', label: '用户', kind: 'self', x: centerX, y: centerY }]
   const edges: GraphEdge[] = []
-  const radiusX = 270
-  const radiusY = 190
+  const typeRadius = 230
+  // 记忆网格块：每类在类型节点外侧排成 2 列网格，间距大于节点尺寸避免重叠
+  const cols = 2
+  const colGap = 146
+  const rowGap = 52
+  const startOffset = 120
+  const maxPerType = 10
   typeOrder.forEach((type, index) => {
     const angle = -Math.PI / 2 + (index * Math.PI * 2) / Math.max(typeOrder.length, 1)
+    const dirX = Math.cos(angle)
+    const dirY = Math.sin(angle)
+    const perpX = -dirY
+    const perpY = dirX
     const typeNode = {
       id: `type:${type}`,
       label: getMemoryMeta(type).label,
       kind: 'type' as const,
-      x: 490 + Math.cos(angle) * radiusX,
-      y: 310 + Math.sin(angle) * radiusY,
+      x: centerX + dirX * typeRadius,
+      y: centerY + dirY * typeRadius,
     }
     nodes.push(typeNode)
     edges.push({ from: 'self', to: typeNode.id })
-    groups[type].slice(0, 12).forEach((item, itemIndex) => {
-      const spread = (itemIndex - (groups[type].slice(0, 12).length - 1) / 2) * 26
+    const groupItems = groups[type].slice(0, maxPerType)
+    groupItems.forEach((item, itemIndex) => {
+      const row = Math.floor(itemIndex / cols)
+      const col = itemIndex % cols
+      const rowCount = Math.ceil(groupItems.length / cols)
+      const radialDist = startOffset + col * colGap
+      const perpSpread = (row - (rowCount - 1) / 2) * rowGap
       const memoryNode = {
         id: item.id,
         label: item.title,
         kind: 'memory' as const,
-        x: typeNode.x + Math.cos(angle) * 128 - Math.sin(angle) * spread,
-        y: typeNode.y + Math.sin(angle) * 88 + Math.cos(angle) * spread,
+        x: typeNode.x + dirX * radialDist + perpX * perpSpread,
+        y: typeNode.y + dirY * radialDist + perpY * perpSpread,
         item,
       }
       nodes.push(memoryNode)
