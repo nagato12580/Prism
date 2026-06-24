@@ -18,6 +18,7 @@ from ..schemas.memory import (
     memory_source_to_out,
 )
 from ..services.memory_extraction import extract_session_memories
+from ..services.memory_consolidation import consolidation_candidates, run_consolidation
 from ..services.memory_entity import extract_and_link_entities
 from ..services.memory_reflection import list_insights, run_reflection
 from ..services.memory_vectors import upsert_statement_vector
@@ -366,3 +367,15 @@ def get_insights(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get
         }
         for i in insights
     ]
+
+
+@router.get("/consolidate/preview", response_model=dict)
+def preview_consolidation(db: Session = Depends(get_db)):
+    """预览巩固候选：展示将提升重要度的高频记忆，不修改数据。"""
+    return consolidation_candidates(db)
+
+
+@router.post("/consolidate", response_model=dict)
+def trigger_consolidation(db: Session = Depends(get_db)):
+    """手动触发巩固：高频被召回但重要度偏低的记忆提升重要度。"""
+    return run_consolidation(db)

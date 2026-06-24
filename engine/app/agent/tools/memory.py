@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.models.memory import MemoryEntry, MemoryStatement, MemoryStatus
+from backend.app.services.memory_access import bump_memory_access
 from backend.app.services.memory_vectors import search_memory_vectors
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 from engine.app.config import settings
@@ -151,6 +152,14 @@ def _build_memory_search(ctx: ToolContext) -> StructuredTool:
                 reverse=True,
             )
             merged = merged[:limit]
+
+            # 回写 access_count 供巩固提权依据（失败不影响召回结果）
+            if merged:
+                try:
+                    hit_ids = [(s["ref_id"], "entry" if s.get("source") == "asset" else "statement") for s in merged]
+                    bump_memory_access(db, memory_ids=hit_ids)
+                except Exception:
+                    pass
 
             ctx.citations.extend(merged)
             ctx.stats_holder["memory_search"] = {"hit_count": len(merged)}

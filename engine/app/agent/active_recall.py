@@ -74,6 +74,7 @@ def recall_memory_context(
     lines: list[str] = []
     try:
         fetched: set[str] = set()
+        hit_ids: list[tuple[str, str]] = []
         for hit in vec_hits:
             if len(lines) >= max_items:
                 break
@@ -87,6 +88,7 @@ def recall_memory_context(
                 if rec:
                     lines.append(_entry_brief(rec))
                     fetched.add(mid)
+                    hit_ids.append((mid, "entry"))
             elif kind == "statement":
                 rec = (
                     db.query(MemoryStatement)
@@ -100,6 +102,7 @@ def recall_memory_context(
                 if rec:
                     lines.append(_statement_brief(rec))
                     fetched.add(mid)
+                    hit_ids.append((mid, "statement"))
     except Exception:
         return ""
     finally:
@@ -107,6 +110,18 @@ def recall_memory_context(
 
     if not lines:
         return ""
+
+    # 回写 access_count（失败不影响召回注入）
+    if hit_ids:
+        try:
+            from backend.app.services.memory_access import bump_memory_access
+            bump_session = _Session()
+            try:
+                bump_memory_access(bump_session, memory_ids=hit_ids)
+            finally:
+                bump_session.close()
+        except Exception:
+            pass
 
     block = "【关于用户的已知记忆（供参考，可自然融入回答，不必刻意提及）】\n" + "\n".join(lines)
     return block

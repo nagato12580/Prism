@@ -365,6 +365,29 @@ export const memoryApi = {
     const qs = search.toString() ? `?${search.toString()}` : ''
     return request<MemoryInsight[]>(`/memories/insights${qs}`)
   },
+  previewConsolidation: () =>
+    request<ConsolidationPreview>(`/memories/consolidate/preview`),
+  consolidate: () =>
+    request<ConsolidationResult>(`/memories/consolidate`, { method: 'POST' }),
+}
+
+export interface ConsolidationCandidate {
+  id: string
+  title?: string
+  content?: string
+  access_count: number
+  importance: number
+}
+
+export interface ConsolidationPreview {
+  entries: ConsolidationCandidate[]
+  statements: ConsolidationCandidate[]
+}
+
+export interface ConsolidationResult {
+  promoted_entries: number
+  promoted_statements: number
+  total_promoted: number
 }
 
 export interface MemoryInsight {

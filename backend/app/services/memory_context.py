@@ -7,10 +7,17 @@ from sqlalchemy.orm import Session
 from backend.app.config import settings
 from backend.app.models.memory import MemoryEntry, MemoryStatement, MemoryStatus
 from backend.app.services.memory_vectors import search_memory_vectors
+from backend.app.utils.time import local_now
 
 MIN_SCORE = 0.40
 MAX_ITEMS = 5
 MAX_CHARS = 600
+
+
+def _touch_access(rec) -> None:
+    """召回命中时累加 access_count（不 commit，随调用方事务提交）。"""
+    rec.access_count = (rec.access_count or 0) + 1
+    rec.last_accessed_at = local_now()
 
 
 def recall_preference_context(
@@ -61,6 +68,7 @@ def recall_preference_context(
             if rec:
                 lines.append(f"- {rec.title or rec.content[:40]}：{rec.content}")
                 fetched.add(mid)
+                _touch_access(rec)
         elif kind == "statement":
             rec = (
                 db.query(MemoryStatement)
@@ -74,6 +82,7 @@ def recall_preference_context(
             if rec and rec.statement_type in preference_types:
                 lines.append(f"- {rec.content}")
                 fetched.add(mid)
+                _touch_access(rec)
 
     if not lines:
         return ""
