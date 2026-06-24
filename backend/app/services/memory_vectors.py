@@ -5,11 +5,12 @@ from openai import OpenAI
 from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
 
 from backend.app.config import settings
-from backend.app.models.memory import MemoryEntry, MemoryStatement
+from backend.app.models.memory import MemoryEntry, MemoryInsight, MemoryStatement
 
 MEMORY_COLLECTION_NAME = "prism_memory"
 KIND_ENTRY = "entry"
 KIND_STATEMENT = "statement"
+KIND_INSIGHT = "insight"
 _embedding_client: OpenAI | None = None
 
 
@@ -62,6 +63,11 @@ def _statement_vector_text(statement: MemoryStatement) -> str:
     return "\n".join(part for part in parts if part)
 
 
+def _insight_vector_text(insight: MemoryInsight) -> str:
+    parts = [insight.theme or "", insight.content or "", insight.insight_type or ""]
+    return "\n".join(part for part in parts if part)
+
+
 def upsert_entry_vector(entry: MemoryEntry) -> str:
     return _upsert(KIND_ENTRY, entry.id, entry.user_id, entry.memory_type or "",
                    entry.embedding_ref, _entry_vector_text(entry))
@@ -70,6 +76,11 @@ def upsert_entry_vector(entry: MemoryEntry) -> str:
 def upsert_statement_vector(statement: MemoryStatement) -> str:
     return _upsert(KIND_STATEMENT, statement.id, statement.user_id, statement.statement_type or "",
                    statement.embedding_ref, _statement_vector_text(statement))
+
+
+def upsert_insight_vector(insight: MemoryInsight) -> str:
+    return _upsert(KIND_INSIGHT, insight.id, insight.user_id, insight.theme or "",
+                   insight.embedding_ref, _insight_vector_text(insight))
 
 
 def _upsert(kind: str, memory_id: str, user_id: str, memory_type: str,
