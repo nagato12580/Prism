@@ -1,22 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BrainCircuit, Loader2, RefreshCw, Search } from 'lucide-react'
-import { memoryApi, type MemoryStatement } from '@/app/api'
+import { BrainCircuit, Boxes, Loader2, RefreshCw, Search } from 'lucide-react'
+import { memoryApi, type MemoryEntityGraph, type MemoryEntityNode, type MemoryStatement } from '@/app/api'
 import { cn } from '@/lib/utils'
 import { type MemoryView, entryToView, formatDate, getMemoryMeta, groupMemories, memoryTypeMeta, statementToView } from './memoryUtils'
 
 type GraphNode = {
   id: string
   label: string
-  kind: 'self' | 'type' | 'memory'
+  kind: 'self' | 'type' | 'memory' | 'entity'
   x: number
   y: number
   item?: MemoryView
+  entity?: MemoryEntityNode
 }
 
-type GraphEdge = { from: string; to: string }
+type GraphEdge = { from: string; to: string; dashed?: boolean }
+
+const ENTITY_TYPE_META: Record<string, { label: string; tone: string }> = {
+  project: { label: '项目', tone: 'border-blue-200 bg-blue-50 text-blue-700' },
+  technology: { label: '技术', tone: 'border-cyan-200 bg-cyan-50 text-cyan-700' },
+  topic: { label: '主题', tone: 'border-violet-200 bg-violet-50 text-violet-700' },
+  person: { label: '人物', tone: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  product: { label: '产品', tone: 'border-amber-200 bg-amber-50 text-amber-700' },
+}
+
+function entityMeta(type: string) {
+  return ENTITY_TYPE_META[type] ?? { label: type || '实体', tone: 'border-slate-200 bg-slate-100 text-slate-600' }
+}
 
 export function MemoryGraphPage() {
   const [memories, setMemories] = useState<MemoryView[]>([])
+  const [entityGraph, setEntityGraph] = useState<MemoryEntityGraph | null>(null)
+  const [mode, setMode] = useState<'entity' | 'type'>('entity')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -30,23 +45,34 @@ export function MemoryGraphPage() {
     )
   }, [memories, query])
 
-  const graph = useMemo(() => buildGraph(filtered), [filtered])
-  const selected = selectedId ? filtered.find((item) => item.id === selectedId) ?? null : filtered[0] ?? null
+  const typeGraph = useMemo(() => buildTypeGraph(filtered), [filtered])
+  const entityGraphData = useMemo(() => buildEntityGraph(entityGraph, filtered), [entityGraph, filtered])
+  const graph = mode === 'entity' ? entityGraphData : typeGraph
+  const hasEntities = (entityGraph?.entities?.length ?? 0) > 0
+
+  const selected = selectedId ? graph.nodes.find((n) => n.id === selectedId) ?? null : graph.nodes.find((n) => n.kind === 'entity' || n.kind === 'memory') ?? null
 
   const loadMemories = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [entries, statements] = await Promise.all([
+      const [entries, statements, entities] = await Promise.all([
         memoryApi.list({ limit: 180 }),
         memoryApi.listStatements({ limit: 200 }).catch(() => [] as MemoryStatement[]),
+        memoryApi.listEntities({ limit: 120 }).catch(() => ({ entities: [], relations: [] }) as MemoryEntityGraph),
       ])
       const views = [
         ...entries.map(entryToView),
         ...statements.map(statementToView),
       ].sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0))
       setMemories(views)
-      setSelectedId((current) => (current && views.some((item) => item.id === current) ? current : views[0]?.id ?? null))
+      setEntityGraph(entities)
+      if (entities.entities?.length) {
+        setMode('entity')
+      } else {
+        setMode('type')
+      }
+      setSelectedId((current) => (current && views.some((item) => item.id === current) ? current : null))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -69,7 +95,32 @@ export function MemoryGraphPage() {
             </div>
             <h1 className="mt-1 text-xl font-semibold text-slate-950">记忆图谱</h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <div className="inline-flex rounded-lg border border-[var(--prism-line)] bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setMode('entity')}
+                disabled={!hasEntities}
+                className={cn(
+                  'inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition disabled:opacity-40',
+                  mode === 'entity' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
+                )}
+              >
+                <Boxes size={13} />
+                实体图
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('type')}
+                className={cn(
+                  'inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition',
+                  mode === 'type' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
+                )}
+              >
+                <BrainCircuit size={13} />
+                类型图
+              </button>
+            </div>
             <label className="relative block w-full min-w-0 sm:w-64">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -98,6 +149,8 @@ export function MemoryGraphPage() {
             <GraphEmpty text="正在读取记忆图谱。" />
           ) : filtered.length === 0 ? (
             <GraphEmpty text="没有匹配的记忆。清空搜索后可以查看完整图谱。" />
+          ) : graph.nodes.length === 0 ? (
+            <GraphEmpty text="暂无实体数据。确认记忆后会自动抽取实体，或切换到「类型图」查看。" />
           ) : (
             <svg viewBox="0 0 1200 720" className="h-full min-h-[36rem] w-full">
               <defs>
@@ -118,6 +171,7 @@ export function MemoryGraphPage() {
                     y2={to.y}
                     stroke="#cbd5e1"
                     strokeWidth={edge.from === 'self' ? 1.4 : 1}
+                    strokeDasharray={edge.dashed ? '4 3' : undefined}
                   />
                 )
               })}
@@ -125,8 +179,8 @@ export function MemoryGraphPage() {
                 <GraphNodeShape
                   key={node.id}
                   node={node}
-                  active={node.item?.id === selected?.id}
-                  onSelect={() => node.item && setSelectedId(node.item.id)}
+                  active={node.id === selectedId}
+                  onSelect={() => setSelectedId(node.id)}
                 />
               ))}
             </svg>
@@ -136,18 +190,22 @@ export function MemoryGraphPage() {
 
       <aside className="min-h-0 overflow-hidden rounded-lg border border-[var(--prism-line)] bg-white">
         <div className="border-b border-[var(--prism-line)] p-3">
-          <div className="text-xs font-medium text-slate-500">选中记忆</div>
-          <h2 className="mt-1 truncate text-base font-semibold text-slate-950">{selected?.title ?? '暂无记忆'}</h2>
+          <div className="text-xs font-medium text-slate-500">{selected?.kind === 'entity' ? '选中实体' : '选中记忆'}</div>
+          <h2 className="mt-1 truncate text-base font-semibold text-slate-950">
+            {selected?.kind === 'entity' ? selected.entity?.name : selected?.label ?? '暂无选中'}
+          </h2>
         </div>
         <div className="min-h-0 space-y-3 overflow-y-auto p-3">
-          {selected ? (
+          {selected?.kind === 'entity' && selected.entity ? (
+            <EntityDetail entity={selected.entity} memories={filtered} />
+          ) : selected?.item ? (
             <>
-              <MemoryDetail item={selected} />
-              <RelationList selected={selected} items={filtered} />
+              <MemoryDetail item={selected.item} />
+              <RelationList selected={selected.item} items={filtered} />
             </>
           ) : (
             <div className="rounded-lg border border-dashed border-[var(--prism-line)] bg-slate-50 p-4 text-xs leading-5 text-slate-500">
-              选择图谱中的记忆节点后，这里会显示来源、标签和相邻记忆。
+              选择图谱中的实体或记忆节点后，这里会显示详情和关联。
             </div>
           )}
         </div>
@@ -156,7 +214,7 @@ export function MemoryGraphPage() {
   )
 }
 
-function buildGraph(items: MemoryView[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+function buildTypeGraph(items: MemoryView[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const groups = groupMemories(items)
   const typeOrder = Object.keys(memoryTypeMeta).filter((type) => groups[type]?.length)
   const centerX = 600
@@ -207,21 +265,94 @@ function buildGraph(items: MemoryView[]): { nodes: GraphNode[]; edges: GraphEdge
   return { nodes, edges }
 }
 
+function buildEntityGraph(eg: MemoryEntityGraph | null, memories: MemoryView[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  if (!eg || !eg.entities?.length) {
+    return { nodes: [], edges: [] }
+  }
+  const centerX = 600
+  const centerY = 360
+  const radius = 200
+  const nodes: GraphNode[] = []
+  const edges: GraphEdge[] = []
+  const entityById = new Map(eg.entities.map((e) => [e.id, e]))
+  const memoryById = new Map(memories.map((m) => [m.id, m]))
+
+  // 实体节点：环形分布，按 mention_count 降序取前 14 个
+  const topEntities = [...eg.entities].sort((a, b) => (b.mention_count ?? 0) - (a.mention_count ?? 0)).slice(0, 14)
+  topEntities.forEach((entity, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / topEntities.length
+    nodes.push({
+      id: entity.id,
+      label: entity.name,
+      kind: 'entity',
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius,
+      entity,
+    })
+  })
+
+  // 实体间关系边
+  eg.relations.forEach((rel) => {
+    if (entityById.has(rel.subject_entity_id) && entityById.has(rel.object_entity_id)) {
+      edges.push({ from: rel.subject_entity_id, to: rel.object_entity_id })
+    }
+  })
+
+  // 实体关联的记忆节点：挂在实体外侧 2 列网格
+  const cols = 2
+  const colGap = 146
+  const rowGap = 48
+  const startOffset = 90
+  const maxPerEntity = 4
+  topEntities.forEach((entity, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / topEntities.length
+    const dirX = Math.cos(angle)
+    const dirY = Math.sin(angle)
+    const perpX = -dirY
+    const perpY = dirX
+    const ex = centerX + dirX * radius
+    const ey = centerY + dirY * radius
+    const linkedMemories = (entity.source_ids ?? [])
+      .map((sid) => memoryById.get(sid))
+      .filter((m): m is MemoryView => Boolean(m))
+      .slice(0, maxPerEntity)
+    linkedMemories.forEach((item, itemIndex) => {
+      const row = Math.floor(itemIndex / cols)
+      const col = itemIndex % cols
+      const rowCount = Math.ceil(linkedMemories.length / cols)
+      const radialDist = startOffset + col * colGap
+      const perpSpread = (row - (rowCount - 1) / 2) * rowGap
+      nodes.push({
+        id: `mem:${item.id}`,
+        label: item.title,
+        kind: 'memory',
+        x: ex + dirX * radialDist + perpX * perpSpread,
+        y: ey + dirY * radialDist + perpY * perpSpread,
+        item,
+      })
+      edges.push({ from: entity.id, to: `mem:${item.id}`, dashed: true })
+    })
+  })
+  return { nodes, edges }
+}
+
 function GraphNodeShape({ node, active, onSelect }: { node: GraphNode; active: boolean; onSelect: () => void }) {
-  const meta = node.item ? getMemoryMeta(node.item.memory_type) : null
-  const fill = node.kind === 'self' ? '#0f172a' : node.kind === 'type' ? '#ffffff' : active ? '#eff6ff' : '#ffffff'
-  const stroke = node.kind === 'self' ? '#0f172a' : active ? '#2563eb' : '#cbd5e1'
-  const width = node.kind === 'memory' ? 132 : node.kind === 'type' ? 76 : 86
+  const memMeta = node.item ? getMemoryMeta(node.item.memory_type) : null
+  const entMeta = node.entity ? entityMeta(node.entity.entity_type) : null
+  const fill = node.kind === 'self' ? '#0f172a' : active ? '#eff6ff' : '#ffffff'
+  const stroke = node.kind === 'self' ? '#0f172a' : active ? '#2563eb' : node.kind === 'entity' ? '#94a3b8' : '#cbd5e1'
+  const width = node.kind === 'memory' ? 132 : node.kind === 'type' ? 76 : 96
   const height = node.kind === 'memory' ? 42 : 40
+  const selectable = node.kind === 'memory' || node.kind === 'entity'
   return (
     <g
-      role={node.item ? 'button' : undefined}
-      tabIndex={node.item ? 0 : undefined}
+      role={selectable ? 'button' : undefined}
+      tabIndex={selectable ? 0 : undefined}
       onClick={onSelect}
       onKeyDown={(event) => {
-        if (node.item && (event.key === 'Enter' || event.key === ' ')) onSelect()
+        if (selectable && (event.key === 'Enter' || event.key === ' ')) onSelect()
       }}
-      className={node.item ? 'cursor-pointer outline-none' : undefined}
+      className={selectable ? 'cursor-pointer outline-none' : undefined}
       filter="url(#memoryShadow)"
     >
       <rect
@@ -244,10 +375,52 @@ function GraphNodeShape({ node, active, onSelect }: { node: GraphNode; active: b
       </text>
       {node.kind === 'memory' && node.item ? (
         <text x={node.x} y={node.y + 14} textAnchor="middle" className="select-none fill-slate-400 text-[9px]">
-          {meta?.label} · {Math.round(Number(node.item.importance || 0) * 100)}
+          {memMeta?.label} · {Math.round(Number(node.item.importance || 0) * 100)}
+        </text>
+      ) : null}
+      {node.kind === 'entity' && node.entity ? (
+        <text x={node.x} y={node.y + 14} textAnchor="middle" className="select-none fill-slate-400 text-[9px]">
+          {entMeta?.label} · {node.entity.mention_count ?? 1}
         </text>
       ) : null}
     </g>
+  )
+}
+
+function EntityDetail({ entity, memories }: { entity: MemoryEntityNode; memories: MemoryView[] }) {
+  const meta = entityMeta(entity.entity_type)
+  const linked = (entity.source_ids ?? [])
+    .map((sid) => memories.find((m) => m.id === sid))
+    .filter((m): m is MemoryView => Boolean(m))
+  return (
+    <div className="space-y-3">
+      <article className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className={cn('rounded-md border px-2 py-1 text-[11px]', meta.tone)}>{meta.label}</span>
+          <span className="text-[11px] text-slate-400">提及 {entity.mention_count ?? 1} 次</span>
+        </div>
+        {entity.description ? (
+          <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-600">{entity.description}</p>
+        ) : null}
+      </article>
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-slate-950">关联记忆（{linked.length}）</h3>
+        <div className="space-y-2">
+          {linked.length ? (
+            linked.map((item) => (
+              <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                <div className="text-xs font-medium text-slate-800">{item.title}</div>
+                <div className="mt-1 line-clamp-2 text-[11px] text-slate-400">{item.content}</div>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed border-[var(--prism-line)] bg-slate-50 p-3 text-xs text-slate-400">
+              暂无关联记忆
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
   )
 }
 

@@ -351,6 +351,53 @@ export const memoryApi = {
     const qs = search.toString() ? `?${search.toString()}` : ''
     return request<MemoryStatement[]>(`/memories/statements${qs}`)
   },
+  listEntities: (params?: { limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.limit) search.set('limit', String(params.limit))
+    const qs = search.toString() ? `?${search.toString()}` : ''
+    return request<MemoryEntityGraph>(`/memories/entities${qs}`)
+  },
+  reflect: () =>
+    request<{ insights: number; skipped?: string | null }>(`/memories/reflect`, { method: 'POST' }),
+  listInsights: (params?: { limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.limit) search.set('limit', String(params.limit))
+    const qs = search.toString() ? `?${search.toString()}` : ''
+    return request<MemoryInsight[]>(`/memories/insights${qs}`)
+  },
+}
+
+export interface MemoryInsight {
+  id: string
+  theme: string
+  content: string
+  insight_type: string
+  importance: number
+  created_at: string
+  updated_at: string
+}
+
+export interface MemoryEntityNode {
+  id: string
+  name: string
+  entity_type: string
+  description: string
+  mention_count: number
+  importance: number
+  source_ids: string[]
+}
+
+export interface MemoryEntityRelation {
+  id: string
+  subject_entity_id: string
+  object_entity_id: string
+  predicate: string
+  statement_id?: string | null
+}
+
+export interface MemoryEntityGraph {
+  entities: MemoryEntityNode[]
+  relations: MemoryEntityRelation[]
 }
 
 export interface WikiDocument {

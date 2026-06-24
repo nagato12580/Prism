@@ -1,4 +1,13 @@
+import pytest
 from backend.app.models import MemoryDraft, MemorySource, MemoryStatement
+
+
+@pytest.fixture(autouse=True)
+def _stub_memory_indexing(monkeypatch):
+    """避免审阅测试真实调用向量索引/实体抽取。"""
+    import backend.app.api.memories as mem_api
+    monkeypatch.setattr(mem_api, "_index_statement_vector", lambda statement: None)
+    monkeypatch.setattr(mem_api, "_link_statement_entities", lambda db, statement: None)
 
 
 def test_create_and_list_memory_drafts(client):
