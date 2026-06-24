@@ -23,6 +23,7 @@ from ..models.asset import AssetRelation, AssetUsageEvent, ExtensionPoint, Perso
 from ..models.memory import MemoryEntry
 from ..services.knowledge_governance import GovernanceResult, settle_personal_asset_unit_to_governance
 from ..services.memory_context import recall_preference_context
+from ..services.memory_entity import extract_and_link_entities
 from ..services.memory_vectors import upsert_entry_vector
 from ..utils.time import local_now
 from ..schemas.asset import (
@@ -779,6 +780,10 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
 
     if memory_entry is not None:
         _index_entry_vector(memory_entry)
+        try:
+            extract_and_link_entities(db, content=memory_entry.title or memory_entry.content, source_id=memory_entry.id)
+        except Exception:
+            pass
 
     db.commit()
     db.refresh(item)

@@ -1,3 +1,14 @@
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_memory_recall(monkeypatch):
+    """避免资产解析测试真实调用向量召回/LLM 实体抽取/向量索引。"""
+    monkeypatch.setattr("backend.app.api.assets.recall_preference_context", lambda db, content, **kw: "")
+    monkeypatch.setattr("backend.app.api.assets.extract_and_link_entities", lambda *a, **kw: [])
+    monkeypatch.setattr("backend.app.api.assets._index_entry_vector", lambda entry: None)
+
+
 def test_create_asset_draft_from_fragment_uses_ai_parse(client, monkeypatch):
     monkeypatch.setattr(
         "backend.app.api.assets._ai_parse_asset",

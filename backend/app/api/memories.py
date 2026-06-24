@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..config import settings
-from ..models.memory import MemoryDraft, MemoryEntry, MemorySource, MemoryStatement, MemoryStatus
+from ..models.memory import MemoryDraft, MemoryEntity, MemoryEntry, MemoryRelation, MemorySource, MemoryStatement, MemoryStatus
 from ..schemas.memory import (
     MemoryDraftConfirmOut,
     MemoryDraftCreate,
@@ -18,6 +18,8 @@ from ..schemas.memory import (
     memory_source_to_out,
 )
 from ..services.memory_extraction import extract_session_memories
+from ..services.memory_entity import extract_and_link_entities
+from ..services.memory_reflection import list_insights, run_reflection
 from ..services.memory_vectors import upsert_statement_vector
 from ..utils.time import local_now
 
@@ -143,6 +145,14 @@ def _index_statement_vector(statement: MemoryStatement) -> None:
         statement.embedding_status = "pending"
 
 
+def _link_statement_entities(db: Session, statement: MemoryStatement) -> None:
+    """确认后抽取核心实体并关联；失败不阻塞审阅。"""
+    try:
+        extract_and_link_entities(db, content=statement.content, source_id=statement.id, statement_id=statement.id)
+    except Exception:
+        pass
+
+
 @router.get("/drafts", response_model=list[MemoryDraftOut])
 def list_memory_drafts(
     status: Optional[str] = Query(None),
@@ -214,6 +224,7 @@ def confirm_memory_draft(draft_id: str, db: Session = Depends(get_db)):
     db.add(statement)
     db.flush()
     _index_statement_vector(statement)
+    _link_statement_entities(db, statement)
     db.commit()
     db.refresh(draft)
     db.refresh(statement)
@@ -258,6 +269,7 @@ def supersede_memory_draft(
     db.add(statement)
     db.flush()
     _index_statement_vector(statement)
+    _link_statement_entities(db, statement)
     old_statement.superseded_by_id = statement.id
     db.commit()
     db.refresh(draft)
@@ -281,3 +293,76 @@ def list_memory_statements(
         .all()
     )
     return [_statement_to_out(statement) for statement in statements]
+
+
+@router.get("/entities", response_model=dict)
+def list_memory_entities(
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    entities = (
+        db.query(MemoryEntity)
+        .filter(MemoryEntity.user_id == DEFAULT_USER_ID, MemoryEntity.status == MemoryStatus.CONFIRMED)
+        .order_by(MemoryEntity.mention_count.desc(), MemoryEntity.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    entity_ids = [e.id for e in entities]
+    relations = (
+        db.query(MemoryRelation)
+        .filter(
+            MemoryRelation.user_id == DEFAULT_USER_ID,
+            MemoryRelation.status == MemoryStatus.CONFIRMED,
+            MemoryRelation.subject_entity_id.in_(entity_ids),
+            MemoryRelation.object_entity_id.in_(entity_ids),
+        )
+        .all()
+    )
+    return {
+        "entities": [
+            {
+                "id": e.id,
+                "name": e.name,
+                "entity_type": e.entity_type,
+                "description": e.description,
+                "mention_count": e.mention_count,
+                "importance": e.importance,
+                "source_ids": e.source_ids or [],
+            }
+            for e in entities
+        ],
+        "relations": [
+            {
+                "id": r.id,
+                "subject_entity_id": r.subject_entity_id,
+                "object_entity_id": r.object_entity_id,
+                "predicate": r.predicate,
+                "statement_id": r.statement_id,
+            }
+            for r in relations
+        ],
+    }
+
+
+@router.post("/reflect", response_model=dict)
+def trigger_reflection(db: Session = Depends(get_db)):
+    """手动触发记忆反思：LLM 归纳已确认记忆为高层洞察 Insight。"""
+    result = run_reflection(db)
+    return result
+
+
+@router.get("/insights", response_model=list[dict])
+def get_insights(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
+    insights = list_insights(db, limit=limit)
+    return [
+        {
+            "id": i.id,
+            "theme": i.theme,
+            "content": i.content,
+            "insight_type": i.insight_type,
+            "importance": i.importance,
+            "created_at": i.created_at,
+            "updated_at": i.updated_at,
+        }
+        for i in insights
+    ]

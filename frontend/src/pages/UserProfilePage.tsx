@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Brain, CircleDot, Loader2, MessageSquareText, Package, RefreshCw, ShieldCheck, Sparkles, Target } from 'lucide-react'
-import { memoryApi, type MemoryStatement } from '@/app/api'
+import { Brain, CircleDot, Lightbulb, Loader2, MessageSquareText, Package, RefreshCw, ShieldCheck, Sparkles, Target } from 'lucide-react'
+import { memoryApi, type MemoryInsight, type MemoryStatement } from '@/app/api'
 import { cn } from '@/lib/utils'
 import { type MemoryView, entryToView, formatDate, getMemoryMeta, groupMemories, importantTags, memoryTypeMeta, statementToView } from './memoryUtils'
 
 export function UserProfilePage() {
   const [memories, setMemories] = useState<MemoryView[]>([])
+  const [insights, setInsights] = useState<MemoryInsight[]>([])
+  const [reflecting, setReflecting] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const groups = useMemo(() => groupMemories(memories), [memories])
   const topTags = useMemo(() => importantTags(memories), [memories])
@@ -19,19 +22,41 @@ export function UserProfilePage() {
     setLoading(true)
     setError(null)
     try {
-      const [entries, statements] = await Promise.all([
+      const [entries, statements, insightList] = await Promise.all([
         memoryApi.list({ limit: 160 }),
         memoryApi.listStatements({ limit: 200 }).catch(() => [] as MemoryStatement[]),
+        memoryApi.listInsights({ limit: 20 }).catch(() => [] as MemoryInsight[]),
       ])
       const views = [
         ...entries.map(entryToView),
         ...statements.map(statementToView),
       ].sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0))
       setMemories(views)
+      setInsights(insightList)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const triggerReflection = async () => {
+    setReflecting(true)
+    setNotice(null)
+    setError(null)
+    try {
+      const result = await memoryApi.reflect()
+      if (result.skipped) {
+        setNotice(`反思跳过：${result.skipped === 'too_few_memories' ? '记忆太少，至少需要 4 条' : '暂无可归纳内容'}`)
+      } else {
+        setNotice(`反思完成，生成 ${result.insights} 条洞察。`)
+      }
+      const insightList = await memoryApi.listInsights({ limit: 20 }).catch(() => [] as MemoryInsight[])
+      setInsights(insightList)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReflecting(false)
     }
   }
 
@@ -86,6 +111,40 @@ export function UserProfilePage() {
               <p className="mt-3 text-xs leading-5 text-slate-300">
                 基于 {memories.length} 条记忆计算。分数越高，表示当前画像中高权重记忆占比越高。
               </p>
+            </section>
+
+            <section className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-950">
+                  <Lightbulb size={15} className="text-amber-600" />
+                  画像洞察
+                </div>
+                <button
+                  type="button"
+                  onClick={triggerReflection}
+                  disabled={reflecting || memories.length < 4}
+                  className="inline-flex h-7 items-center gap-1 rounded-md bg-amber-600 px-2 text-[11px] font-medium text-white transition hover:brightness-95 disabled:opacity-40"
+                >
+                  {reflecting ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                  生成洞察
+                </button>
+              </div>
+              {notice ? <div className="mb-2 text-[11px] text-amber-700">{notice}</div> : null}
+              <div className="space-y-2">
+                {insights.length ? (
+                  insights.map((ins) => (
+                    <div key={ins.id} className="rounded-md border border-amber-100 bg-white p-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-amber-700">{ins.theme}</span>
+                        <span className="text-[10px] text-slate-400">{Math.round(Number(ins.importance || 0) * 100)}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-4 text-slate-600">{ins.content}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-[11px] text-slate-400">暂无洞察。积累足够记忆后点「生成洞察」归纳画像。</div>
+                )}
+              </div>
             </section>
 
             <section className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
