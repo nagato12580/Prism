@@ -6,7 +6,7 @@ from typing import Any, Callable
 from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models.memory import MemoryEntry, MemoryStatement, MemoryStatus
+from backend.app.models.memory import MemoryEntry, MemoryInsight, MemoryStatement, MemoryStatus
 from backend.app.services.memory_vectors import search_memory_vectors
 from engine.app.config import settings
 
@@ -72,6 +72,7 @@ def recall_memory_context(
 
     db = _Session()
     lines: list[str] = []
+    insight_lines: list[str] = []
     try:
         fetched: set[str] = set()
         hit_ids: list[tuple[str, str]] = []
@@ -103,12 +104,17 @@ def recall_memory_context(
                     lines.append(_statement_brief(rec))
                     fetched.add(mid)
                     hit_ids.append((mid, "statement"))
+            elif kind == "insight":
+                rec = db.query(MemoryInsight).filter(MemoryInsight.id == mid, MemoryInsight.user_id == user_id).first()
+                if rec:
+                    insight_lines.append(f"- [画像洞察·{rec.theme}] {rec.content}")
+                    fetched.add(mid)
     except Exception:
         return ""
     finally:
         db.close()
 
-    if not lines:
+    if not lines and not insight_lines:
         return ""
 
     # 回写 access_count（失败不影响召回注入）
@@ -123,8 +129,13 @@ def recall_memory_context(
         except Exception:
             pass
 
-    block = "【关于用户的已知记忆（供参考，可自然融入回答，不必刻意提及）】\n" + "\n".join(lines)
-    return block
+    # Insight（高层概括）优先放首部，再接具体记忆
+    parts: list[str] = []
+    if insight_lines:
+        parts.append("【画像洞察】\n" + "\n".join(insight_lines))
+    if lines:
+        parts.append("【关于用户的已知记忆（供参考，可自然融入回答，不必刻意提及）】\n" + "\n".join(lines))
+    return "\n\n".join(parts)
 
 
 __all__ = ["has_recall_signal", "recall_memory_context"]

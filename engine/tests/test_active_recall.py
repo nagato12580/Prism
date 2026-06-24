@@ -136,3 +136,56 @@ def test_recall_respects_timeout(monkeypatch):
 
     monkeypatch.setattr(ar, "search_memory_vectors", slow_search)
     assert recall_memory_context("我偏好", timeout_seconds=0.1) == ""
+
+
+def test_recall_injects_insight_at_top(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from backend.app.database import Base
+    from backend.app.models import MemoryEntry, MemoryInsight
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    insight = MemoryInsight(
+        id="ins-1",
+        user_id="default-user",
+        theme="技术偏好",
+        content="用户偏好轻量、低依赖的方案。",
+        insight_type="reflection",
+        importance=0.85,
+    )
+    entry = MemoryEntry(
+        id="e1",
+        user_id="default-user",
+        title="偏好深色主题",
+        content="用户偏好深色主题阅读。",
+        memory_type="preference",
+        importance=0.7,
+    )
+    session.add_all([insight, entry])
+    session.commit()
+    ins_id, entry_id = insight.id, entry.id
+    session.close()
+
+    import engine.app.agent.active_recall as ar
+    ar._Session = Session
+
+    def fake_vector_search(**kw):
+        return [
+            {"memory_id": ins_id, "kind": "insight", "memory_type": "技术偏好", "score": 0.9},
+            {"memory_id": entry_id, "kind": "entry", "memory_type": "preference", "score": 0.7},
+        ]
+
+    monkeypatch.setattr(ar, "search_memory_vectors", fake_vector_search)
+
+    block = recall_memory_context("我偏好什么", min_score=0.5)
+
+    assert "画像洞察" in block
+    assert "轻量" in block
+    assert "深色主题" in block
+    # Insight 块在前
+    assert block.index("画像洞察") < block.index("深色主题")

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models.memory import MemoryEntry, MemoryStatement, MemoryStatus
+from backend.app.models.memory import MemoryEntry, MemoryInsight, MemoryStatement, MemoryStatus
 from backend.app.services.memory_access import bump_memory_access
 from backend.app.services.memory_vectors import search_memory_vectors
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
@@ -56,6 +56,22 @@ def _statement_to_source(statement: MemoryStatement, score: float) -> dict[str, 
     }
 
 
+def _insight_to_source(insight: MemoryInsight, score: float) -> dict[str, Any]:
+    return {
+        "memory_id": insight.id,
+        "ref_type": "memory",
+        "ref_id": insight.id,
+        "title": f"[画像洞察] {insight.theme}",
+        "content": insight.content,
+        "memory_type": "insight",
+        "category": insight.theme,
+        "tags": [],
+        "importance": insight.importance,
+        "source": "insight",
+        "score": score,
+    }
+
+
 def _build_memory_search(ctx: ToolContext) -> StructuredTool:
     def run(query: str, limit: int = 10) -> str:
         db = _Session()
@@ -94,6 +110,11 @@ def _build_memory_search(ctx: ToolContext) -> StructuredTool:
                     )
                     if rec:
                         sources.append(_statement_to_source(rec, score))
+                        fetched_ids.add(mid)
+                elif kind == "insight":
+                    rec = db.query(MemoryInsight).filter(MemoryInsight.id == mid, MemoryInsight.user_id == "default-user").first()
+                    if rec:
+                        sources.append(_insight_to_source(rec, score))
                         fetched_ids.add(mid)
 
             # 2. 向量不可用或不足时，回退 LIKE 关键词召回

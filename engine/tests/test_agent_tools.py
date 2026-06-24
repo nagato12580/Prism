@@ -231,6 +231,51 @@ def test_memory_search_tool_recalls_confirmed_statements_and_skips_drafts(monkey
     assert ctx.stats_holder["memory_search"]["hit_count"] == 1
 
 
+def test_memory_search_recalls_insights_via_vector(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from backend.app.database import Base
+    from backend.app.models import MemoryInsight
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    insight = MemoryInsight(
+        id="ins-1",
+        user_id="default-user",
+        theme="技术偏好",
+        content="用户偏好轻量、低依赖的技术方案。",
+        insight_type="reflection",
+        importance=0.85,
+    )
+    session.add(insight)
+    session.commit()
+    insight_id = insight.id
+    session.close()
+    monkeypatch.setattr(memory_tools, "_Session", Session)
+
+    def fake_vector_search(**kw):
+        return [{"memory_id": insight_id, "kind": "insight", "memory_type": "技术偏好", "score": 0.88}]
+
+    monkeypatch.setattr(memory_tools, "search_memory_vectors", fake_vector_search)
+
+    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
+    tool = next(t for t in build_enabled_tools(ctx) if t.name == "memory_search")
+
+    payload = json.loads(tool.invoke({"query": "我偏好什么技术", "limit": 5}))
+
+    assert payload["status"] == "success"
+    assert len(payload["memories"]) == 1
+    hit = payload["memories"][0]
+    assert hit["source"] == "insight"
+    assert hit["memory_type"] == "insight"
+    assert "轻量" in hit["content"]
+    assert abs(hit["score"] - 0.88) < 1e-6
+
+
 def test_memory_search_prefers_vector_recall_and_propagates_score(monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker

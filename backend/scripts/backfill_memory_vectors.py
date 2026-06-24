@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.database import SessionLocal
-from backend.app.models.memory import MemoryEntry, MemoryStatement, MemoryStatus
-from backend.app.services.memory_vectors import upsert_entry_vector, upsert_statement_vector
+from backend.app.models.memory import MemoryEntry, MemoryInsight, MemoryStatement, MemoryStatus
+from backend.app.services.memory_vectors import upsert_entry_vector, upsert_insight_vector, upsert_statement_vector
 
 
 Stats = dict[str, int]
@@ -80,6 +80,29 @@ def backfill_memory_vectors(
                     stats["skipped"] += 1
             except Exception:
                 statement.embedding_status = "failed"
+                stats["failed"] += 1
+        if batch_size > 0 and index % batch_size == 0:
+            db.commit()
+
+    insights_q = db.query(MemoryInsight).filter(MemoryInsight.status == MemoryStatus.CONFIRMED)
+    if user_id:
+        insights_q = insights_q.filter(MemoryInsight.user_id == user_id)
+    for insight in insights_q.order_by(MemoryInsight.created_at.asc()).limit(limit).all():
+        index += 1
+        stats["scanned"] += 1
+        if _should_skip(insight.embedding_status, insight.embedding_ref, force=force):
+            stats["skipped"] += 1
+        else:
+            try:
+                ref = upsert_insight_vector(insight)
+                if ref:
+                    _mark_done(insight, ref)
+                    stats["updated"] += 1
+                else:
+                    insight.embedding_status = "pending"
+                    stats["skipped"] += 1
+            except Exception:
+                insight.embedding_status = "failed"
                 stats["failed"] += 1
         if batch_size > 0 and index % batch_size == 0:
             db.commit()

@@ -148,6 +148,9 @@ class MemoryInsight(Base):
     importance = Column(Float, default=0.6)
     status = Column(String(32), default=MemoryStatus.CONFIRMED, index=True)
     valid_from = Column(DateTime, default=local_now)
+    embedding_ref = Column(String(255), default="")
+    embedding_model = Column(String(128), default="")
+    embedding_status = Column(String(32), default="pending", index=True)
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 

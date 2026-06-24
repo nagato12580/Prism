@@ -116,6 +116,7 @@ def run_reflection(
 
     source_ids = [sid for sid, _ in sources]
     created = 0
+    to_index: list[MemoryInsight] = []
     for ins in raw_insights:
         theme = ins["theme"]
         existing = (
@@ -127,9 +128,10 @@ def run_reflection(
             existing.content = ins["content"]
             existing.importance = ins["importance"]
             existing.source_statement_ids = source_ids
+            to_index.append(existing)
             created += 1
         else:
-            db.add(MemoryInsight(
+            insight = MemoryInsight(
                 user_id=user_id,
                 theme=theme,
                 content=ins["content"],
@@ -137,10 +139,31 @@ def run_reflection(
                 source_statement_ids=source_ids,
                 importance=ins["importance"],
                 status=MemoryStatus.CONFIRMED,
-            ))
+            )
+            db.add(insight)
+            db.flush()
+            to_index.append(insight)
             created += 1
     db.commit()
+    # 反思产出后向量化 Insight，供召回链路使用；失败不阻塞
+    for insight in to_index:
+        _index_insight_vector(db, insight)
+    db.commit()
     return {"insights": created, "skipped": None}
+
+
+def _index_insight_vector(db: Session, insight: MemoryInsight) -> None:
+    try:
+        from backend.app.services.memory_vectors import upsert_insight_vector
+        vector_id = upsert_insight_vector(insight)
+    except Exception:
+        vector_id = ""
+    if vector_id:
+        insight.embedding_ref = vector_id
+        insight.embedding_model = settings.EMBEDDING_MODEL
+        insight.embedding_status = "done"
+    else:
+        insight.embedding_status = "pending"
 
 
 def list_insights(db: Session, *, user_id: str = DEFAULT_USER_ID, limit: int = 20) -> list[MemoryInsight]:

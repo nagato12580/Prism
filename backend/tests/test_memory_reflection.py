@@ -2,6 +2,14 @@ from backend.app.models.memory import MemoryEntry, MemoryInsight, MemoryStatemen
 from backend.app.models.memory import MemoryStatus
 from backend.app.services import memory_reflection
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_insight_indexing(monkeypatch):
+    """避免反思测试真实调用向量索引。"""
+    monkeypatch.setattr(memory_reflection, "_index_insight_vector", lambda db, insight: setattr(insight, "embedding_status", "done") or None)
+
 
 def _fake_llm(insights):
     def _call(block):
@@ -119,6 +127,21 @@ def test_reflection_includes_confirmed_statements(db_session, monkeypatch):
 
     assert "复习知识" in captured["block"]
     assert "草稿未确认" not in captured["block"]
+
+
+def test_reflection_indexes_insight_vectors(db_session, monkeypatch):
+    _seed(db_session, 5)
+    indexed = []
+    monkeypatch.setattr(memory_reflection, "_index_insight_vector", lambda db, insight: indexed.append(insight.id) or setattr(insight, "embedding_status", "done"))
+    monkeypatch.setattr(memory_reflection, "_call_reflection_llm", _fake_llm([
+        {"theme": "技术偏好", "content": "用户偏好轻量。", "importance": 0.8},
+    ]))
+
+    memory_reflection.run_reflection(db_session)
+
+    assert len(indexed) == 1
+    insight = db_session.query(MemoryInsight).one()
+    assert insight.embedding_status == "done"
 
 
 def test_list_insights_returns_confirmed_ordered(db_session):
