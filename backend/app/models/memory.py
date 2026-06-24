@@ -28,6 +28,8 @@ class MemoryEntry(Base):
     embedding_ref = Column(String(255), default="")
     embedding_model = Column(String(128), default="")
     embedding_status = Column(String(32), default="pending", index=True)
+    access_count = Column(Integer, default=0, index=True)
+    last_accessed_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
@@ -72,6 +74,8 @@ class MemoryStatement(Base):
     embedding_ref = Column(String(255), default="")
     embedding_model = Column(String(128), default="")
     embedding_status = Column(String(32), default="pending", index=True)
+    access_count = Column(Integer, default=0, index=True)
+    last_accessed_at = Column(DateTime, nullable=True, index=True)
     source_id = Column(CHAR(36), ForeignKey("memory_source.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)

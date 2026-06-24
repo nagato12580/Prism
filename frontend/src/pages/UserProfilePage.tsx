@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Brain, CircleDot, Lightbulb, Loader2, MessageSquareText, Package, RefreshCw, ShieldCheck, Sparkles, Target } from 'lucide-react'
-import { memoryApi, type MemoryInsight, type MemoryStatement } from '@/app/api'
+import { Brain, CircleDot, Gauge, Lightbulb, Loader2, MessageSquareText, Package, RefreshCw, ShieldCheck, Sparkles, Target } from 'lucide-react'
+import { memoryApi, type ConsolidationResult, type MemoryInsight, type MemoryStatement } from '@/app/api'
 import { cn } from '@/lib/utils'
 import { type MemoryView, entryToView, formatDate, getMemoryMeta, groupMemories, importantTags, memoryTypeMeta, statementToView } from './memoryUtils'
 
@@ -8,6 +8,7 @@ export function UserProfilePage() {
   const [memories, setMemories] = useState<MemoryView[]>([])
   const [insights, setInsights] = useState<MemoryInsight[]>([])
   const [reflecting, setReflecting] = useState(false)
+  const [consolidating, setConsolidating] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -57,6 +58,21 @@ export function UserProfilePage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setReflecting(false)
+    }
+  }
+
+  const triggerConsolidation = async () => {
+    setConsolidating(true)
+    setNotice(null)
+    setError(null)
+    try {
+      const result: ConsolidationResult = await memoryApi.consolidate()
+      setNotice(`巩固完成，提升 ${result.total_promoted} 条高频记忆重要度。`)
+      await loadMemories()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConsolidating(false)
     }
   }
 
@@ -119,15 +135,26 @@ export function UserProfilePage() {
                   <Lightbulb size={15} className="text-amber-600" />
                   画像洞察
                 </div>
-                <button
-                  type="button"
-                  onClick={triggerReflection}
-                  disabled={reflecting || memories.length < 4}
-                  className="inline-flex h-7 items-center gap-1 rounded-md bg-amber-600 px-2 text-[11px] font-medium text-white transition hover:brightness-95 disabled:opacity-40"
-                >
-                  {reflecting ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                  生成洞察
-                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={triggerConsolidation}
+                    disabled={consolidating || memories.length === 0}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-40"
+                  >
+                    {consolidating ? <Loader2 size={12} className="animate-spin" /> : <Gauge size={12} />}
+                    巩固
+                  </button>
+                  <button
+                    type="button"
+                    onClick={triggerReflection}
+                    disabled={reflecting || memories.length < 4}
+                    className="inline-flex h-7 items-center gap-1 rounded-md bg-amber-600 px-2 text-[11px] font-medium text-white transition hover:brightness-95 disabled:opacity-40"
+                  >
+                    {reflecting ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    生成洞察
+                  </button>
+                </div>
               </div>
               {notice ? <div className="mb-2 text-[11px] text-amber-700">{notice}</div> : null}
               <div className="space-y-2">
