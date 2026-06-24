@@ -36,7 +36,7 @@ import {
 } from '@/app/chatStore'
 import type { ResourceMediaType } from '@/app/api'
 import { knowledgeApi, chatApi, type KnowledgeTopic } from '@/app/api'
-import { cn } from '@/lib/utils'
+import { cn, genId } from '@/lib/utils'
 
 const starterPrompts = [
   '总结我上传资料里的核心观点',
@@ -300,8 +300,8 @@ export function ChatPage() {
       .filter((m) => !m.streaming)
       .map((m) => ({ role: m.role, content: historyContent(m) }))
 
-    addMessage({ id: crypto.randomUUID(), role: 'user', content: query })
-    addMessage({ id: crypto.randomUUID(), role: 'assistant', content: '', streaming: true })
+    addMessage({ id: genId(), role: 'user', content: query })
+    addMessage({ id: genId(), role: 'assistant', content: '', streaming: true })
 
     const userPersistPromise = persistUserMessage(sessionId, query)
 
@@ -314,7 +314,7 @@ export function ChatPage() {
           setLastAgentStatus(safeString(msg.data?.label))
         } else if (msg.type === 'tool_call') {
           addLastToolRun({
-            id: crypto.randomUUID(),
+            id: genId(),
             tool: safeString(msg.data?.tool, 'tool'),
             query: safeString(msg.data?.query),
             status: 'running',
