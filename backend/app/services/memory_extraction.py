@@ -25,8 +25,8 @@ class MemoryCandidate:
     temporal_type: str = "stable"
     confidence: float = 0.7
     importance: float = 0.6
-    risk_level: str = "medium"
-    decision_hint: str = "review"
+    explicitness: float = 0.7
+    sensitivity_flag: bool = False
     evidence_message_id: str = ""
 
 
@@ -36,8 +36,10 @@ class MemoryExtractionResult:
     messages_scanned: int
     candidates_found: int = 0
     drafts_created: int = 0
+    auto_confirmed: int = 0
     candidates_skipped: int = 0
     draft_ids: list[str] = field(default_factory=list)
+    statement_ids: list[str] = field(default_factory=list)
 
 
 def load_session_messages(db: Session, session_id: str, limit: int = 20) -> list[ChatMessage]:
@@ -178,6 +180,12 @@ def parse_memory_candidates(raw: str) -> list[MemoryCandidate]:
         confidence = _as_float(item.get("confidence"), 0.7)
         if confidence < MIN_CONFIDENCE:
             continue
+        # Parse sensitivity_flag: accept bool or int/float
+        sens_raw = item.get("sensitivity_flag", False)
+        if isinstance(sens_raw, bool):
+            sensitivity_flag = sens_raw
+        else:
+            sensitivity_flag = bool(sens_raw)
         candidates.append(
             MemoryCandidate(
                 content=content.strip(),
@@ -185,8 +193,8 @@ def parse_memory_candidates(raw: str) -> list[MemoryCandidate]:
                 temporal_type=str(item.get("temporal_type") or "stable"),
                 confidence=confidence,
                 importance=_as_float(item.get("importance"), 0.6),
-                risk_level=str(item.get("risk_level") or "medium"),
-                decision_hint=str(item.get("decision_hint") or "review"),
+                explicitness=_as_float(item.get("explicitness"), 0.7),
+                sensitivity_flag=sensitivity_flag,
                 evidence_message_id=str(item.get("evidence_message_id") or ""),
             )
         )
