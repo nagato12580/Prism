@@ -1,5 +1,8 @@
 import json
 import logging
+import os
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///./_answer_import.db")
 
 from engine.app.chat import answer
 
@@ -11,12 +14,62 @@ class FakeRunner:
 
 
 def test_answer_stream_delegates_to_agent_runner(monkeypatch):
-    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    captured = {}
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return FakeRunner()
+
+    monkeypatch.setattr(answer, "build_agent_runner", build)
 
     lines = list(answer.answer_stream("hello", [{"role": "user", "content": "old"}]))
 
     assert json.loads(lines[0]) == {"type": "agent_status", "data": {"label": "hello"}}
     assert json.loads(lines[1]) == {"type": "done"}
+    assert captured["deep_search_enabled"] is False
+    assert captured["deep_search_depth"] == "standard"
+
+
+def test_answer_stream_forwards_deep_search_options(monkeypatch):
+    captured = {}
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return FakeRunner()
+
+    monkeypatch.setattr(answer, "build_agent_runner", build)
+
+    list(
+        answer.answer_stream(
+            "hello",
+            [],
+            deep_search_enabled=True,
+            deep_search_depth="deep",
+        )
+    )
+
+    assert captured["deep_search_enabled"] is True
+    assert captured["deep_search_depth"] == "deep"
+
+
+def test_build_agent_runner_enables_deep_search_tool_when_requested(monkeypatch):
+    class FakeModel:
+        pass
+
+    captured = {}
+
+    def fake_build_enabled_tools(ctx, overrides=None):
+        captured["overrides"] = overrides
+        return []
+
+    monkeypatch.setattr(answer, "_resolve_allowed_item_ids", lambda topic_id: None)
+    monkeypatch.setattr(answer, "build_enabled_tools", fake_build_enabled_tools)
+    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+
+    runner = answer.build_agent_runner(deep_search_enabled=True, deep_search_depth="deep")
+
+    assert captured["overrides"]["deep_knowledge_search"] is True
+    assert runner.system_prompt.endswith("deep_knowledge_search。")
 
 
 def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
