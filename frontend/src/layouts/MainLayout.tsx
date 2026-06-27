@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   BookOpen,
@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { memoryApi } from '@/app/api'
 
 const navItems = [
   { to: '/chat', label: '对话', icon: MessageSquare },
@@ -50,7 +51,7 @@ function Brand({ isDark = false }: { isDark?: boolean }) {
   )
 }
 
-function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDark?: boolean }) {
+function NavList({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: () => void; isDark?: boolean; draftCount?: number }) {
   const location = useLocation()
 
   return (
@@ -112,6 +113,7 @@ function NavList({ onNavigate, isDark = false }: { onNavigate?: () => void; isDa
           active={location.pathname === '/memory/inbox'}
           isDark={isDark}
           onNavigate={onNavigate}
+          badge={draftCount}
         />
         <NavItem
           to="/memory/profile"
@@ -141,6 +143,7 @@ function NavItem({
   active,
   isDark = false,
   onNavigate,
+  badge,
 }: {
   to: string
   label: string
@@ -148,6 +151,7 @@ function NavItem({
   active: boolean
   isDark?: boolean
   onNavigate?: () => void
+  badge?: number
 }) {
   return (
     <NavLink
@@ -165,11 +169,16 @@ function NavItem({
     >
       <Icon size={16} className="shrink-0" />
       <span>{label}</span>
+      {badge != null && badge > 0 ? (
+        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      ) : null}
     </NavLink>
   )
 }
 
-function CompactNav({ onNavigate, isDark = false }: { onNavigate?: () => void; isDark?: boolean }) {
+function CompactNav({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: () => void; isDark?: boolean; draftCount?: number }) {
   const location = useLocation()
 
   return (
@@ -198,6 +207,11 @@ function CompactNav({ onNavigate, isDark = false }: { onNavigate?: () => void; i
           >
             <Icon size={18} className="shrink-0" />
             <span>{item.label}</span>
+            {item.to === '/memory/inbox' && draftCount > 0 ? (
+              <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                {draftCount > 99 ? '99+' : draftCount}
+              </span>
+            ) : null}
           </NavLink>
         )
       })}
@@ -208,15 +222,28 @@ function CompactNav({ onNavigate, isDark = false }: { onNavigate?: () => void; i
 export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [draftCount, setDraftCount] = useState(0)
   const isDark = theme === 'dark'
   const location = useLocation()
   const isChatRoute = location.pathname === '/' || location.pathname === '/chat' || location.pathname.startsWith('/chat/')
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = () => {
+      memoryApi.countDrafts('draft')
+        .then(res => { if (!cancelled) setDraftCount(res.count) })
+        .catch(() => {})
+    }
+    poll()
+    const id = setInterval(poll, 30_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
   return (
     <div className={cn('fixed inset-0 flex overflow-hidden transition-colors', isDark ? 'bg-[#070917] text-slate-100' : 'bg-[#f4f7fb] text-slate-950')}>
       <aside className={cn('hidden w-[220px] shrink-0 flex-col border-r transition-colors lg:flex', isDark ? 'border-white/[0.07] bg-[#0c0f24]' : 'border-slate-200 bg-[#f8fbff]')}>
         <Brand isDark={isDark} />
-        <NavList isDark={isDark} />
+        <NavList isDark={isDark} draftCount={draftCount} />
       </aside>
 
       {mobileOpen ? (
@@ -246,7 +273,7 @@ export function MainLayout() {
                 <X size={18} />
               </button>
             </div>
-            <CompactNav isDark={isDark} onNavigate={() => setMobileOpen(false)} />
+            <CompactNav isDark={isDark} onNavigate={() => setMobileOpen(false)} draftCount={draftCount} />
           </aside>
         </div>
       ) : null}
