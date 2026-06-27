@@ -201,6 +201,13 @@ def count_memory_drafts(
 
 @router.post("/drafts", response_model=MemoryDraftOut)
 def create_memory_draft(payload: MemoryDraftCreate, db: Session = Depends(get_db)):
+    # Semantic dedup: check if similar memory already exists
+    content = payload.payload.get("content") if isinstance(payload.payload, dict) else None
+    if isinstance(content, str) and content.strip():
+        from backend.app.services.memory_extraction import _check_semantic_duplicate
+        is_dup, _ = _check_semantic_duplicate(db, content.strip())
+        if is_dup:
+            raise HTTPException(status_code=409, detail="Similar memory already exists")
     source = _create_source(payload.source, db) if payload.source else None
     draft = MemoryDraft(
         user_id=DEFAULT_USER_ID,

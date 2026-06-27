@@ -43,7 +43,7 @@ W_CROSS_SESSION = 0.10
 # Thresholds
 HIGH_STAKES_CONFLICT_SIMILARITY = 0.80
 HIGH_STAKES_CONFLICT_IMPORTANCE = 0.7
-DUPLICATION_SIMILARITY = 0.95
+DUPLICATION_SIMILARITY = 0.85
 CORROBORATION_SIMILARITY = 0.85
 
 
@@ -299,6 +299,42 @@ def _existing_memory_contents(db: Session) -> set[str]:
     return contents
 
 
+def _check_semantic_duplicate(
+    db: Session,
+    content: str,
+    existing_exact: set[str] | None = None,
+) -> tuple[bool, str]:
+    """
+    检查 content 是否与已有记忆重复（精确 + 语义）。
+    Returns (is_duplicate, matched_statement_id).
+    existing_exact: 预加载的精确匹配集合，传入则走快速路径。
+    """
+    normalized = _normalize_content(content)
+
+    # Fast path: exact match against preloaded or freshly-loaded set
+    if existing_exact is not None:
+        if not normalized or normalized in existing_exact:
+            return True, ""
+        # Fall through to semantic check below
+    else:
+        # No cache: load and check exact match
+        if not normalized:
+            return True, ""
+        if normalized in _existing_memory_contents(db):
+            return True, ""
+
+    # Slow path: embedding semantic similarity (only if exact miss)
+    similar = _search_similar_statements(content, top_k=5)
+    for hit in similar:
+        if hit.get("kind") != "statement":
+            continue
+        hit_score = float(hit.get("score", 0))
+        if hit_score >= DUPLICATION_SIMILARITY:
+            return True, str(hit.get("memory_id", ""))
+
+    return False, ""
+
+
 def _search_similar_statements(
     text: str,
     top_k: int = 10,
@@ -455,10 +491,11 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
     confirmed_statements = _existing_confirmed_statements(db)
 
     for candidate in candidates:
-        normalized = _normalize_content(candidate.content)
-        if not normalized or normalized in existing:
+        is_dup, dup_id = _check_semantic_duplicate(db, candidate.content, existing)
+        if is_dup:
             result.candidates_skipped += 1
             continue
+        normalized = _normalize_content(candidate.content)
         evidence = by_id.get(candidate.evidence_message_id) or messages[-1]
         source = MemorySource(
             user_id=DEFAULT_USER_ID,
@@ -534,10 +571,13 @@ def extract_session_memories_scheduled(
     existing = _existing_memory_contents(db)
 
     for candidate in candidates:
-        normalized = _normalize_content(candidate.content)
-        if not normalized or normalized in existing:
+        # Semantic dedup: exact match + embedding similarity
+        is_dup, dup_id = _check_semantic_duplicate(db, candidate.content, existing)
+        if is_dup:
             result.candidates_skipped += 1
             continue
+
+        normalized = _normalize_content(candidate.content)
 
         # Run auto-confirm decision engine
         auto_score, decision, conflict_ids = evaluate_auto_confirm(
