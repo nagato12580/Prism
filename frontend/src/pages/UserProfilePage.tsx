@@ -83,8 +83,8 @@ export function UserProfilePage() {
   const strongest = memories[0]
 
   return (
-    <div className="min-h-full space-y-4 text-[13px]">
-      <header className="flex flex-col gap-3 border-b border-[var(--prism-line)] pb-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="flex h-[calc(100vh-9rem)] flex-col space-y-3 text-[13px]">
+      <header className="shrink-0 flex flex-col gap-3 border-b border-[var(--prism-line)] pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
             <Brain size={16} className="text-[var(--prism-blue)]" />
@@ -106,15 +106,15 @@ export function UserProfilePage() {
         </button>
       </header>
 
-      {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
+      {error ? <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
 
       {loading && memories.length === 0 ? (
         <EmptyState text="正在读取用户记忆。" />
       ) : memories.length === 0 ? (
         <EmptyState text="还没有用户记忆。确认碎片时开启记忆写入或从对话提取确认后，这里会形成画像。" />
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
-          <aside className="space-y-3">
+        <div className="min-h-0 flex-1 grid gap-4 overflow-hidden xl:grid-cols-[22rem_minmax(0,1fr)]">
+          <aside className="overflow-y-auto space-y-3 pe-1">
             <section className="rounded-lg border border-[var(--prism-line)] bg-slate-950 p-4 text-white">
               <div className="flex items-center gap-2 text-xs font-medium text-blue-100">
                 <Sparkles size={15} />
@@ -157,7 +157,7 @@ export function UserProfilePage() {
                 </div>
               </div>
               {notice ? <div className="mb-2 text-[11px] text-amber-700">{notice}</div> : null}
-              <div className="space-y-2">
+              <div className="max-h-48 overflow-y-auto space-y-2">
                 {insights.length ? (
                   insights.map((ins) => (
                     <div key={ins.id} className="rounded-md border border-amber-100 bg-white p-2">
@@ -200,7 +200,7 @@ export function UserProfilePage() {
             </section>
           </aside>
 
-          <main className="grid gap-3 lg:grid-cols-2">
+          <main className="overflow-y-auto grid gap-3 lg:grid-cols-2 pe-1">
             {Object.keys(memoryTypeMeta).map((type) => (
               <MemorySection key={type} type={type} items={groups[type] ?? []} />
             ))}
