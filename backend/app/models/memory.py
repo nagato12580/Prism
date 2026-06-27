@@ -181,3 +181,21 @@ class MemoryDraft(Base):
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     source = relationship("MemorySource")
+
+
+class MemoryExtractionRun(Base):
+    __tablename__ = "memory_extraction_run"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    user_id = Column(CHAR(36), default="default-user", index=True, nullable=False)
+    trigger_type = Column(String(32), default="scheduled", index=True, comment="scheduled/manual/instant")
+    sessions_scanned = Column(Integer, default=0)
+    sessions_extracted = Column(Integer, default=0)
+    candidates_found = Column(Integer, default=0)
+    auto_confirmed = Column(Integer, default=0)
+    inbox_created = Column(Integer, default=0)
+    skipped = Column(Integer, default=0)
+    errors = Column(Integer, default=0)
+    duration_ms = Column(Integer, default=0)
+    details = Column(JSON, default=dict, comment="per-session breakdown")
+    created_at = Column(DateTime, default=local_now)
