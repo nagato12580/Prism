@@ -241,3 +241,35 @@ def test_auto_memory_extraction_ignores_session_open_failures(monkeypatch):
     monkeypatch.setattr(chat_api, "SessionLocal", fail_session_open)
 
     chat_api._run_memory_extraction_best_effort("session-id")
+
+
+def test_count_drafts_returns_count(client):
+    """GET /memories/drafts/count returns draft count and by_risk breakdown."""
+    # Create a draft manually via the create endpoint
+    payload = {
+        "draft_type": "statement",
+        "payload": {"content": "test count draft", "statement_type": "fact"},
+        "decision_hint": "review",
+        "risk_level": "medium",
+        "confidence": 0.7,
+    }
+    client.post("/api/v1/memories/drafts", json=payload)
+
+    resp = client.get("/api/v1/memories/drafts/count?status=draft")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "count" in data
+    assert data["count"] >= 1
+    assert "by_risk" in data
+
+
+def test_trigger_scheduled_extraction_returns_stats(client):
+    """POST /memories/extract/scheduled triggers a round and returns stats."""
+    resp = client.post("/api/v1/memories/extract/scheduled")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "sessions_scanned" in data
+    assert "sessions_extracted" in data
+    assert "auto_confirmed" in data
+    assert "inbox_created" in data
+    assert "errors" in data
