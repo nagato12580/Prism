@@ -44,6 +44,11 @@ class Settings:
 
     JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret")
     MEMORY_EXTRACTION_AUTO_ENABLED: bool = os.getenv("MEMORY_EXTRACTION_AUTO_ENABLED", "0") == "1"
+    MEMORY_SCHEDULED_ENABLED: bool = os.getenv("MEMORY_SCHEDULED_ENABLED", "1") == "1"
+    MEMORY_SCHEDULED_INTERVAL_MINUTES: int = int(os.getenv("MEMORY_SCHEDULED_INTERVAL_MINUTES", "30"))
+    MEMORY_SCHEDULED_MAX_SESSIONS: int = int(os.getenv("MEMORY_SCHEDULED_MAX_SESSIONS", "10"))
+    MEMORY_SCHEDULED_CONTEXT_WINDOW: int = int(os.getenv("MEMORY_SCHEDULED_CONTEXT_WINDOW", "5"))
+    MEMORY_AUTO_CONFIRM_THRESHOLD: float = float(os.getenv("MEMORY_AUTO_CONFIRM_THRESHOLD", "0.85"))
 
 
 settings = Settings()
