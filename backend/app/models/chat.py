@@ -19,6 +19,9 @@ class ChatSession(Base):
     user_id = Column(CHAR(36), default="default-user")
     topic_id = Column(CHAR(36), nullable=True, default=None, comment="关联知识库主题")
     source_types = Column(JSON, nullable=True, default=None, comment="过滤数据来源类型")
+    summary = Column(Text, default="", comment="LLM 生成的会话摘要")
+    last_extracted_message_id = Column(CHAR(36), default="", comment="提取水位线：上次提取到的最后一条消息 ID")
+    last_extracted_at = Column(DateTime, nullable=True, comment="上次触发提取的时间")
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
