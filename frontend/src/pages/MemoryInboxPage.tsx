@@ -115,13 +115,13 @@ export function MemoryInboxPage() {
   }
 
   return (
-    <div data-testid="memory-inbox-page" className="min-h-[calc(100vh-9rem)] space-y-4 text-[13px]">
-      <section className="border-b border-[var(--prism-line)] pb-3">
+    <div data-testid="memory-inbox-page" className="flex h-[calc(100vh-9rem)] flex-col space-y-3 text-[13px]">
+      <section className="shrink-0 border-b border-[var(--prism-line)] pb-3">
         <div className="text-xs font-medium text-slate-500">Memory governance</div>
         <h1 className="mt-1 text-2xl font-semibold text-slate-950">Memory Inbox</h1>
       </section>
 
-      <section className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
+      <section className="shrink-0 rounded-lg border border-[var(--prism-line)] bg-white p-3">
         <div className="flex flex-col gap-2 md:flex-row md:items-end">
           <label className="min-w-0 flex-1">
             <span className="mb-1 block text-[11px] font-medium text-slate-500">Chat session</span>
@@ -169,7 +169,7 @@ export function MemoryInboxPage() {
         ) : null}
       </section>
 
-      <section className="flex flex-col gap-2 rounded-lg border border-[var(--prism-line)] bg-white p-3 md:flex-row md:items-center">
+      <section className="shrink-0 flex flex-col gap-2 rounded-lg border border-[var(--prism-line)] bg-white p-3 md:flex-row md:items-center">
         <label className="relative min-w-0 flex-1">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -202,9 +202,10 @@ export function MemoryInboxPage() {
         </button>
       </section>
 
-      {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
+      {error ? <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
 
-      <section className="grid gap-3">
+      <section className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-[var(--prism-line)] bg-white">
+        <div className="grid gap-3 p-3">
         {filtered.map((draft) => (
           <article key={draft.id} className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -283,6 +284,7 @@ export function MemoryInboxPage() {
             No memory drafts match the current filters.
           </div>
         ) : null}
+      </div>
       </section>
     </div>
   )
