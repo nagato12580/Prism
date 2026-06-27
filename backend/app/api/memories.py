@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -169,6 +170,35 @@ def list_memory_drafts(
     return [_draft_to_out(draft) for draft in drafts]
 
 
+@router.get("/drafts/count")
+def count_memory_drafts(
+    status: str = Query("draft"),
+    db: Session = Depends(get_db),
+):
+    """Return count of drafts (default: draft status) for badge display."""
+    count = (
+        db.query(MemoryDraft)
+        .filter(
+            MemoryDraft.user_id == DEFAULT_USER_ID,
+            MemoryDraft.status == status,
+        )
+        .count()
+    )
+    risks = (
+        db.query(MemoryDraft.risk_level, func.count())
+        .filter(
+            MemoryDraft.user_id == DEFAULT_USER_ID,
+            MemoryDraft.status == status,
+        )
+        .group_by(MemoryDraft.risk_level)
+        .all()
+    )
+    return {
+        "count": count,
+        "by_risk": {risk: c for risk, c in risks},
+    }
+
+
 @router.post("/drafts", response_model=MemoryDraftOut)
 def create_memory_draft(payload: MemoryDraftCreate, db: Session = Depends(get_db)):
     source = _create_source(payload.source, db) if payload.source else None
@@ -276,6 +306,14 @@ def supersede_memory_draft(
     db.refresh(draft)
     db.refresh(statement)
     return MemoryDraftConfirmOut(draft=_draft_to_out(draft), statement=_statement_to_out(statement))
+
+
+@router.post("/extract/scheduled", response_model=dict)
+def trigger_scheduled_extraction():
+    """Manually trigger one round of scheduled extraction."""
+    from backend.app.services.memory_scheduler import _scheduled_extraction_round
+    stats = _scheduled_extraction_round()
+    return stats
 
 
 @router.get("/statements", response_model=list[MemoryStatementOut])
