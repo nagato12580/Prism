@@ -231,3 +231,140 @@ def test_detect_conflicts_requires_sufficient_overlap():
     confirmed = [("s1", "用户偏好深色主题阅读", "habit")]
 
     assert _detect_conflicts(candidate, confirmed) == []
+
+
+def test_parse_memory_candidates_parses_explicitness_and_sensitivity():
+    raw = json.dumps({
+        "candidates": [
+            {
+                "content": "用户使用 Python 作为主力语言",
+                "statement_type": "preference",
+                "temporal_type": "stable",
+                "confidence": 0.9,
+                "importance": 0.8,
+                "explicitness": 0.95,
+                "sensitivity_flag": False,
+                "evidence_message_id": "msg-a",
+            },
+            {
+                "content": "用户身份证号为 xxx",
+                "statement_type": "fact",
+                "confidence": 0.85,
+                "explicitness": 1.0,
+                "sensitivity_flag": True,
+                "evidence_message_id": "msg-b",
+            },
+        ]
+    }, ensure_ascii=False)
+
+    candidates = svc.parse_memory_candidates(raw)
+
+    assert len(candidates) == 2
+    assert candidates[0].explicitness == 0.95
+    assert candidates[0].sensitivity_flag is False
+    assert candidates[1].explicitness == 1.0
+    assert candidates[1].sensitivity_flag is True
+
+
+def test_parse_memory_candidates_handles_sensitivity_as_int():
+    """sensitivity_flag may come as 0/1 int, parse as bool."""
+    raw = json.dumps({
+        "candidates": [
+            {"content": "test", "sensitivity_flag": 1, "explicitness": 0.85},
+        ]
+    })
+    candidates = svc.parse_memory_candidates(raw)
+    assert len(candidates) == 1
+    assert candidates[0].sensitivity_flag is True
+
+
+def test_load_session_messages_with_watermark_splits_correctly(db_session):
+    session = ChatSession(user_id="default-user", title="Watermark test")
+    db_session.add(session)
+    db_session.flush()
+
+    msgs = []
+    for i in range(10):
+        m = ChatMessage(session_id=session.id, role="user", content=f"msg{i}")
+        db_session.add(m)
+        msgs.append(m)
+    db_session.commit()
+
+    # Watermark at message index 3 (split at msg idx 4)
+    watermark_id = msgs[3].id
+    context, new = svc.load_session_messages_with_watermark(
+        db_session, session.id, watermark_id, context_window=5,
+    )
+
+    # Context should include messages before watermark (limited to 5)
+    assert len(context) <= 5
+    # New messages = msgs[4:] = 6 messages
+    assert len(new) == 6
+    assert new[0].content == "msg4"
+    assert new[-1].content == "msg9"
+
+
+def test_load_session_messages_with_watermark_no_watermark_returns_all_new(db_session):
+    session = ChatSession(user_id="default-user", title="No watermark")
+    db_session.add(session)
+    db_session.flush()
+
+    for i in range(3):
+        db_session.add(ChatMessage(session_id=session.id, role="user", content=f"msg{i}"))
+    db_session.commit()
+
+    context, new = svc.load_session_messages_with_watermark(
+        db_session, session.id, "", context_window=5,
+    )
+
+    # No watermark → all messages are new, context is empty
+    assert len(context) == 0
+    assert len(new) == 3
+
+
+def test_load_session_messages_with_watermark_404_on_missing_session(db_session):
+    import pytest
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        svc.load_session_messages_with_watermark(db_session, "nonexistent-id")
+    assert exc_info.value.status_code == 404
+
+
+def test_evaluate_auto_confirm_sensitivity_veto(db_session):
+    """sensitivity_flag=True must force 'review' regardless of score."""
+    from backend.app.services.memory_extraction import MemoryCandidate
+
+    candidate = MemoryCandidate(
+        content="用户的身份证号是 xxx",
+        statement_type="fact",
+        confidence=0.99,
+        explicitness=1.0,
+        sensitivity_flag=True,
+    )
+
+    score, decision, conflicts = svc.evaluate_auto_confirm(
+        db_session, candidate, session_id="",
+    )
+
+    assert decision == "review"
+    assert score == 0.0  # vetoed
+
+
+def test_evaluate_auto_confirm_low_confidence_decision_review(db_session):
+    """Low confidence on a decision type should result in review."""
+    candidate = svc.MemoryCandidate(
+        content="用户决定使用微服务架构",
+        statement_type="decision",
+        confidence=0.6,
+        explicitness=0.5,
+        sensitivity_flag=False,
+        importance=0.7,
+    )
+
+    score, decision, conflicts = svc.evaluate_auto_confirm(
+        db_session, candidate, session_id="",
+    )
+
+    assert decision == "review"
+    # Score should be well below 0.85 threshold
+    assert score < 0.85
