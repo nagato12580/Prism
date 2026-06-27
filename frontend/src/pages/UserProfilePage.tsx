@@ -200,10 +200,12 @@ export function UserProfilePage() {
             </section>
           </aside>
 
-          <main className="overflow-y-auto grid gap-3 lg:grid-cols-2 pe-1">
-            {Object.keys(memoryTypeMeta).map((type) => (
-              <MemorySection key={type} type={type} items={groups[type] ?? []} />
-            ))}
+          <main className="overflow-y-auto pe-1">
+            <div className="grid gap-3 lg:grid-cols-2">
+              {Object.keys(memoryTypeMeta).map((type) => (
+                <MemorySection key={type} type={type} items={groups[type] ?? []} />
+              ))}
+            </div>
           </main>
         </div>
       )}
@@ -214,8 +216,8 @@ export function UserProfilePage() {
 function MemorySection({ type, items }: { type: string; items: MemoryView[] }) {
   const meta = getMemoryMeta(type)
   return (
-    <section className="min-h-[16rem] rounded-lg border border-[var(--prism-line)] bg-white p-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <section className="flex flex-col min-h-[16rem] max-h-[28rem] rounded-lg border border-[var(--prism-line)] bg-white p-3">
+      <div className="shrink-0 mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={cn('flex h-7 w-7 items-center justify-center rounded-lg border text-xs font-semibold', meta.tone)}>
             {meta.short}
@@ -227,7 +229,7 @@ function MemorySection({ type, items }: { type: string; items: MemoryView[] }) {
         </div>
         <Target size={15} className="text-slate-300" />
       </div>
-      <div className="space-y-2">
+      <div className="min-h-0 flex-1 overflow-y-auto space-y-2 pr-1">
         {items.length ? items.map((item) => <MemoryCard key={item.id} item={item} />) : <EmptyLine />}
       </div>
     </section>
