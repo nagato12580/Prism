@@ -13,7 +13,8 @@ from backend.app.config import settings
 from backend.app.models.chat import ChatMessage, ChatSession
 from backend.app.models.memory import MemoryDraft, MemorySource, MemoryStatement, MemoryStatus
 from backend.app.prompts.memory_extraction import build_memory_extraction_messages
-from backend.app.services.memory_vectors import search_memory_vectors
+from backend.app.services.memory_vectors import search_memory_vectors, upsert_statement_vector
+from backend.app.utils.time import local_now
 
 DEFAULT_USER_ID = "default-user"
 MIN_CONFIDENCE = 0.35
@@ -485,6 +486,137 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
         existing.add(normalized)
         result.draft_ids.append(draft.id)
         result.drafts_created += 1
+
+    db.commit()
+    return result
+
+
+def extract_session_memories_scheduled(
+    db: Session,
+    session_id: str,
+    last_extracted_message_id: str = "",
+    context_window: int = 5,
+) -> MemoryExtractionResult:
+    """
+    Scheduled extraction variant with watermark, summary, and auto-confirm.
+    """
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    context_messages, new_messages = load_session_messages_with_watermark(
+        db, session_id, last_extracted_message_id, context_window,
+    )
+
+    result = MemoryExtractionResult(session_id=session_id, messages_scanned=len(new_messages))
+    if not new_messages:
+        return result
+
+    # Step 1: Update session summary
+    session_summary = generate_or_update_summary(db, session, new_messages)
+
+    # Step 2: Build prompt and call LLM
+    prompt_messages = build_memory_extraction_messages(
+        new_messages=new_messages,
+        context_messages=context_messages,
+        session_summary=session_summary,
+    )
+    raw = _call_memory_extraction_llm(prompt_messages)
+    candidates = parse_memory_candidates(raw)
+    result.candidates_found = len(candidates)
+
+    # Step 3: Process each candidate through decision engine
+    by_id = {m.id: m for m in new_messages}
+    existing = _existing_memory_contents(db)
+
+    for candidate in candidates:
+        normalized = _normalize_content(candidate.content)
+        if not normalized or normalized in existing:
+            result.candidates_skipped += 1
+            continue
+
+        # Run auto-confirm decision engine
+        auto_score, decision, conflict_ids = evaluate_auto_confirm(
+            db, candidate, session_id=session_id,
+        )
+
+        evidence = by_id.get(candidate.evidence_message_id) or new_messages[-1]
+        source = MemorySource(
+            user_id=DEFAULT_USER_ID,
+            source_type="chat_message",
+            source_id=evidence.id,
+            session_id=session_id,
+            message_id=evidence.id,
+            span_text=evidence.content or "",
+            source_metadata={"extractor": "memory_scheduled_v1"},
+        )
+
+        if decision == "skip":
+            result.candidates_skipped += 1
+            continue
+
+        if decision == "auto_confirm":
+            # Create confirmed MemoryStatement directly
+            statement = MemoryStatement(
+                user_id=DEFAULT_USER_ID,
+                content=candidate.content,
+                statement_type=candidate.statement_type,
+                temporal_type=candidate.temporal_type,
+                confidence=candidate.confidence,
+                importance=candidate.importance,
+                explicitness=candidate.explicitness,
+                sensitivity_flag=1.0 if candidate.sensitivity_flag else 0.0,
+                auto_confirm_score=auto_score,
+                corroboration_count=0,
+                status=MemoryStatus.CONFIRMED,
+                source=source,
+            )
+            db.add_all([source, statement])
+            db.flush()
+            # Index vector
+            try:
+                vector_id = upsert_statement_vector(statement)
+                if vector_id:
+                    statement.embedding_ref = vector_id
+                    statement.embedding_model = settings.EMBEDDING_MODEL
+                    statement.embedding_status = "done"
+                else:
+                    statement.embedding_status = "pending"
+            except Exception:
+                statement.embedding_status = "pending"
+            result.statement_ids.append(statement.id)
+            result.auto_confirmed += 1
+        else:
+            # decision == "review" — create draft for Memory Inbox
+            draft = MemoryDraft(
+                user_id=DEFAULT_USER_ID,
+                draft_type="statement",
+                payload={
+                    "content": candidate.content,
+                    "statement_type": candidate.statement_type,
+                    "temporal_type": candidate.temporal_type,
+                    "importance": candidate.importance,
+                },
+                decision_hint="review",
+                risk_level="medium" if auto_score >= 0.6 else "high",
+                confidence=candidate.confidence,
+                explicitness=candidate.explicitness,
+                sensitivity_flag=1.0 if candidate.sensitivity_flag else 0.0,
+                auto_confirm_score=auto_score,
+                conflict_ids=conflict_ids,
+                source=source,
+            )
+            db.add_all([source, draft])
+            db.flush()
+            result.draft_ids.append(draft.id)
+            result.drafts_created += 1
+
+        existing.add(normalized)
+
+    # Step 4: Update watermark on session
+    if new_messages:
+        session.last_extracted_message_id = new_messages[-1].id
+        session.last_extracted_at = local_now()
 
     db.commit()
     return result
