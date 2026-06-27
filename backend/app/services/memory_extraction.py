@@ -13,9 +13,37 @@ from backend.app.config import settings
 from backend.app.models.chat import ChatMessage, ChatSession
 from backend.app.models.memory import MemoryDraft, MemorySource, MemoryStatement, MemoryStatus
 from backend.app.prompts.memory_extraction import build_memory_extraction_messages
+from backend.app.services.memory_vectors import search_memory_vectors
 
 DEFAULT_USER_ID = "default-user"
 MIN_CONFIDENCE = 0.35
+
+# Auto-confirm decision engine constants
+TYPE_RISK_BASELINE = {
+    "fact": 1.0,
+    "preference": 0.9,
+    "project_context": 0.85,
+    "topic_interest": 0.80,
+    "goal": 0.70,
+    "constraint": 0.65,
+    "decision": 0.60,
+    "question": 0.50,
+}
+
+# Scoring weights
+W_CONFIDENCE = 0.25
+W_EXPLICITNESS = 0.15
+W_SENSITIVITY = 0.10
+W_TYPE_RISK = 0.15
+W_NO_CONFLICT = 0.15
+W_CORROBORATION = 0.10
+W_CROSS_SESSION = 0.10
+
+# Thresholds
+HIGH_STAKES_CONFLICT_SIMILARITY = 0.80
+HIGH_STAKES_CONFLICT_IMPORTANCE = 0.7
+DUPLICATION_SIMILARITY = 0.95
+CORROBORATION_SIMILARITY = 0.85
 
 
 @dataclass
@@ -264,6 +292,134 @@ def _existing_memory_contents(db: Session) -> set[str]:
         if isinstance(payload, dict) and isinstance(payload.get("content"), str):
             contents.add(_normalize_content(payload["content"]))
     return contents
+
+
+def _search_similar_statements(
+    text: str,
+    top_k: int = 10,
+) -> list[dict[str, Any]]:
+    """Search Milvus for semantically similar confirmed statements."""
+    try:
+        return search_memory_vectors(
+            text=text,
+            user_id=DEFAULT_USER_ID,
+            top_k=top_k,
+        )
+    except Exception:
+        return []
+
+
+def _check_semantic_conflict(
+    new_content: str,
+    existing_content: str,
+) -> bool:
+    """Check if two high-similarity statements semantically conflict via negation scan."""
+    negation_patterns = [
+        r"不\w{0,2}(?:喜欢|想|需要|会|能|应该|再|用|做|是|再|打算)",
+        r"没有\w+",
+        r"拒绝|放弃|停止|取消|不再|改为|换成|改成",
+    ]
+    new_has_neg = any(re.search(p, new_content) for p in negation_patterns)
+    existing_has_neg = any(re.search(p, existing_content) for p in negation_patterns)
+    return new_has_neg != existing_has_neg
+
+
+def evaluate_auto_confirm(
+    db: Session,
+    candidate: MemoryCandidate,
+    session_id: str = "",
+) -> tuple[float, str, list[str]]:
+    """
+    Compute the auto_confirm_score and return (score, decision, conflict_ids).
+
+    decision is one of: "auto_confirm", "review", "skip"
+    """
+    # ---- Veto Rule 1: Sensitivity gate ----
+    if candidate.sensitivity_flag:
+        return (0.0, "review", [])
+
+    type_risk = TYPE_RISK_BASELINE.get(candidate.statement_type, 0.80)
+
+    # ---- Semantic search for conflict & corroboration ----
+    similar = _search_similar_statements(candidate.content, top_k=10)
+
+    max_conflict_sim = 0.0
+    conflict_ids: list[str] = []
+    corroboration_count = 0
+    cross_session_ids: set[str] = set()
+
+    for hit in similar:
+        if hit.get("kind") != "statement":
+            continue
+        hit_score = float(hit.get("score", 0))
+        memory_id = str(hit.get("memory_id", ""))
+
+        # Load the existing statement
+        stmt = db.query(MemoryStatement).filter(
+            MemoryStatement.id == memory_id,
+            MemoryStatement.status == MemoryStatus.CONFIRMED,
+        ).first()
+        if not stmt:
+            continue
+
+        # ---- Duplication check ----
+        if hit_score >= DUPLICATION_SIMILARITY:
+            # Increment corroboration on existing
+            stmt.corroboration_count = (stmt.corroboration_count or 0) + 1
+            # Duplication = skip
+            return (0.0, "skip", [memory_id])
+
+        # ---- Corroboration check ----
+        if hit_score >= CORROBORATION_SIMILARITY:
+            corroboration_count += 1
+            if stmt.source and stmt.source.session_id:
+                cross_session_ids.add(stmt.source.session_id)
+            if session_id and session_id in cross_session_ids:
+                cross_session_ids.discard(session_id)
+
+        # ---- Conflict check (same type, high similarity but lower than dup) ----
+        if (
+            hit_score >= HIGH_STAKES_CONFLICT_SIMILARITY
+            and hit_score < DUPLICATION_SIMILARITY
+            and stmt.statement_type == candidate.statement_type
+        ):
+            if _check_semantic_conflict(candidate.content, stmt.content or ""):
+                max_conflict_sim = max(max_conflict_sim, hit_score)
+                if (stmt.importance or 0) >= HIGH_STAKES_CONFLICT_IMPORTANCE:
+                    conflict_ids.append(memory_id)
+
+    # ---- Veto Rule 2: High-stakes conflict gate ----
+    if conflict_ids:
+        return (0.0, "review", conflict_ids)
+
+    # ---- Compute corroboration boost ----
+    corroboration_boost = min(1.0, corroboration_count / 3.0)
+
+    # ---- Cross-session boost ----
+    cross_session_count = len(cross_session_ids)
+    if cross_session_count >= 2:
+        cross_session_boost = 1.0
+    elif cross_session_count == 1:
+        cross_session_boost = 0.5
+    else:
+        cross_session_boost = 0.0
+
+    # ---- Composite score ----
+    score = (
+        W_CONFIDENCE * candidate.confidence
+        + W_EXPLICITNESS * candidate.explicitness
+        + W_SENSITIVITY * (1.0 - (1.0 if candidate.sensitivity_flag else 0.0))
+        + W_TYPE_RISK * type_risk
+        + W_NO_CONFLICT * (1.0 - max_conflict_sim)
+        + W_CORROBORATION * corroboration_boost
+        + W_CROSS_SESSION * cross_session_boost
+    )
+
+    threshold = settings.MEMORY_AUTO_CONFIRM_THRESHOLD
+    if score >= threshold:
+        return (score, "auto_confirm", [])
+    else:
+        return (score, "review", [])
 
 
 def _call_memory_extraction_llm(prompt_messages: list[dict[str, str]]) -> str:
