@@ -321,6 +321,10 @@ export const memoryApi = {
     const qs = search.toString() ? `?${search.toString()}` : ''
     return request<MemoryDraft[]>(`/memories/drafts${qs}`)
   },
+  countDrafts: (status = 'draft') =>
+    request<{ count: number; by_risk: Record<string, number> }>(
+      `/memories/drafts/count?status=${status}`,
+    ),
   createDraft: (data: MemoryDraftCreate) =>
     request<MemoryDraft>('/memories/drafts', {
       method: 'POST',
