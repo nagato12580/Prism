@@ -105,21 +105,13 @@ export function KnowledgeGraphWorkbench({
         ? selectedParentId
         : parents[0]?.id ?? null
       const nextParentGroup = nextParentId && data.parent_groups ? data.parent_groups[nextParentId] : null
-      const firstChild = nextParentGroup?.children[0] ?? null
-      const preservedChild = nextParentGroup?.children.find((child) => child.ckp.id === selectedCkpId) ?? null
-      const nextChildId = nextParentGroup
-        ? preservedChild?.ckp.id ?? firstChild?.ckp.id ?? null
-        : nextParentId
-      const visibleChildId = nextParentGroup && !firstChild ? null : nextChildId
+      const nextParent = nextParentId
+        ? nextParentGroup?.parent ?? parents.find((parent) => parent.id === nextParentId) ?? null
+        : null
+      const nextChildId = nextParentGroup ? null : nextParentId
       setSelectedParentId(nextParentId)
-      setSelectedCkpId(visibleChildId)
-      setSelection(
-        visibleChildId
-          ? { kind: 'ckp', node: data.groups[visibleChildId]?.ckp ?? preservedChild?.ckp ?? firstChild?.ckp ?? parents[0] }
-          : nextParentId
-            ? { kind: 'ckp', node: nextParentGroup?.parent ?? parents.find((parent) => parent.id === nextParentId)! }
-            : null,
-      )
+      setSelectedCkpId(nextChildId)
+      setSelection(nextParent ? { kind: 'ckp', node: nextParent } : null)
     } catch (err) {
       setError(`加载 CKP Workbench 失败：${getErrorMessage(err)}`)
     } finally {
@@ -182,10 +174,9 @@ export function KnowledgeGraphWorkbench({
               type="button"
               onClick={() => {
                 const currentParentGroup = payload?.parent_groups?.[parent.id]
-                const firstChild = currentParentGroup?.children[0]
                 setSelectedParentId(parent.id)
-                setSelectedCkpId(currentParentGroup && !firstChild ? null : firstChild?.ckp.id ?? parent.id)
-                setSelection({ kind: 'ckp', node: firstChild?.ckp ?? parent })
+                setSelectedCkpId(currentParentGroup ? null : parent.id)
+                setSelection({ kind: 'ckp', node: currentParentGroup?.parent ?? parent })
               }}
               className={cn(
                 'w-full rounded-lg border px-3 py-2 text-left transition',
@@ -253,7 +244,7 @@ export function KnowledgeGraphWorkbench({
           <div className="rounded-lg border border-dashed border-[var(--prism-line)] bg-white px-4 py-6 text-center text-sm leading-6 text-slate-500">
             当前筛选下，这个父 CKP 没有可见的子 CKP。
           </div>
-        ) : !selectedGroup ? (
+        ) : selectedParentGroup && selectedParentGroup.children.length > 0 && !selectedCkpId ? null : !selectedGroup ? (
           <div className="flex min-h-full items-center justify-center px-6 text-center text-sm leading-6 text-slate-500">
             暂无可展示的 CKP。确认碎片或完成文档向量化后，会生成 PKU 和 CKP。
           </div>

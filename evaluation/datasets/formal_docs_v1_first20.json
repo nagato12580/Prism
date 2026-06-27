@@ -1,0 +1,645 @@
+{
+  "meta": {
+    "created_at": "2026-06-22T14:57:38.922533+00:00",
+    "total_queries": 20,
+    "zh_count": 48,
+    "en_count": 12,
+    "failed_count": 0,
+    "sampling_strategy": "random_parent_with_children",
+    "sample_size": 60,
+    "candidate_item_ids": [
+      "1e8927d1-f559-4747-bac4-a8417c813eea",
+      "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+      "28841883-d42b-4670-a124-c571f73f8d1a",
+      "aa67312a-53dd-447b-9084-3e6e08f215e7",
+      "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c"
+    ],
+    "llm_model": "deepseek-v4-flash",
+    "embedding_model": "jina-embeddings-v3",
+    "top_k_eval": 20,
+    "output_path": "evaluation\\datasets\\formal_docs_v1.json",
+    "sample_note": "first 20 queries for governed_v2 quick eval"
+  },
+  "queries": [
+    {
+      "id": "q001",
+      "question": "在RAG系统中，父子块之间的映射关系通常通过什么方式在工程落地中建立",
+      "language": "zh",
+      "parent_chunk_id": "be865ef7-0a2d-4770-b2f7-5c139db1b73f",
+      "parent_chunk_text": "[image-20260408115740220](attachment/image-20260408115740220.png)## RAG系统流程文档解析 (Parsing) -> 分块 (Chunking) -> 向量化 (Embedding) -> 存入向量数据库 (Vector DB) -> 用户提问查询 -> 检索 (Retrieval) -> 结合 Prompt 送入 LLM 生成答案。## 向量检索算法![image-20260408162730013](attachment/image-20260408162730013.png)## 父子块分块策略，子块对应的父块合父块对应的子块的关系要如何记录在工程落地中，父子块（Parent-Child Chunking）的映射关系本质上是一个**关系型数据设计**。由于大模型 RAG 系统的特殊性，主流的实现方案是通过 **唯一标识符（ID）+ 元数据（Metadata）** 来建立绑定，并通常采用**双层存储架构（Two-Tier Storage）**。### 1.核心架构：双层存储分离为了兼顾“检索精度”和“存储效率”，我...",
+      "relevant_children": [
+        {
+          "chunk_id": "2f37f7fd-5990-4f7f-8395-bb67a56ba80b",
+          "chunk_text": "[image-20260408115740220](attachment/image-20260408115740220.png)## RAG系统流程文档解析 (Parsing) -> 分块 (Chunking) -> 向量化 (Embedding) -> 存入向量数据库 (Vector DB) -> 用户提问查询 -> 检索 (Retrieval) -> 结合 Prompt 送入 LLM 生成答案。## 向量检索算法![image-20260408162730013](attachment/image-20260408162730013.png)## 父子块分块策略，子块对应的父块合父块对应的子块的关系要如何记录在工程落地中，父子块（Parent-Child Chunking）的映射关系本质上是一个**关系型数据设计**。"
+        },
+        {
+          "chunk_id": "a81ec8a3-c42c-47f7-8782-b8c62f8f7778",
+          "chunk_text": "png)## 父子块分块策略，子块对应的父块合父块对应的子块的关系要如何记录在工程落地中，父子块（Parent-Child Chunking）的映射关系本质上是一个**关系型数据设计**。由于大模型 RAG 系统的特殊性，主流的实现方案是通过 **唯一标识符（ID）+ 元数据（Metadata）** 来建立绑定，并通常采用**双层存储架构（Two-Tier Storage）**。### 1.核心架构：双层存储分离为了兼顾“检索精度”和“存储效率”，我们通常不会把冗长的父块文本和子块的向量挤在同一个数据库的同一张表里。"
+        },
+        {
+          "chunk_id": "b83206db-96f6-438c-93b0-37815e2ed25a",
+          "chunk_text": "核心架构：双层存储分离为了兼顾“检索精度”和“存储效率”，我们通常不会把冗长的父块文本和子块的向量挤在同一个数据库的同一张表里。- **底层（检索层）：向量数据库（Vector DB）**。例如 Milvus, Qdrant, Chroma 等。这里**只存子块**的 Embedding 向量、子块文本片段，以及至关重要的 Metadata（其中包含指向父块的 ID）。- **顶层（内容层）：键值/文档数据库（KV/Document Store）**。例如 Redis, MongoDB，或者在轻量级本地 Agent 项目中直接用 SQLite 或本地 JSON 文件。这里**只存父块**的完整文本，以 `parent_id` 作为主键（Key）。### 2."
+        },
+        {
+          "chunk_id": "94af8127-b47f-40e4-a76a-b7dd61d79b98",
+          "chunk_text": "### 2.数据结构设计（Schema）在你的 Python 后端处理逻辑中，数据切分和入库时需要构建类似如下的数据字典结构：**写入向量数据库的子块数据（Child Chunk）：**JSON```{\"child_id\": \"child_001_a\",\"embedding\": [0.12, -0.45, 0.89, ...],\"content\": \"该聚类算法在处理高维噪声数据时表现出极强的鲁棒性。\",\"metadata\": {\"parent_id\": \"doc_001_paragraph_3\",  // 核心：指向父块的外键\"source_file\": \"research_paper.pdf\",\"chunk_index\": 1}}```**写入 KV/文档数据库的父块数据（Parent Chunk）：**JSON```{\"parent_id\": \"doc_001_paragraph_3\",    // 核心：主键\"content\": \"在多视图学习框架中，数据往往伴随大量噪声。"
+        },
+        {
+          "chunk_id": "182e0958-7cbc-462e-8247-25601623ac77",
+          "chunk_text": "pdf\",\"chunk_index\": 1}}```**写入 KV/文档数据库的父块数据（Parent Chunk）：**JSON```{\"parent_id\": \"doc_001_paragraph_3\",    // 核心：主键\"content\": \"在多视图学习框架中，数据往往伴随大量噪声。该聚类算法在处理高维噪声数据时表现出极强的鲁棒性。实验证明，通过引入隐式正则化模块，能够有效剥离异常视图的干扰...\",\"child_ids\": [\"child_001_a\", \"child_001_b\", \"child_001_c\"], // 可选：父到子的反向映射\"metadata\": {\"author\": \"Huilang\",\"publish_date\": \"2026-03\"}}```### 3."
+        },
+        {
+          "chunk_id": "ad33cecc-a683-44ed-a844-10aacd9b5718",
+          "chunk_text": "\",\"child_ids\": [\"child_001_a\", \"child_001_b\", \"child_001_c\"], // 可选：父到子的反向映射\"metadata\": {\"author\": \"Huilang\",\"publish_date\": \"2026-03\"}}```### 3.工程化检索的完整工作流 (Workflow)当用户发起一个提问时，系统是如何利用这套映射关系的呢？1."
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q002",
+      "question": "在Skill管理中，两阶段调用的第一阶段应检索多少个最相关的Skill",
+      "language": "zh",
+      "parent_chunk_id": "95ce1fc4-998a-48ea-ad62-472875dba914",
+      "parent_chunk_text": "- **长链路依赖推理**：部署 A 之前需要先拉起 B 的数据库迁移，这种时序逻辑在复杂拓扑下容易断裂。## Motion Graphic Agent：概念与架构**Motion Graphic Agent** 是专门生成动态图形（如 After Effects 脚本、Lottie 动画）的智能体。- **架构**：通常采用 **Planner + Coder + Renderer** 模式。1.**Planner**：将视觉描述拆解为时间轴动作（如：0s 缩放，1s 位移）。2.**Coder**：生成特定的脚本（JavaScript/Python），操作 AE 或通过 Canvas 绘图。3.**Renderer**：调用 Headless 浏览器或渲染引擎生成视频/GIF，并由 LLM 进行视觉反馈修正。## SKill是啥## Skill 太多占用上下文？这是典型的 **\"Tool Retrieval\"** 问题，解决方案是：- **RAG 化 Skill 管理**：不要全塞 Prompt。将所有 Skill 的 Description 存入向量数据库。- **两阶段调用**...",
+      "relevant_children": [
+        {
+          "chunk_id": "341bb66b-04b9-429f-b69b-ded64a6d1a2a",
+          "chunk_text": "- **长链路依赖推理**：部署 A 之前需要先拉起 B 的数据库迁移，这种时序逻辑在复杂拓扑下容易断裂。## Motion Graphic Agent：概念与架构**Motion Graphic Agent** 是专门生成动态图形（如 After Effects 脚本、Lottie 动画）的智能体。- **架构**：通常采用 **Planner + Coder + Renderer** 模式。1.**Planner**：将视觉描述拆解为时间轴动作（如：0s 缩放，1s 位移）。2.**Coder**：生成特定的脚本（JavaScript/Python），操作 AE 或通过 Canvas 绘图。3.**Renderer**：调用 Headless 浏览器或渲染引擎生成视频/GIF，并由 LLM 进行视觉反馈修正。## SKill是啥## Skill 太多占用上下文？"
+        },
+        {
+          "chunk_id": "7235a9ed-ddef-45a8-bef1-0e5bb899f699",
+          "chunk_text": "## SKill是啥## Skill 太多占用上下文？这是典型的 **\"Tool Retrieval\"** 问题，解决方案是：- **RAG 化 Skill 管理**：不要全塞 Prompt。将所有 Skill 的 Description 存入向量数据库。- **两阶段调用**：- **Phase 1**：根据 Query 检索最相关的 Top 3-5 个 Skill。- **Phase 2**：仅将这几个 Skill 的完整定义喂给 LLM。## Description 相似导致加载错误？**精细化 Schema 设计**：在 Description 中增加 **\"Negative Examples\"（反面示例）**，明确说明“本工具不适用于 XXX 场景”。**强类型约束**：通过参数的枚举值或 Pydantic 定义强制区分。"
+        },
+        {
+          "chunk_id": "026ab191-1e8d-4855-a919-26a90699b2b7",
+          "chunk_text": "**强类型约束**：通过参数的枚举值或 Pydantic 定义强制区分。**Few-shot 演示**：在 Prompt 中针对容易混淆的两个 Skill 提供对比示例（Contrastive Examples）。## 上下文工程要注意的点**噪声过滤**：对话历史中无用的冗余信息（如打招呼、重复报错）必须修剪，否则会稀释注意力。**结构化布局**：使用 Markdown 标签明确区分 `Current Goal`、`Memory`、`Tool Outputs`，这比纯文本更能引导 LLM 推理。## 主流 Agent 设计与 Multi-Agent 架构## 主流设计- **Single Agent**：ReAct (Reason + Act), Plan-and-Execute。- **Multi-Agent**：多智能体协作。## Multi-Agent 实现方案1."
+        },
+        {
+          "chunk_id": "06516ced-42d4-4d89-815e-cde7c744eedd",
+          "chunk_text": "## Multi-Agent 实现方案1.**中心化 (Hub-and-Spoke)**：一个 Manager Agent 分配任务给多个 Worker（如 AutoGen）。2.**流水线型 (Sequential/Pipeline)**：A 做完给 B，B 做完给 C（如 LangGraph 的简单链）。3.**协作协议 (Peer-to-Peer)**：Agent 之间动态对话。## Multi-Agent 靠什么交流？**结构化消息 (Structured Messaging)**：通常是 JSON 或经过定义的通信协议（Message Pool）。**共享看板 (Blackboard/State)**：所有 Agent 读写同一个共享的状态对象（State Object），实时感知进度。## Agent项目开发的框架**LangChain**（生态丰富但较重）、**AutoGen**（多智能体对话优秀）或 **MetaGPT**。"
+        },
+        {
+          "chunk_id": "33efff05-1ba6-40f1-8d9c-f2928fd96aed",
+          "chunk_text": "## Agent项目开发的框架**LangChain**（生态丰富但较重）、**AutoGen**（多智能体对话优秀）或 **MetaGPT**。然后强调你为了更深入理解底层逻辑和工具调用机制，在实际项目中会选择或借鉴 **`hello-agents`** 这类更轻量级的框架。## 推理模式的差异化设计**ReAct (Reason + Act)：** 最主流的模式。工程实现是：Prompt 中定义严格的思考框架 `Thought -> Action -> Observation`。每执行完一步，将结果拼接回 Prompt 中再次请求 LLM，直到输出 `Finish`。"
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q003",
+      "question": "What is the LLM-as-a-Judge evaluation method and how does it work",
+      "language": "en",
+      "parent_chunk_id": "7c362dea-9bfb-42b6-8858-39f8916eb6e7",
+      "parent_chunk_text": "在实际的 RAG 工业落地中，我们通常会**组合使用**这些指标：1.用**关键词重合度**保底，确保硬核事实（Entity/Fact）不出错。2.用**文本相似度**作为主导，评估模型是否真正理解并回答了问题。3.用 **ROUGE-L** 辅助观察生成的句子结构是否连贯、完整。#### 维度三：Answer Relevance (回答相关性) —— 考察“生成层”的有用性- **核心问题**：大模型的最终回答，真的解答了用户最初的 Query 吗？- **为什么重要**：有时候检索到了相关的文档，模型也忠实地复述了文档，但就是**答非所问**。比如用户问“大理天气如何？”，模型回答“大理是一个美丽的城市”（因为文档里只有这句话）。这时候忠实度很高，但回答相关性极低。------### 2.怎么打分？(Evaluation Methods)知道了要评什么，接下来是怎么评。总不能让人工一条条去读。1.**LLM-as-a-Judge (让大模型当裁判)**：- 这是目前**最绝对的主流**。- 做法是：写一套极其严格的 Prompt，把用户的 Query、系统检索到的 Context ...",
+      "relevant_children": [
+        {
+          "chunk_id": "e7c3e39a-4502-4ecb-876f-9d8a81238c19",
+          "chunk_text": "在实际的 RAG 工业落地中，我们通常会**组合使用**这些指标：1.用**关键词重合度**保底，确保硬核事实（Entity/Fact）不出错。2.用**文本相似度**作为主导，评估模型是否真正理解并回答了问题。3.用 **ROUGE-L** 辅助观察生成的句子结构是否连贯、完整。#### 维度三：Answer Relevance (回答相关性) —— 考察“生成层”的有用性- **核心问题**：大模型的最终回答，真的解答了用户最初的 Query 吗？- **为什么重要**：有时候检索到了相关的文档，模型也忠实地复述了文档，但就是**答非所问**。比如用户问“大理天气如何？"
+        },
+        {
+          "chunk_id": "5c6db864-573c-43bf-acc4-2be4cf67577d",
+          "chunk_text": "比如用户问“大理天气如何？”，模型回答“大理是一个美丽的城市”（因为文档里只有这句话）。这时候忠实度很高，但回答相关性极低。------### 2.怎么打分？(Evaluation Methods)知道了要评什么，接下来是怎么评。总不能让人工一条条去读。1.**LLM-as-a-Judge (让大模型当裁判)**：- 这是目前**最绝对的主流**。- 做法是：写一套极其严格的 Prompt，把用户的 Query、系统检索到的 Context 和系统生成的 Answer 一起喂给一个更强大的闭源模型（比如 GPT-4o 或 Claude 3."
+        },
+        {
+          "chunk_id": "d49ac420-e981-42e4-aaf3-853eca467c1b",
+          "chunk_text": "- 做法是：写一套极其严格的 Prompt，把用户的 Query、系统检索到的 Context 和系统生成的 Answer 一起喂给一个更强大的闭源模型（比如 GPT-4o 或 Claude 3.5 Sonnet），让它按照上述的三个维度，给系统的表现打分（通常是 0-1 分），并给出打分理由。2.**基于语义的自动化指标 (如 BERTScore)**：- 在你拥有“标准答案 (Ground Truth)”的前提下，可以使用 BERT 等模型，计算你的系统回答与标准答案之间的语义相似度。3.**人工验收 (Human-in-the-loop)**：- 虽然慢，但必须有。"
+        },
+        {
+          "chunk_id": "da047154-54b5-4a46-9ffe-07e1d367c7c8",
+          "chunk_text": "**人工验收 (Human-in-the-loop)**：- 虽然慢，但必须有。通常是在系统上线前，由业务专家对 LLM 裁判打出的低分 case 进行人工复核，以校验裁判本身是否公正。------### 3.工业界主流评估框架 (可以直接写进简历的工具)不需要你手写打分的 Prompt，开源社区已经封装好了极其强大的评估框架：- **Ragas (RAG Assessment)**：目前最火的 RAG 专属评估框架。它的核心设计就是围绕上述的 Triad 展开的。你只需要提供包含 `question`, `contexts`, `answer`, `ground_truth` 的数据集，它就能一键跑出各个维度的得分。"
+        },
+        {
+          "chunk_id": "34fdf438-4b18-4b0e-a89f-25f17594ddfe",
+          "chunk_text": "你只需要提供包含 `question`, `contexts`, `answer`, `ground_truth` 的数据集，它就能一键跑出各个维度的得分。- **TruLens**：也是一个非常强大的框架，除了提供类似 Ragas 的评估，它还自带一个很炫酷的 Dashboard，能让你直观地看到每次改动（比如调大了 Chunk Size，或者换了 BGE 模型）后，哪一个环节的分数涨了或跌了。# 向量数据库## ANN不求精确解，只求近似解，锁定区域再查找最有可能的## 向量缓存索引具体是怎么实现的# 底层协议## MCP (Model Context Protocol) 的核心内容与通信方式**核心内容：** MCP 是一个标准化的 C/S 架构协议。"
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q004",
+      "question": "What is the core of Gemini CLI design and what are its optimization points",
+      "language": "en",
+      "parent_chunk_id": "3dcb4c24-ab41-44f3-b6a3-b14654881965",
+      "parent_chunk_text": "| ✅ **原生支持**。MCP Server 可以将本地文件系统、数据库、GitHub 仓库等直接映射为大模型可以读取的 URI。模型能像访问本地磁盘一样感知这些数据。|| **Prompts (提示词)** | ❌ 通常硬编码在 Agent 的系统设定里。| ✅ **原生支持**。MCP 允许服务器向客户端提供可复用的、动态的 Prompt 模板。|# 其他题目## Gemini CLI 设计核心与优化**核心**：**流式响应（Streaming）\\**与\\**多模态文件处理**的极速反馈。**优化点**：1.**缓存层**：对重复的系统指令使用 **Context Caching** 降低成本。2.**终端交互**：增加交互式命令纠错（当命令报错时，自动询问是否让 Gemini 修复）。## 如何设计一个高效的 Agent 上下文维护方案？核心在于 **“分层”** 与 **“动态压缩”**。- **短期记忆（Sliding Window）**：只保留最近 $N$ 轮对话。- **长期记忆（Vector Search）**：将历史对话向量化存入数据库（如 FAISS/Milvu...",
+      "relevant_children": [
+        {
+          "chunk_id": "f7558f81-7476-4047-b370-055eae14fd19",
+          "chunk_text": "| ✅ **原生支持**。MCP Server 可以将本地文件系统、数据库、GitHub 仓库等直接映射为大模型可以读取的 URI。模型能像访问本地磁盘一样感知这些数据。|| **Prompts (提示词)** | ❌ 通常硬编码在 Agent 的系统设定里。| ✅ **原生支持**。MCP 允许服务器向客户端提供可复用的、动态的 Prompt 模板。|# 其他题目## Gemini CLI 设计核心与优化**核心**：**流式响应（Streaming）\\**与\\**多模态文件处理**的极速反馈。**优化点**：1.**缓存层**：对重复的系统指令使用 **Context Caching** 降低成本。2."
+        },
+        {
+          "chunk_id": "fafba5d6-4975-4869-b077-49abed872594",
+          "chunk_text": "2.**终端交互**：增加交互式命令纠错（当命令报错时，自动询问是否让 Gemini 修复）。## 如何设计一个高效的 Agent 上下文维护方案？核心在于 **“分层”** 与 **“动态压缩”**。- **短期记忆（Sliding Window）**：只保留最近 $N$ 轮对话。- **长期记忆（Vector Search）**：将历史对话向量化存入数据库（如 FAISS/Milvus），按语义相关性召回。- **总结压缩（Summarization）**：当 Context 过长时，让 LLM 对老对话进行摘要，只保留“关键事实”存入 System Prompt。- **实体记忆（Entity Store）**：结构化提取用户偏好（如：用户喜欢 Python），以 Key-Value 形式持久化。"
+        },
+        {
+          "chunk_id": "b26160f2-3209-44cd-8072-2d94a24a6b65",
+          "chunk_text": "- **实体记忆（Entity Store）**：结构化提取用户偏好（如：用户喜欢 Python），以 Key-Value 形式持久化。## 一个完整的 Agent 智能体架构一般包括哪些部分？业界公认的公式是：**Agent = LLM + 规划（Planning）+ 记忆（Memory）+ 工具使用（Tool Use）**。- **大脑 (LLM)**：核心推理引擎。- **规划**：拆解任务（Chain of Thought / Plan & Solve）。- **记忆**：短期/长期存储。- **执行器 (Action/Tools)**：调用外部 API（搜索、代码执行等）。## Agent 和 LLM 有什么区别？- **LLM** 是“概率预测器”，它是一次性的、静态的输入输出（问答）。"
+        },
+        {
+          "chunk_id": "18997384-c6c3-4245-b503-d6e2d7225ab3",
+          "chunk_text": "- **LLM** 是“概率预测器”，它是一次性的、静态的输入输出（问答）。- **Agent** 是“能动者”，它有目标、能感知环境、能使用工具、并能通过 **自我迭代（Self-reflection）** 修正错误。> **打个比方**：LLM 像是一本百科全书，而 Agent 是一个会查书并帮你把事办成的人。## 向量检索和关键词检索的区别是什么？**关键词检索 (BM25/TF-IDF)**：硬匹配。搜“番茄”找不着“西红柿”。优点是精准、型号/人名匹配极强。**向量检索 (Semantic Search)**：语义匹配。通过 Embedding 空间计算距离，搜“番茄”能找到“西红柿”。"
+        },
+        {
+          "chunk_id": "6fe61f8b-9041-4663-8969-42625af4caa4",
+          "chunk_text": "通过 Embedding 空间计算距离，搜“番茄”能找到“西红柿”。优点是懂意图，抗干扰强。**最佳实践**：**混合搜索 (Hybrid Search)**。## 你了解的 Tool 调用机制是怎样的？目前主流是 **OpenAI Function Calling** 或 **ReAct** 模式：1.**定义**：开发者提供工具的 JSON Schema（包含函数名、参数描述）。2.**推理**：LLM 判断当前问题需要调用工具，并按 Schema 吐出参数。3."
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q005",
+      "question": "What is the recommended workflow for beginners when fine-tuning a model, according to the document",
+      "language": "en",
+      "parent_chunk_id": "057b630a-d05c-4118-86d1-e04b87552669",
+      "parent_chunk_text": "Loss 只能辅助判断训练状态，不能单独代表业务效果。推理结果必须用真实样本验收。```对于新手，最推荐的路线是：```text先用小模型 + 小数据 + LoRA 跑通全流程；再清洗数据、补充样本、分析错例；最后才系统调参和扩大模型规模。```",
+      "relevant_children": [
+        {
+          "chunk_id": "e3c7b576-94e2-4769-ac36-9077b64f47dd",
+          "chunk_text": "Loss 只能辅助判断训练状态，不能单独代表业务效果。推理结果必须用真实样本验收。```对于新手，最推荐的路线是：```text先用小模型 + 小数据 + LoRA 跑通全流程；再清洗数据、补充样本、分析错例；最后才系统调参和扩大模型规模。```"
+        }
+      ],
+      "item_id": "aa67312a-53dd-447b-9084-3e6e08f215e7",
+      "item_title": "大模型微调指南"
+    },
+    {
+      "id": "q006",
+      "question": "LangSmith链路可观测的核心价值有哪些？请结合文档举例说明如何通过它定位RAG系统中的问题。",
+      "language": "zh",
+      "parent_chunk_id": "bc6f2774-9117-4eb4-ab32-ec01da469f9a",
+      "parent_chunk_text": "抛弃暴力的字数切分，改用按 Markdown 结构或代码逻辑切分；评估现有的 Embedding 模型是否不适合你的垂直领域（比如用通用模型去嵌数学公式和代码），考虑微调 Embedding 或更换模型。## langsmith链路可观测，具体是怎么做的> **基础接入：** 主要通过配置环境变量来自动拦截并追踪底层的 LLM 和工具调用；对于自己写的非标准函数（如业务清洗、精排逻辑），则加上 `@traceable` 装饰器，确保整条链路监控不断层。>> **核心价值（排障与归因）：**>> - **破解 RAG 黑盒：** 能够可视化查看每一个节点的出入参。如果最终答案报错，我能立刻在 UI 上看清是 FAISS/BM25 没召回目标文档、BGE 精排打分有误，还是大模型胡编乱造，精准定位问题。> - **监控 Agent 流转：** 配合 LangGraph 的图结构，清晰查看意图识别、检索、外部工具以及 Reflection 打分的流转路径是否正确。>>>> **性能优化（闭环）：** 这一点最重要。正是通过观察 LangSmith 的 Latency（延迟）面板，我确认了系统...",
+      "relevant_children": [
+        {
+          "chunk_id": "4a742e6f-7c00-4513-828b-4fc146f72a31",
+          "chunk_text": "抛弃暴力的字数切分，改用按 Markdown 结构或代码逻辑切分；评估现有的 Embedding 模型是否不适合你的垂直领域（比如用通用模型去嵌数学公式和代码），考虑微调 Embedding 或更换模型。## langsmith链路可观测，具体是怎么做的> **基础接入：** 主要通过配置环境变量来自动拦截并追踪底层的 LLM 和工具调用；对于自己写的非标准函数（如业务清洗、精排逻辑），则加上 `@traceable` 装饰器，确保整条链路监控不断层。"
+        },
+        {
+          "chunk_id": "8194edd2-140d-469b-83a8-36c3001df393",
+          "chunk_text": "## langsmith链路可观测，具体是怎么做的> **基础接入：** 主要通过配置环境变量来自动拦截并追踪底层的 LLM 和工具调用；对于自己写的非标准函数（如业务清洗、精排逻辑），则加上 `@traceable` 装饰器，确保整条链路监控不断层。>> **核心价值（排障与归因）：**>> - **破解 RAG 黑盒：** 能够可视化查看每一个节点的出入参。如果最终答案报错，我能立刻在 UI 上看清是 FAISS/BM25 没召回目标文档、BGE 精排打分有误，还是大模型胡编乱造，精准定位问题。"
+        },
+        {
+          "chunk_id": "0bb2028c-0194-4ab9-bc78-77b867483026",
+          "chunk_text": "如果最终答案报错，我能立刻在 UI 上看清是 FAISS/BM25 没召回目标文档、BGE 精排打分有误，还是大模型胡编乱造，精准定位问题。> - **监控 Agent 流转：** 配合 LangGraph 的图结构，清晰查看意图识别、检索、外部工具以及 Reflection 打分的流转路径是否正确。>>>> **性能优化（闭环）：** 这一点最重要。正是通过观察 LangSmith 的 Latency（延迟）面板，我确认了系统的性能瓶颈卡在 BGE-Reranker 推理上。以此为数据支撑，我才针对性地实现了简历里提到的“向量缓存索引” ，有效提升了响应速度。## 三层索引分块策略### 1."
+        },
+        {
+          "chunk_id": "a1af40e0-4ab4-4e87-94d5-89888c933f3f",
+          "chunk_text": "## 三层索引分块策略### 1.架构拆解：什么是“三层”？- **底层（Layer 3）：子块 / 检索层 (Child Chunks)**- **长相**：极小的文本片段，通常只有一两句话（约 50-100 Tokens）。- **作用**：**专职负责被搜索。**因为文本短，核心关键词（如特定的人名、地名、专业术语）的向量特征非常集中。当用户提出具体问题时，BGE 模型对这类小块的向量匹配精准度极高。- **中层（Layer 2）：父块 / 上下文层 (Parent Chunks)**- **长相**：完整的段落或小节（约 500-1000 Tokens）。"
+        },
+        {
+          "chunk_id": "3166a19b-5585-4919-a829-4ed51b2ae0d3",
+          "chunk_text": "- **中层（Layer 2）：父块 / 上下文层 (Parent Chunks)**- **长相**：完整的段落或小节（约 500-1000 Tokens）。- **作用**：**专职负责给大模型看。**每一个底层的小块（Layer 3），都通过 Metadata 里的 `parent_id` 悄悄绑定着它所属的中层大块。- **顶层（Layer 1）：全局 / 摘要层 (Summary/Document Level)**- **长相**：整篇文档或大章节的高度浓缩摘要。- **作用**：**负责宏观路由。**应对用户类似“这篇文章主要讲了什么”这种宽泛提问。"
+        },
+        {
+          "chunk_id": "5d150c69-0213-4e9f-aa60-fb2f4d7f8c19",
+          "chunk_text": "**应对用户类似“这篇文章主要讲了什么”这种宽泛提问。一句话概括：**子块存在“懂数学”的向量数据库里，父块存在“容量大”的传统数据库（或本地字典）里，两者通过 `ID` 这根隐形的线连在一起。**## Query重构### 1.Query Translation（查询转换：换个更聪明的问法）"
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q007",
+      "question": "在GRPO训练中，思考长度与答案正确性之间存在怎样的相关性？请结合短期与长期奖励、探索与利用以及任务复杂度等方面进行解释。",
+      "language": "zh",
+      "parent_chunk_id": "38f5e47d-055c-4c20-844d-b85d948841e0",
+      "parent_chunk_text": "元强化学习学习如何快速适应新任务的学习方法。如MAML（Model-Agnostic Meta-Learning）。14.强化学习的应用游戏AI、机器人控制、自动驾驶、推荐系统等。每个点都可以进一步展开为更详细的概念讲解和实际应用案例。根据你的具体需求，可以选择深入研究其中的一部分或全部内容。希望这能帮助你更好地准备面试或深化对强化学习的理解！20.问grpo训练过程中思考长度和答案正确性的相关性在讨论 GRPO（Generalized Regularized Policy Optimization） 或任何强化学习（RL）算法时，思考长度（即智能体在做出决策前考虑的步骤数或信息量）与答案正确性之间的关系是一个复杂但有趣的话题。这种关系并不是直接的线性关系，而是受到多种因素的影响。思考长度的概念在强化学习中，“思考长度”可以理解为智能体在采取行动之前评估未来可能状态和奖励的能力。这通常通过以下几个方面体现：规划步数：智能体能够预测其行为对未来几步的影响。记忆机制：智能体是否能够记住过去的状态和动作，并利用这些信息来指导当前决策。模型使用：如果智能体使用环境模型（如世界模型或动态模型），...",
+      "relevant_children": [
+        {
+          "chunk_id": "901047cf-faec-426f-af43-9548e79886c0",
+          "chunk_text": "元强化学习学习如何快速适应新任务的学习方法。如MAML（Model-Agnostic Meta-Learning）。14.强化学习的应用游戏AI、机器人控制、自动驾驶、推荐系统等。每个点都可以进一步展开为更详细的概念讲解和实际应用案例。根据你的具体需求，可以选择深入研究其中的一部分或全部内容。希望这能帮助你更好地准备面试或深化对强化学习的理解！20."
+        },
+        {
+          "chunk_id": "82293bae-10f8-49cb-8aae-dc6274abbe29",
+          "chunk_text": "20.问grpo训练过程中思考长度和答案正确性的相关性在讨论 GRPO（Generalized Regularized Policy Optimization） 或任何强化学习（RL）算法时，思考长度（即智能体在做出决策前考虑的步骤数或信息量）与答案正确性之间的关系是一个复杂但有趣的话题。这种关系并不是直接的线性关系，而是受到多种因素的影响。思考长度的概念在强化学习中，“思考长度”可以理解为智能体在采取行动之前评估未来可能状态和奖励的能力。这通常通过以下几个方面体现：规划步数：智能体能够预测其行为对未来几步的影响。"
+        },
+        {
+          "chunk_id": "5613423a-9b10-4de5-8821-78c47c3d2d79",
+          "chunk_text": "这通常通过以下几个方面体现：规划步数：智能体能够预测其行为对未来几步的影响。记忆机制：智能体是否能够记住过去的状态和动作，并利用这些信息来指导当前决策。模型使用：如果智能体使用环境模型（如世界模型或动态模型），它可以在虚拟环境中进行多次尝试而不实际执行动作，从而增加“思考”的深度。思考长度与答案正确性的相关性1.短期 vs 长期奖励好未来面经（熊）20短期奖励：较短的思考长度可能导致智能体更关注即时奖励，而忽略了长期后果。"
+        },
+        {
+          "chunk_id": "ca329bc9-8174-45ec-a3e5-87c1aea4ce9a",
+          "chunk_text": "短期 vs 长期奖励好未来面经（熊）20短期奖励：较短的思考长度可能导致智能体更关注即时奖励，而忽略了长期后果。虽然这可能在某些情况下快速获得正面反馈，但从长远来看，可能会导致次优策略。长期奖励：较长的思考长度允许智能体考虑到更远的未来，从而更好地平衡短期和长期目标。然而，过长的思考长度也可能导致计算复杂度增加，甚至出现维度灾难问题。2.探索 vs 利用探索：较长的思考长度有助于智能体在面对不确定性时做出更好的探索决策。"
+        },
+        {
+          "chunk_id": "476d8e88-d698-4870-9f0f-d930862dca22",
+          "chunk_text": "探索 vs 利用探索：较长的思考长度有助于智能体在面对不确定性时做出更好的探索决策。例如，在部分可观测环境中，更多的思考可以帮助智能体识别潜在的风险和机会。利用：在已经积累了足够知识的情况下，适当的思考长度可以提高智能体利用已有信息的能力，从而更快地收敛到最优策略。3.任务复杂度对于简单任务，较短的思考长度可能就足够了，因为未来的状态变化相对容易预测。对于复杂任务，特别是那些需要多步推理或涉及多个代理交互的任务，较长的思考长度往往是必要的。"
+        },
+        {
+          "chunk_id": "54bcc33e-fde5-4d41-8928-e1ad65f6e9cd",
+          "chunk_text": "对于复杂任务，特别是那些需要多步推理或涉及多个代理交互的任务，较长的思考长度往往是必要的。这有助于智能体构建更准确的世界模型，并制定更为复杂的策略。GRPO 中的相关考量"
+        }
+      ],
+      "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+      "item_title": "好未来"
+    },
+    {
+      "id": "q008",
+      "question": "What is the effective date of the C/C++ coding standard document",
+      "language": "en",
+      "parent_chunk_id": "4047afa3-7714-4f2b-97bc-9e85c4ca3698",
+      "parent_chunk_text": "C/C++编码规范任子行内部资料不得外传1 / 17文控表文件名称C/C++编码规范版本号V01.00文件编码DM-PR-R01生效日期2023-05-01拟制人曾德新、林亚坤流程责任人廖茜文件密级内部公开适用范围任子行、科技开发、任网游所属流程架构L1研发管理L2研发项目管理C/C++编码规范任子行内部资料不得外传2 / 17目录1.目的.........................................................................................................................................32.概述.........................................................................................................................................33.主要内容..............................................",
+      "relevant_children": [
+        {
+          "chunk_id": "06ede455-90c0-4519-93ad-e4676f2f80f4",
+          "chunk_text": "C/C++编码规范任子行内部资料不得外传1 / 17文控表文件名称C/C++编码规范版本号V01.00文件编码DM-PR-R01生效日期2023-05-01拟制人曾德新、林亚坤流程责任人廖茜文件密级内部公开适用范围任子行、科技开发、任网游所属流程架构L1研发管理L2研发项目管理C/C++编码规范任子行内部资料不得外传2 / 17目录1.目的.............................................................................................."
+        },
+        {
+          "chunk_id": "4283e1c2-eadb-4ac7-8e2e-41248a869cec",
+          "chunk_text": "....................................................32.概述.........................................................................................................................................33.主要内容........................................................."
+        },
+        {
+          "chunk_id": "1ae6dfa0-4e33-4945-ab2d-92042e859023",
+          "chunk_text": "................................................................................................33.1.数据库设计规范........................................................................................................33.1.1.基础规范..................................."
+        },
+        {
+          "chunk_id": "8f3bea3a-5c7a-4d41-8604-0216f9cda65d",
+          "chunk_text": "................................................................................................33.1.2.表设计规范.......................................................................................................33.1.3.列设计规范..................................."
+        },
+        {
+          "chunk_id": "86ab52bf-fa22-42d2-bda3-3ecbca848e05",
+          "chunk_text": "..........................................................................."
+        }
+      ],
+      "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+      "item_title": "C++编码规范V01.00"
+    },
+    {
+      "id": "q009",
+      "question": "PPO算法中用于限制策略更新幅度的clip范围通常设为多少",
+      "language": "zh",
+      "parent_chunk_id": "88bcf776-0afa-4dcc-8e89-49548a021db1",
+      "parent_chunk_text": "每层Transformer块内部：虽然大多数情况下位置编码只在输入端添加一次，但在某些设计中，为了增强模型对长距离依赖关系的建模能力，可能会选择在每个Transformer块内部重新引入位置编码。不过，这种方法并不常见，因为它增加了计算复杂度，并且可能引发训练不稳定的问题。特殊情况下的其他位置：根据特定应用的需求或者模型架构的设计，位置编码也可能在其他位置被使用。例如，在一些变种模型中，可能会探索将位置编码与其他类型的特征结合，或是采用更复杂的机制来动态生成位置编码等。总的来说，对于大多数Decoder-only模型而言，位置编码主要是在输入嵌入之后一次性加入的。这样做不仅简单有效，而且能够保证在整个网络中传递准确的位置信息。值得注意的是，随着研究的进步，也出现了各种改进的位置编码方法，比如相对位置编码、可学习位置编码等，旨在进一步提升模型性能和灵活性。这些改进方法可能会改变位置编码的具体加载位置或方式，但核心思想依然围绕着如何高效地将位置信息整合进模型之中。好未来面经（熊）59.这里ppo和GRPO是用过，对原理了解吗(了解也跑过)，问GRPO和PPO细节，聊了好一会儿你提到你了解并...",
+      "relevant_children": [
+        {
+          "chunk_id": "46b9218d-9820-416d-8099-2356b654c308",
+          "chunk_text": "每层Transformer块内部：虽然大多数情况下位置编码只在输入端添加一次，但在某些设计中，为了增强模型对长距离依赖关系的建模能力，可能会选择在每个Transformer块内部重新引入位置编码。不过，这种方法并不常见，因为它增加了计算复杂度，并且可能引发训练不稳定的问题。特殊情况下的其他位置：根据特定应用的需求或者模型架构的设计，位置编码也可能在其他位置被使用。例如，在一些变种模型中，可能会探索将位置编码与其他类型的特征结合，或是采用更复杂的机制来动态生成位置编码等。总的来说，对于大多数Decoder-only模型而言，位置编码主要是在输入嵌入之后一次性加入的。"
+        },
+        {
+          "chunk_id": "966606e0-45cd-4a6e-9505-f5a7f19dca83",
+          "chunk_text": "总的来说，对于大多数Decoder-only模型而言，位置编码主要是在输入嵌入之后一次性加入的。这样做不仅简单有效，而且能够保证在整个网络中传递准确的位置信息。值得注意的是，随着研究的进步，也出现了各种改进的位置编码方法，比如相对位置编码、可学习位置编码等，旨在进一步提升模型性能和灵活性。这些改进方法可能会改变位置编码的具体加载位置或方式，但核心思想依然围绕着如何高效地将位置信息整合进模型之中。好未来面经（熊）59."
+        },
+        {
+          "chunk_id": "d08621e3-f603-471d-8458-cd7e032cb7a0",
+          "chunk_text": "好未来面经（熊）59.这里ppo和GRPO是用过，对原理了解吗(了解也跑过)，问GRPO和PPO细节，聊了好一会儿你提到你了解并跑过 PPO 和 GRPO，并且还跟别人聊了 GRPO 和 PPO 的细节。这说明你已经有一定基础，我们可以从原理层面深入梳理一下这两个算法的异同、设计思想、以及它们在实际应用中的优劣。🧠 一、PPO（Proximal Policy Optimization）✅ 基本思想：PPO 是 OpenAI 提出的一种基于策略梯度的强化学习算法，目标是解决传统 TRPO（Trust Region Policy Optimization）优化过程复杂、难以实现的问题。"
+        },
+        {
+          "chunk_id": "4330dd01-f6c0-4010-8024-4efd6d5cada2",
+          "chunk_text": "🧠 一、PPO（Proximal Policy Optimization）✅ 基本思想：PPO 是 OpenAI 提出的一种基于策略梯度的强化学习算法，目标是解决传统 TRPO（Trust Region Policy Optimization）优化过程复杂、难以实现的问题。它通过引入一个“clip”机制来限制策略更新的幅度，从而保证训练的稳定性。🔑 核心公式（Policy Loss）：其中：：新旧策略的概率比；：优势函数估计；：clip 范围（如 0."
+        },
+        {
+          "chunk_id": "79175d39-0c52-4340-a604-c726a05372da",
+          "chunk_text": "🔑 核心公式（Policy Loss）：其中：：新旧策略的概率比；：优势函数估计；：clip 范围（如 0.2）；✅ 特点：优点缺点稳定性强，适合连续控制任务超参数敏感（如 clip 范围、学习率等）易于实现和调参在稀疏奖励任务中收敛慢多步 rollout + GAE 估计效果好对 exploration 利用不足🧠 二、GRPO（Generalized Regularized PolicyOptimization）L(θ) =CLIPE​[min(r​(θ)​, clip(r​(θ), 1 −ttA^ttϵ, 1 + ϵ)​)]A^tr​(θ) =t​π​(a​∣s​)θ​oldttπ​(a​∣s​)θtt​A^tϵ好未来面经（熊）6GRPO 是一种较新的策略优化方法，由 DeepMind 在 2023 年提出（论文名《Regularized Policy Optimization for Sequential Decision Making》），它是对"
+        }
+      ],
+      "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+      "item_title": "好未来"
+    },
+    {
+      "id": "q010",
+      "question": "在文本分类任务的最小可行方案中，推荐的数据量是多少",
+      "language": "zh",
+      "parent_chunk_id": "f49041e1-9f2a-4c7e-b4ff-f9acb0b1fb39",
+      "parent_chunk_text": "- 清洗低质量回答- 增加高质量示例- 上线 prompt 与训练 prompt 保持一致```------# 第九阶段：推荐实验记录表每次训练都要记录实验配置，否则无法复现。| 实验编号 | 模型     | 数据版本 | 学习率 | epoch | batch | max_length | LoRA r | 验证 F1 | 备注           || -------- | -------- | -------- | ------ | ----- | ----- | ---------- | ------ | ------- | -------------- || exp_001  | qwen-xxx | v1       | 5e-5   | 3     | 4     | 256        | 8      | 0.81    | 初版           || exp_002  | qwen-xxx | v2       | 3e-5   | 4     | 4     | 256        | 8      | 0.84    | 清洗标签后提升 |必须记录：`...",
+      "relevant_children": [
+        {
+          "chunk_id": "7a138cd1-d929-4c92-b3bd-9b77db94cc32",
+          "chunk_text": "- 清洗低质量回答- 增加高质量示例- 上线 prompt 与训练 prompt 保持一致```------# 第九阶段：推荐实验记录表每次训练都要记录实验配置，否则无法复现。| 实验编号 | 模型     | 数据版本 | 学习率 | epoch | batch | max_length | LoRA r | 验证 F1 | 备注           || -------- | -------- | -------- | ------ | ----- | ----- | ---------- | ------ | ------- | -------------- || exp_001  | qwen-xxx | v1       | 5e-5   | 3     | 4     | 256        | 8      | 0.81    | 初版           || exp_002  | qwen-xxx | v2       | 3e-5   | 4     | 4     | 256        | 8      | 0."
+        },
+        {
+          "chunk_id": "f8c4350b-246f-43c8-84b1-c843dc51fb7f",
+          "chunk_text": "84    | 清洗标签后提升 |必须记录：```text- 数据版本- 模型版本- 代码版本- 参数配置- 随机种子- 验证指标- 错误样本分析```------# 第十阶段：推荐最小可行方案新手可以先按以下配置跑通第一版：```text任务：文本分类数据：至少每类 100 条起步，越多越好模型：选择一个较小的中文或多语种模型微调方式：LoRAlearning_rate：5e-5epoch：3batch_size：按显存设置max_length：256评估指标：Accuracy + Macro F1 + 每类 Recall验收方式：验证集指标 + 30 条人工样本测试```如果是指令微调：```text数据：高质量 instruction/input/output模型：Chat/Instruct 版本模型微调方式：LoRA 或 QLoRAepoch：1–3 起步学习率：1e-5 到 2e-4 之间试验评估：人工评测 + 自动指标 + 线上模拟样本```------# 第十一阶段：上线前检查清单## 数据检查- 标签是否真实可靠- 是否去重- 是否有训练/验证泄漏- 类别是否严重不平衡- 是否覆盖真实线上表达- 是否有脏数据和异常样本## 训练检查- loss 是否正常下降- 是否出现 NaN- 是否保存最佳模型- 是否固定随机种子- 是否记录实验配置- 是否能复现结果## 评估检查- 是否看了 Accuracy、Precision、Recall、F1- 是否看了混淆矩阵- 是否和基线比较- 是否分析错误样本- 是否关注关键类别- 是否单独测试边界样本## 推理检查- 单条预测是否正确- 批量预测是否稳定- 低置信度样本是否兜底- 空输入、超长输入是否处理- 输出格式是否稳定- 推理速度是否满足业务要求## 上线检查- 是否灰度发布- 是否保留回滚方案- 是否监控线上指标- 是否收集错例- 是否建立持续迭代数据闭环------# 第十二阶段：完整闭环总结微调大模型不是单纯执行训练代码，而是一个完整工程闭环：```text明确任务→ 清洗数据→ 定义标签→ 切分数据→ 跑通训练→ 评估指标→ 错误分析→ 参数调优→ 推理验收→ 灰度上线→ 收集错例→ 继续迭代```最重要的原则：```text数据质量优先于参数技巧。"
+        },
+        {
+          "chunk_id": "e04232cb-7e88-4515-a7cf-6afbdfd2b9a9",
+          "chunk_text": "验证集必须独立。标签必须真实。指标必须组合看。"
+        }
+      ],
+      "item_id": "aa67312a-53dd-447b-9084-3e6e08f215e7",
+      "item_title": "大模型微调指南"
+    },
+    {
+      "id": "q011",
+      "question": "策略迭代和值迭代的主要区别是什么",
+      "language": "zh",
+      "parent_chunk_id": "996a3b64-ea59-4d13-bc56-cce52e4d0e96",
+      "parent_chunk_text": "包括策略迭代和值迭代等方法，用于解决已知模型的MDP问题。策略迭代：交替进行策略评估和策略改进。值迭代：直接更新价值函数直到收敛，然后从中提取最优策略。5.蒙特卡洛方法不需要环境模型，通过采样轨迹来估计价值函数。主要技术包括首次访问MC和每次访问MC。6.时序差分学习（TD Learning）好未来面经（熊）18状态价值函数的贝尔曼方程:这个公式的直观含义是：状态 ss 的价值，等于在该状态下，按照策略 ππ 选择动作 aa 的概率，乘以（执行该动作获得的即时奖励 RR，加上未来状态 s′s′ 的价值乘以折扣因子 γγ）的总和。动作价值函数的贝尔曼方程:这个公式的含义是：在状态 ss 执行动作 aa 的价值，等于执行该动作的即时奖励 RR，加上未来可能进入的状态 s′s′ 下，按照策略 ππ 选择后续动作所能获得的期望价值。TD 学习通过采样得到真实的下一个状态，然后用当前对该状态价值的估计来更新当前状态的价值结合了动态规划和蒙特卡洛的优点，如TD(0)，SARSA，Q-learning等。TD(0)：基于当前预测与下一个状态的预测之间的差异更新价值函数。SARSA：一种在线策略TD学...",
+      "relevant_children": [
+        {
+          "chunk_id": "ad4886f4-a0d6-4ff3-bb18-2ed25d04addb",
+          "chunk_text": "包括策略迭代和值迭代等方法，用于解决已知模型的MDP问题。策略迭代：交替进行策略评估和策略改进。值迭代：直接更新价值函数直到收敛，然后从中提取最优策略。5.蒙特卡洛方法不需要环境模型，通过采样轨迹来估计价值函数。主要技术包括首次访问MC和每次访问MC。6."
+        },
+        {
+          "chunk_id": "5fb22568-41fa-4c3a-a600-ece791222449",
+          "chunk_text": "6.时序差分学习（TD Learning）好未来面经（熊）18状态价值函数的贝尔曼方程:这个公式的直观含义是：状态 ss 的价值，等于在该状态下，按照策略 ππ 选择动作 aa 的概率，乘以（执行该动作获得的即时奖励 RR，加上未来状态 s′s′ 的价值乘以折扣因子 γγ）的总和。动作价值函数的贝尔曼方程:这个公式的含义是：在状态 ss 执行动作 aa 的价值，等于执行该动作的即时奖励 RR，加上未来可能进入的状态 s′s′ 下，按照策略 ππ 选择后续动作所能获得的期望价值。"
+        },
+        {
+          "chunk_id": "60e5aea3-9320-446b-8b9a-70a62d5899c5",
+          "chunk_text": "动作价值函数的贝尔曼方程:这个公式的含义是：在状态 ss 执行动作 aa 的价值，等于执行该动作的即时奖励 RR，加上未来可能进入的状态 s′s′ 下，按照策略 ππ 选择后续动作所能获得的期望价值。TD 学习通过采样得到真实的下一个状态，然后用当前对该状态价值的估计来更新当前状态的价值结合了动态规划和蒙特卡洛的优点，如TD(0)，SARSA，Q-learning等。TD(0)：基于当前预测与下一个状态的预测之间的差异更新价值函数。SARSA：一种在线策略TD学习算法。Q-learning：一种离线策略TD学习算法，目标是找到最优策略。7."
+        },
+        {
+          "chunk_id": "33945b13-039a-444c-a923-61ebe2e40e6a",
+          "chunk_text": "7.策略梯度方法直接优化策略参数而非间接通过价值函数。常见算法有REINFORCE，Actor-Critic等。REINFORCE：使用策略梯度定理更新策略参数。Actor-Critic：结合了价值方法和策略梯度的优点，同时学习策略和价值函数。8.深度强化学习将深度学习与强化学习相结合，处理高维输入数据。DQN：Deep Q-Network，解决了传统Q-learning中的维度灾难问题。DDPG：Deep Deterministic Policy Gradient，适用于连续动作空间。PPO：Proximal Policy Optimization，一种高效的策略梯度方法。TRPO：Trust Region Policy Optimization，旨在保证每一步策略更新的安全性。9."
+        },
+        {
+          "chunk_id": "dde7bc96-250a-451b-9c2e-5796c772279f",
+          "chunk_text": "9.探索与利用强化学习中的一个重要挑战是如何平衡探索未知环境（exploration）和利用已有知识（exploitation）。方法包括\\(\\epsilon\\)-贪心策略、UCB（Upper Confidence Bound）、Softmax策略等。10.多智能体系统当存在多个相互作用的智能体时，如何设计有效的学习算法。涉及到合作、竞争或混合场景下的策略学习。11.分布式强化学习利用多台机器并行执行环境模拟以加速训练过程。如A3C（Asynchronous Advantage Actor-Critic），IMPALA等。好未来面经（熊）1912.逆向强化学习根据观察到的行为推断背后的奖励函数。"
+        },
+        {
+          "chunk_id": "9b048373-df52-45c3-8825-714d1ced82a9",
+          "chunk_text": "逆向强化学习根据观察到的行为推断背后的奖励函数。应用于模仿学习等领域。13."
+        }
+      ],
+      "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+      "item_title": "好未来"
+    },
+    {
+      "id": "q012",
+      "question": "根据C++编码规范，数据库表存储引擎必须使用什么",
+      "language": "zh",
+      "parent_chunk_id": "fb81fe95-3977-486e-bfad-1019ca2d3870",
+      "parent_chunk_text": "............................143.2.8.内存管理.........................................................................................................163.2.9.代码编辑、编译、审查.................................................................................174.支持文件...............................................................................................................................175.文件履历....................................................................................................................",
+      "relevant_children": [
+        {
+          "chunk_id": "0621a33e-7af9-446b-b664-6d71c5038ba8",
+          "chunk_text": "............................143.2.8.内存管理.........................................................................................................163.2.9.代码编辑、编译、审查.................................................................................174.支持文件............."
+        },
+        {
+          "chunk_id": "7f7a98ea-7632-4857-93b5-41d35659fd96",
+          "chunk_text": ".........174.支持文件...............................................................................................................................175.文件履历............................................................................................................."
+        },
+        {
+          "chunk_id": "2dd79d42-1e04-446f-9463-819a8fd6d4bb",
+          "chunk_text": "..........................................17C/C++编码规范任子行内部资料不得外传3 / 17C/C++编码规范1.目的本文档通过一系列切实可行的编码准则，应用于C/C++项目开发工作中，以提升协作效率、降低沟通成本、提高代码的可读性、可维护性、可测试性以及保证系统的稳定和高效，特制定本规范。2.概述本文档涉及的规范包括:数据库设计规范、C/C++开发规范等，主要用于指导软件（C/C++）开发人员编码，对软件设计人员也有一定的参考意义。3.主要内容3.1."
+        },
+        {
+          "chunk_id": "4cbe120f-0737-47fc-b82f-1e48a8fdd348",
+          "chunk_text": "概述本文档涉及的规范包括:数据库设计规范、C/C++开发规范等，主要用于指导软件（C/C++）开发人员编码，对软件设计人员也有一定的参考意义。3.主要内容3.1.数据库设计规范介绍数据库相关的规范，如DB、SQL、表设计等。主体还是以《阿里巴巴Java 开发手册》中第五章节为主。3.1.1."
+        },
+        {
+          "chunk_id": "71fb6669-5c72-4933-9c5c-8bbe9ad6b319",
+          "chunk_text": "1.基础规范表存储引擎必须使用InnoDB；表字符集默认使用utf8 ，必要时候使用utf8mb4；通用，无乱码风险，汉字3 字节，英文1 字节；utf8mb4 是utf8 的超集，有存储4 字节例如表情符号时使用它；禁止使用存储过程，触发器，Event；对数据库性能影响较大，能让站点层和服务层干的事情，不要交到数据库层；调试，排错，迁移都比较困难，扩展性较差；禁止在数据库中存储大文件，例如照片，可以将大文件存储在对象存储系统，数据库中存储路径；"
+        }
+      ],
+      "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+      "item_title": "C++编码规范V01.00"
+    },
+    {
+      "id": "q013",
+      "question": "在Python编码规范中，当函数参数过多时，文档推荐使用哪种方式来封装参数",
+      "language": "zh",
+      "parent_chunk_id": "09081604-7fd4-4ffb-82fb-d43d6827103a",
+      "parent_chunk_text": "def get_active_users(limit: int = 100) -> list[User]:...```### 5.1 使用内置泛型Python 3.9+ 推荐使用内置泛型：```python# 推荐names: list[str] = []metadata: dict[str, str] = {}```### 5.2 避免滥用 `Any````python# 不推荐from typing import Anydef process(data: Any) -> Any:...# 推荐@dataclassclass OrderPayload:product_id: intquantity: intdef process_order(data: OrderPayload) -> Order:...```## 6.函数设计### 6.1 函数应职责单一一个函数只做一件清晰的事情。```python# 不推荐def create_user_and_send_email_and_write_log(data: dict) -> None:...# 推荐def create_user...",
+      "relevant_children": [
+        {
+          "chunk_id": "663c10f7-9de3-44a4-b969-82523a19e501",
+          "chunk_text": "def get_active_users(limit: int = 100) -> list[User]:...```### 5.1 使用内置泛型Python 3.9+ 推荐使用内置泛型：```python# 推荐names: list[str] = []metadata: dict[str, str] = {}```### 5.2 避免滥用 `Any````python# 不推荐from typing import Anydef process(data: Any) -> Any:...# 推荐@dataclassclass OrderPayload:product_id: intquantity: intdef process_order(data: OrderPayload) -> Order:...```## 6.函数设计### 6.1 函数应职责单一一个函数只做一件清晰的事情。```python# 不推荐def create_user_and_send_email_and_write_log(data: dict) -> None:...# 推荐def create_user(data: UserCreate) -> User:...def send_welcome_email(user: User) -> None:...```### 6."
+        },
+        {
+          "chunk_id": "b48f2733-86ae-4fa8-8136-bba8ef87159a",
+          "chunk_text": ".```### 6.2 控制函数长度建议普通函数控制在 50 行以内。超过时应考虑拆分逻辑。### 6.3 避免过多参数当参数过多时，使用数据类、配置对象或请求模型封装。```pythonfrom dataclasses import dataclass@dataclass(frozen=True)class SearchOptions:keyword: strpage: int = 1page_size: int = 20include_archived: bool = False```## 7.注释与文档字符串### 7.1 注释解释“为什么”，不要重复“是什么”```python# 不推荐：给 count 加 1count += 1# 推荐：跳过第一页，因为外部接口从第二页开始返回增量数据page += 1```### 7.2 公共函数应写 docstring```pythondef calculate_tax(amount: float, tax_rate: float) -> float:\"\"\"Calculate tax amount for a given taxable amount.Args:amount: Taxable amount."
+        },
+        {
+          "chunk_id": "618864bb-08e6-4e2d-9122-77e5a764362c",
+          "chunk_text": "Args:amount: Taxable amount.tax_rate: Tax rate between 0 and 1.Returns:Calculated tax amount.\"\"\"return amount * tax_rate```## 8.异常处理### 8.1 捕获具体异常```python# 不推荐try:data = json.loads(raw_data)except Exception:data = {}# 推荐try:data = json.loads(raw_data)except json.JSONDecodeError as exc:raise ValueError(\"Invalid JSON payload\") from exc```### 8.2 不要吞掉异常```python# 不推荐try:send_email(user.email)except Exception:pass# 推荐try:send_email(user.email)except EmailSendError:logger.exception(\"Failed to send email to user_id=%s\", user.id)raise```### 8.3 自定义异常应表达业务语义```pythonclass InsufficientBalanceError(Exception):\"\"\"Raised when account balance is insufficient for payment.\"\"\"```## 9.日志规范使用 `logging`，避免在业务代码中使用 `print()`。```pythonimport logginglogger = logging."
+        },
+        {
+          "chunk_id": "3811c90b-d9bf-434a-81c6-2a30a6269b86",
+          "chunk_text": "```pythonimport logginglogger = logging.getLogger(__name__)def create_order(user_id: int, product_id: int) -> Order:logger.info(\"Creating order: user_id=%s product_id=%s\", user_id, product_id)...```### 9.1 日志级别| 级别 | 使用场景 ||---|---|| `debug` | 调试信息，默认生产环境可关闭 || `info` | 关键业务流程节点 || `warning` | 可恢复但需要关注的问题 || `error` | 当前操作失败 || `exception` | 捕获异常时记录堆栈 || `critical` | 系统级严重故障 |### 9.2 日志中不要输出敏感信息避免记录密码、密钥、Token、身份证号、完整银行卡号等敏感数据。```python# 不推荐logger.info(\"login payload=%s\", payload)# 推荐logger.info(\"user login requested: username=%s\", username)```## 10."
+        },
+        {
+          "chunk_id": "e1e2f450-39c5-4f8d-ab92-dd2c3acf90b6",
+          "chunk_text": "info(\"user login requested: username=%s\", username)```## 10.数据结构与模型### 10.1 简单结构使用 `dataclass````pythonfrom dataclasses import dataclass@dataclass(frozen=True)"
+        }
+      ],
+      "item_id": "1e8927d1-f559-4747-bac4-a8417c813eea",
+      "item_title": "python_coding_standards"
+    },
+    {
+      "id": "q014",
+      "question": "处理Tavily返回的超长内容时，Map-Reduce策略具体包含哪三个核心阶段",
+      "language": "zh",
+      "parent_chunk_id": "3d3124c8-002c-47b9-a6d6-539176ff6c5c",
+      "parent_chunk_text": "## 如果 Tavily 返回了 3 个非常长的网页内容，加起来超过了你的 LLM 上下文限制（Context Window），你的 `_llm_synthesize` 会崩溃或截断关键信息。你怎么处理？”我会引入 **Map-Reduce 总结策略**。先对每个搜索结果进行独立的 `Summary`（Map 阶段），提取与 query 相关的核心片段，然后再汇总给 LLM 生成最终答案（Reduce 阶段）。或者使用支持长文本的模型，但在调用前会通过 `tiktoken` 库预估长度并进行智能切片。”## Map-Reduce## 1.Map-Reduce 的三个核心阶段#### **第一阶段：Split (切分)**将长文档或多个搜索结果拆分成若干个较小的“分片”（Chunks）。每个分片的大小要确保配合 Prompt 后依然远小于 LLM 的 Token 限制。#### **第二阶段：Map (各自总结)****并行**地对每个分片进行处理。- **动作**：LLM 接收分片 A，提取出与用户问题相关的要点；同时处理分片 B，提取要点。- **结果**：你得到了 N 个简短的“中...",
+      "relevant_children": [
+        {
+          "chunk_id": "6cef7175-6a10-4637-8fb6-4a39867f5066",
+          "chunk_text": "## 如果 Tavily 返回了 3 个非常长的网页内容，加起来超过了你的 LLM 上下文限制（Context Window），你的 `_llm_synthesize` 会崩溃或截断关键信息。你怎么处理？”我会引入 **Map-Reduce 总结策略**。先对每个搜索结果进行独立的 `Summary`（Map 阶段），提取与 query 相关的核心片段，然后再汇总给 LLM 生成最终答案（Reduce 阶段）。或者使用支持长文本的模型，但在调用前会通过 `tiktoken` 库预估长度并进行智能切片。”## Map-Reduce## 1.Map-Reduce 的三个核心阶段#### **第一阶段：Split (切分)**将长文档或多个搜索结果拆分成若干个较小的“分片”（Chunks）。"
+        },
+        {
+          "chunk_id": "2b08d353-a287-471c-98e7-87a806845761",
+          "chunk_text": "Map-Reduce 的三个核心阶段#### **第一阶段：Split (切分)**将长文档或多个搜索结果拆分成若干个较小的“分片”（Chunks）。每个分片的大小要确保配合 Prompt 后依然远小于 LLM 的 Token 限制。#### **第二阶段：Map (各自总结)****并行**地对每个分片进行处理。- **动作**：LLM 接收分片 A，提取出与用户问题相关的要点；同时处理分片 B，提取要点。- **结果**：你得到了 N 个简短的“中间摘要”。#### **第三阶段：Reduce (最终合并)**将所有中间摘要拼接在一起，最后交给 LLM 进行一次**聚合总结**。"
+        },
+        {
+          "chunk_id": "ffb9c7e9-b292-4d59-9701-0545ddebf30f",
+          "chunk_text": "#### **第三阶段：Reduce (最终合并)**将所有中间摘要拼接在一起，最后交给 LLM 进行一次**聚合总结**。- **动作**：LLM 看着这几条提炼后的精选信息，吐出最终的、逻辑连贯的答案。## 当你的上下文（Context）超过了模型的处理极限，怎么办### 1.窗口切片与 Map-Reduce (分治策略)这是最稳健的方法。- **做法**：将长文本拆分成小块（Chunks），每块单独提炼（Map），最后汇总（Reduce）。- **优点**：突破物理限制，处理 100万 Token 也没问题。"
+        },
+        {
+          "chunk_id": "8f9dd6e1-1fbb-44c8-902c-9ced5322a6b2",
+          "chunk_text": "- **优点**：突破物理限制，处理 100万 Token 也没问题。- **缺点**：多次调用 LLM，**慢且贵**；容易丢失跨分片的关联信息（比如 A 里的“他”指代 B 里的“张三”）。------### 2.向量压缩与 Top-K 过滤 (RAG 增强)不要试图把所有搜索结果都塞进去，只给 LLM 吃“精肉”。- **做法**：把 Tavily 返回的网页内容先存入一个**临时的内存向量库**（比如 `FAISS`），然后用用户的 Query 去做一次相似度检索，只取最相关的 Top-5 片段给 LLM。- **面试官视角**：这叫 **\"Search over Search\"**。"
+        },
+        {
+          "chunk_id": "d7484d3a-ed91-4776-b6c6-b8b2fd5107a6",
+          "chunk_text": "- **面试官视角**：这叫 **\"Search over Search\"**。你已经搜了一遍网，再在搜索结果里搜一遍相关性。------### 3.Stuffing + Ranker (精排重测)如果你有 20 个搜索结果，每个结果 1000 字，全塞进去会爆。- **做法**：1.用简单的模型（或 BM25）粗略筛选出 20 条。2.使用 **Rerank 模型**（如 BGE-Reranker 或 Cohere Rerank）给这 20 条打分。3.只保留得分最高的 3 条完整的喂给 LLM。- **核心逻辑**：高质量的 3 条信息远比低质量的 20 条更有用。------### 4.关键信息提取 (Pre-processing)"
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q015",
+      "question": "在大模型微调中，评估指标应当如何正确组合使用",
+      "language": "zh",
+      "parent_chunk_id": "7a8a2f37-3a88-412c-816a-98789410f26f",
+      "parent_chunk_text": "## 2.训练集和验证集必须严格分开错误：```text先 tokenize 再随意切分，导致重复样本泄漏。```正确：```text先去重、清洗、切分，再分别 tokenize。```------## 3.评估指标需组合使用错误：```text只看 Accuracy。```正确：```text同时看 Accuracy、Precision、Recall、F1、混淆矩阵。```------## 4.不要用测试集调参测试集只能在最后使用。错误：```text每次调完参数都在 test 上看效果。```后果：```text测试集被间接污染，最终指标不可信。```------## 5.不要盲目增加 epochepoch 越多不一定越好。常见现象：```text训练 loss 继续下降，验证 F1 开始下降。```这通常说明过拟合。------## 6.不要忽略线上数据分布训练数据如果和线上输入差异太大，模型上线会掉点。例如：```text训练数据是人工整理后的标准句子；线上数据是错别字、口语、emoji、长句、上下文缺失。```解决方式：```text训练集中加入真实线上样本。```-----...",
+      "relevant_children": [
+        {
+          "chunk_id": "734357c5-d222-423c-9f09-3fe960ccb970",
+          "chunk_text": "## 2.训练集和验证集必须严格分开错误：```text先 tokenize 再随意切分，导致重复样本泄漏。```正确：```text先去重、清洗、切分，再分别 tokenize。```------## 3.评估指标需组合使用错误：```text只看 Accuracy。```正确：```text同时看 Accuracy、Precision、Recall、F1、混淆矩阵。```------## 4.不要用测试集调参测试集只能在最后使用。错误：```text每次调完参数都在 test 上看效果。```后果：```text测试集被间接污染，最终指标不可信。```------## 5.不要盲目增加 epochepoch 越多不一定越好。常见现象：```text训练 loss 继续下降，验证 F1 开始下降。```这通常说明过拟合。------## 6."
+        },
+        {
+          "chunk_id": "597e7c21-a7ab-46c8-ac94-04fbf198b47a",
+          "chunk_text": "------## 6.不要忽略线上数据分布训练数据如果和线上输入差异太大，模型上线会掉点。例如：```text训练数据是人工整理后的标准句子；线上数据是错别字、口语、emoji、长句、上下文缺失。```解决方式：```text训练集中加入真实线上样本。```------# 第八阶段：常见问题与排查## 1.显存不足 OOM解决方法：```text- 降低 batch size- 缩短 max_length- 使用 gradient_accumulation_steps- 使用 fp16 或 bf16- 使用 LoRA 或 QLoRA- 换更小模型- 开启 gradient checkpointing```------## 2.列名报错常见原因：```text代码里写的是 text，但数据里叫 content。代码里写的是 label，但数据里叫 category。```解决方法：```text统一列名。"
+        },
+        {
+          "chunk_id": "b09e90fb-70ae-4327-b8d4-45688361583e",
+          "chunk_text": "```解决方法：```text统一列名。```推荐标准列名：分类任务：```texttext, label```指令微调：```textinstruction, input, output```对话微调：```textmessages```------## 3.dtype 不兼容解决方法：```pythontorch_dtype=\"auto\"```或者根据硬件选择：```pythontorch_dtype=torch.float16```支持 bf16 的 GPU 可使用：```pythontorch_dtype=torch.bfloat16```------## 4.Loss 不下降可能原因：```text- labels 设置错误- 学习率过低或过高- 数据标签混乱- prompt 模板不合理- 模型类型和任务不匹配- tokenizer 截断了关键信息```排查顺序：```text先检查 labels，再检查数据，再检查学习率。```------## 5."
+        },
+        {
+          "chunk_id": "02582730-41b5-43d7-b641-e95479303bc5",
+          "chunk_text": "```------## 5.训练集好，验证集差可能原因：```text- 过拟合- 训练集和验证集分布不同- 训练样本太少- 标签噪声高- 重复样本过多```解决方法：```text- 减少 epoch- 清洗数据- 增加验证集覆盖- 增加 dropout- 增加 weight_decay- 使用 early stopping```------## 6.Accuracy 很高，但业务效果差可能原因：```text类别严重不平衡。```例如：```text90% 样本都是“正常”，模型全部预测“正常”，Accuracy 也有 90%。```解决方法：```text- 查看每个类别 Precision、Recall、F1- 使用 Macro F1- 增加少数类样本- 调整采样策略或类别权重```------## 7."
+        },
+        {
+          "chunk_id": "43a86af1-e59f-46c5-b71c-5325c680c3ef",
+          "chunk_text": "```解决方法：```text- 查看每个类别 Precision、Recall、F1- 使用 Macro F1- 增加少数类样本- 调整采样策略或类别权重```------## 7.生成任务答非所问可能原因：```text- 指令格式不统一- output 质量差- prompt 和线上格式不一致- 训练样本太少- 学到了错误风格```解决方法：```text- 统一 instruction 模板"
+        }
+      ],
+      "item_id": "aa67312a-53dd-447b-9084-3e6e08f215e7",
+      "item_title": "大模型微调指南"
+    },
+    {
+      "id": "q016",
+      "question": "在Transformer模型的解码优化中，束搜索（Beam Search）是如何工作的",
+      "language": "zh",
+      "parent_chunk_id": "4fff061b-ac08-4278-8b44-36546644cd98",
+      "parent_chunk_text": "个较短的片段，并设计适当的拼接机制来保持上下文一致性。特殊标记：使用特殊的标记（如 [SEP]  或 [CLS] ）来区分不同的推理步骤或子任务。动态填充：根据批次内最长序列进行填充，避免固定最大长度带来的内存浪费。2.解码优化在 Transformer 模型中进行解码优化，特别是针对长链推理任务，可以从以下几个方面入手：a.改进解码策略i.贪婪搜索 vs.束搜索贪婪搜索：每一步选择概率最高的单词作为下一个输出，简单但容易陷入局部最优。束搜索（Beam Search）：维护多个候选路径，在每一步扩展这些路径并保留前 \\(k\\) 个最有可能的结果，从而增加找到全局最优解的概率。ii.Top-k 和 Nucleus SamplingTop-k Sampling：每次从概率最大的前 \\(k\\) 个词中随机选择一个作为下一个输出。Nucleus Sampling：只考虑累积概率达到某个阈值的部分词汇进行采样，平衡多样性和质量。iii.温度调节使用温度参数调整 softmax 输出的概率分布，较高的温度使分布更平滑，鼓励探索；较低的温度则使其更尖锐，倾向于选择高概率词。b.模型结构调整i.引入稀...",
+      "relevant_children": [
+        {
+          "chunk_id": "f36f4e2f-18c1-4de6-86b7-36557b0faca7",
+          "chunk_text": "个较短的片段，并设计适当的拼接机制来保持上下文一致性。特殊标记：使用特殊的标记（如 [SEP]  或 [CLS] ）来区分不同的推理步骤或子任务。动态填充：根据批次内最长序列进行填充，避免固定最大长度带来的内存浪费。2.解码优化在 Transformer 模型中进行解码优化，特别是针对长链推理任务，可以从以下几个方面入手：a.改进解码策略i.贪婪搜索 vs.束搜索贪婪搜索：每一步选择概率最高的单词作为下一个输出，简单但容易陷入局部最优。"
+        },
+        {
+          "chunk_id": "aa17c819-4949-40fe-96ba-e610c9a2599f",
+          "chunk_text": "束搜索贪婪搜索：每一步选择概率最高的单词作为下一个输出，简单但容易陷入局部最优。束搜索（Beam Search）：维护多个候选路径，在每一步扩展这些路径并保留前 \\(k\\) 个最有可能的结果，从而增加找到全局最优解的概率。ii.Top-k 和 Nucleus SamplingTop-k Sampling：每次从概率最大的前 \\(k\\) 个词中随机选择一个作为下一个输出。Nucleus Sampling：只考虑累积概率达到某个阈值的部分词汇进行采样，平衡多样性和质量。iii."
+        },
+        {
+          "chunk_id": "3306e562-2013-4d92-ad01-8c185ff40f0f",
+          "chunk_text": "iii.温度调节使用温度参数调整 softmax 输出的概率分布，较高的温度使分布更平滑，鼓励探索；较低的温度则使其更尖锐，倾向于选择高概率词。b.模型结构调整i.引入稀疏注意力机制Sparse Attention：减少全连接注意力矩阵中的计算量，例如仅关注最近邻或特定模式的元素，适合长序列处理。Local Attention：对每个位置仅考虑其附近的窗口内的元素，降低复杂度。ii.层次化结构好未来面经（熊）23Hierarchical Transformers：将原始序列划分为多个块，先在块内应用标准Transformer，再在块间应用另一层 Transformer，有效处理长序列。iii."
+        },
+        {
+          "chunk_id": "01a2738a-e695-4f17-9923-4a0c77aa7b0d",
+          "chunk_text": "iii.记忆增强机制External Memory：允许模型访问外部存储器，记录重要的历史信息，辅助当前决策。Memory Networks：结合记忆组件与神经网络，提升长期依赖捕捉能力。3.修改 Transformers 原有结构为了支持上述优化措施，你可能需要对标准 Transformer 进行一些定制化修改：a.自定义注意力机制实现稀疏注意力或局部注意力模块，替代原有的全连接注意力。调整注意力头的数量和维度，适应新的任务需求。b.集成记忆模块在编码器或解码器中嵌入记忆单元，如 LSTM 或 GRU，用于存储和检索重要信息。设计读写操作接口，确保记忆更新高效且准确。c."
+        },
+        {
+          "chunk_id": "1fa4baa6-009e-4501-a430-63669228a6fb",
+          "chunk_text": "c.重写解码器逻辑根据所选的解码策略（如束搜索、核采样等），编写相应的解码函数。具体实现示例考虑如何在不牺牲性能的前提下提高解码效率，比如通过剪枝不必要的路径。假设你正在基于 Hugging Face 的 transformers  库进行开发，下面是一个简单的例子展示如何修改 Transformer 解码器以启用束搜索：from transformers import AutoTokenizer, AutoModelForSeq2SeqLMtokenizer = AutoTokenizer.from_pretrained(\"t5-small\")"
+        }
+      ],
+      "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+      "item_title": "好未来"
+    },
+    {
+      "id": "q017",
+      "question": "在好未来的面经中，为什么选择用高斯分布初始化A，而不是让A为0",
+      "language": "zh",
+      "parent_chunk_id": "2242b6bd-eb20-4756-b5c1-1d592a221bd7",
+      "parent_chunk_text": "所以我们让 B 从 0 开始慢慢学，而 A 提供一个“稳定的输入信号”。如果反过来，A为0 ，B的梯度取决于A，A的梯度取决于B，一开始更新B的梯度的时候不会进行更新，会导致梯度卡住，不会进行更新。为什么A选高斯分布目的是为了把输入信号有效地“编码”到低维空间中，让B有更有效的信号去学习。使用 高斯分布初始化 A，可以让输入特征经过 A 后保留一定的多样性，便于后续的 B 学习有用的信息。好未来面经（熊）2理论上来说AB只要点积为0 都可以符合要求，AB两个都不为0点积为0也是可以的，就是要在不断梯度更新的过程中去贴近最终的值，实际过程中B为0,A为高斯，会更便捷初始化，也可以让权重更新更快。5.大模型用Layernorm为什么不用batchnorm1.序列长度变化LayerNorm是在特征维度上进行归一化的，因此它不依赖于批量大小或序列长度。相反，BatchNorm要求固定的批量大小和输入尺寸，这使得它不太适合处理变长序列的数据（会将输入序列pad到统一长度，用mask忽略padding的影响，通常是pad到最大长度）。2.模型稳定性与性能梯度传播：在训练深度网络时，LayerNor...",
+      "relevant_children": [
+        {
+          "chunk_id": "53d27728-f486-4a77-9ea1-6dd3840f6f98",
+          "chunk_text": "所以我们让 B 从 0 开始慢慢学，而 A 提供一个“稳定的输入信号”。如果反过来，A为0 ，B的梯度取决于A，A的梯度取决于B，一开始更新B的梯度的时候不会进行更新，会导致梯度卡住，不会进行更新。为什么A选高斯分布目的是为了把输入信号有效地“编码”到低维空间中，让B有更有效的信号去学习。使用 高斯分布初始化 A，可以让输入特征经过 A 后保留一定的多样性，便于后续的 B 学习有用的信息。"
+        },
+        {
+          "chunk_id": "f43adce4-a5f9-46cc-a896-a3a9e97ad64e",
+          "chunk_text": "使用 高斯分布初始化 A，可以让输入特征经过 A 后保留一定的多样性，便于后续的 B 学习有用的信息。好未来面经（熊）2理论上来说AB只要点积为0 都可以符合要求，AB两个都不为0点积为0也是可以的，就是要在不断梯度更新的过程中去贴近最终的值，实际过程中B为0,A为高斯，会更便捷初始化，也可以让权重更新更快。5.大模型用Layernorm为什么不用batchnorm1.序列长度变化LayerNorm是在特征维度上进行归一化的，因此它不依赖于批量大小或序列长度。"
+        },
+        {
+          "chunk_id": "f13f9565-0e7a-441f-a30f-68242b1b443a",
+          "chunk_text": "序列长度变化LayerNorm是在特征维度上进行归一化的，因此它不依赖于批量大小或序列长度。相反，BatchNorm要求固定的批量大小和输入尺寸，这使得它不太适合处理变长序列的数据（会将输入序列pad到统一长度，用mask忽略padding的影响，通常是pad到最大长度）。2.模型稳定性与性能梯度传播：在训练深度网络时，LayerNorm有助于稳定梯度传播，特别是在使用残差连接的情况下。LayerNorm通过规范化每个单独样本的特征值来实现这一点，从而减少了层间相互依赖的影响。"
+        },
+        {
+          "chunk_id": "5f515199-339f-497d-a845-2409d22cc2ef",
+          "chunk_text": "LayerNorm通过规范化每个单独样本的特征值来实现这一点，从而减少了层间相互依赖的影响。减少对批量大小的依赖：BatchNorm的效果往往依赖于较大的批量大小来获得准确的均值和方差估计。然而，在实践中，尤其是在使用大型模型时，可能无法总是维持大的批量大小.LayerNorm则不依赖于批量大小3."
+        },
+        {
+          "chunk_id": "9dd4c8de-991d-471a-a956-6b914a438009",
+          "chunk_text": "LayerNorm则不依赖于批量大小3.计算效率与实现复杂度由于批归一化需要依赖批量大小，对实现复杂度要求计算效率：对于某些应用，特别是那些需要在线学习或者增量学习的应用，LayerNorm可以更高效地实施，因为它不需要存储运行中的统计量（即均值和方差）来进行归一化。简化实现：相较于BatchNorm，LayerNorm的实现更加直接，不需要考虑如何在不同的分布式训练设置下同步统计量的问题。6.layernorm的变种RMSNorm核心思想是基于输入向量的均方根（Root Mean Square, RMS）进行归一化，而不是像传统的LayerNorm那样使用均值和标准差。"
+        },
+        {
+          "chunk_id": "82877bd2-98dd-459e-847f-981b7ed3aeae",
+          "chunk_text": "layernorm的变种RMSNorm核心思想是基于输入向量的均方根（Root Mean Square, RMS）进行归一化，而不是像传统的LayerNorm那样使用均值和标准差。具体来说，RMSNorm不会减去均值，而是直接用输入向量除以其均方根值加上一个小的常数（用于防止除零错误），以此来好未来面经（熊）3缩放输入。这种方法能够减少计算量，并且在某些情况下能提供更好的性能或更快的收敛速度。DeepNorm:"
+        }
+      ],
+      "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+      "item_title": "好未来"
+    },
+    {
+      "id": "q018",
+      "question": "lora_dropout的默认值是多少",
+      "language": "zh",
+      "parent_chunk_id": "1c47194f-9296-49e9-baaa-97a158a882cc",
+      "parent_chunk_text": "lora_dropout=0.05,target_modules=[\"q_proj\", \"v_proj\"],bias=\"none\",task_type=\"CAUSAL_LM\")```分类任务可以使用：```pythontask_type=\"SEQ_CLS\"```------## 3.训练参数建议| 参数                        | 新手起点       | 说明                  || --------------------------- | -------------- | --------------------- || learning_rate               | 5e-5           | LoRA 分类任务常用起点 || epochs                      | 3–5            | 数据少时不要太多      || batch_size                  | 按显存设置     | 先从 1、2、4、8 试    || gradient_accumulation_ste...",
+      "relevant_children": [
+        {
+          "chunk_id": "76030cf1-55a3-4ffa-a892-bc2acf89b7b3",
+          "chunk_text": "lora_dropout=0.05,target_modules=[\"q_proj\", \"v_proj\"],bias=\"none\",task_type=\"CAUSAL_LM\")```分类任务可以使用：```pythontask_type=\"SEQ_CLS\"```------## 3.训练参数建议| 参数                        | 新手起点       | 说明                  || --------------------------- | -------------- | --------------------- || learning_rate               | 5e-5           | LoRA 分类任务常用起点 || epochs                      | 3–5            | 数据少时不要太多      || batch_size                  | 按显存设置     | 先从 1、2、4、8 试    || gradient_accumulation_steps | 4 或 8         | 显存不足时增大        || max_length                  | 128–512        | 根据文本长度决定      || weight_decay                | 0.01           | 防止过拟合            || warmup_ratio                | 0.03–0."
+        },
+        {
+          "chunk_id": "45deaa4d-1bbd-4b64-b400-e2beb8a1bb65",
+          "chunk_text": "03–0.1       | 训练更稳定            || logging_steps               | 10–50          | 方便观察训练          || eval_strategy               | steps 或 epoch | 定期验证              || save_strategy               | steps 或 epoch | 保存 checkpoint       || load_best_model_at_end      | True           | 训练结束加载最佳模型  |------## 4.调参顺序不要一开始乱调参数。推荐顺序：### 第一步：先稳训练目标：```text训练能正常跑完，loss 能下降，没有 NaN，没有显存爆掉。```优先检查：```text数据格式、labels、学习率、batch size、max_length。```------### 第二步：再防过拟合如果训练集效果高、验证集效果低，说明可能过拟合。"
+        },
+        {
+          "chunk_id": "af75a492-ad3d-4c0e-8d90-59550ba3dc81",
+          "chunk_text": "```------### 第二步：再防过拟合如果训练集效果高、验证集效果低，说明可能过拟合。处理方式：```text- 减少 epoch- 增加 dropout- 增加 weight_decay- 扩充数据- 清洗重复样本- 使用 early stopping```------### 第三步：最后细调在流程稳定后，再细调：```text- learning_rate- lora_r- lora_alpha- target_modules- max_length- prompt 模板```------# 第四阶段：评估复盘## 1.Loss 不是最终效果Loss 是训练优化指标，表示模型在训练目标上的误差。但业务评估不能只看 Loss。常见情况：```textLoss 下降，但 F1 不提升。Accuracy 很高，但少数类完全识别不出来。验证集指标很好，但线上样本效果差。"
+        },
+        {
+          "chunk_id": "353d1d0a-19a2-4004-81f6-6aee89d897a5",
+          "chunk_text": "验证集指标很好，但线上样本效果差。```所以需要组合评估。------## 2.分类任务常用指标| 指标             | 含义                             || ---------------- | -------------------------------- || Accuracy         | 总体预测正确比例                 || Precision        | 预测为某类的样本中，有多少是真的 || Recall           | 某类真实样本中，有多少被找出来   || F1 Score         | Precision 和 Recall 的综合       || Macro F1         | 各类别 F1 的平均，适合类别不平衡 || Weighted F1      | 按类别样本数加权的 F1            || Confusion Matrix | 看模型把哪些类别混淆了           |------## 3."
+        },
+        {
+          "chunk_id": "15df4b41-f236-4255-9207-21281ee98a68",
+          "chunk_text": "分类任务常用指标| 指标             | 含义                             || ---------------- | -------------------------------- || Accuracy         | 总体预测正确比例                 || Precision        | 预测为某类的样本中，有多少是真的 || Recall           | 某类真实样本中，有多少被找出来   || F1 Score         | Precision 和 Recall 的综合       || Macro F1         | 各类别 F1 的平均，适合类别不平衡 || Weighted F1      | 按类别样本数加权的 F1            || Confusion Matrix | 看模型把哪些类别混淆了           |------## 3.不同任务看不同指标### 类别均衡任务可以关注：```textAccuracy + Macro F1```### 类别不平衡任务更关注：```textMacro F1 + 每个类别的 Recall```### 风控、审核、召回类任务更关注：```textRecall```因为漏掉风险样本代价高。"
+        },
+        {
+          "chunk_id": "5e3b6a1a-898d-4af3-aa93-4d11f92ebba3",
+          "chunk_text": "不同任务看不同指标### 类别均衡任务可以关注：```textAccuracy + Macro F1```### 类别不平衡任务更关注：```textMacro F1 + 每个类别的 Recall```### 风控、审核、召回类任务更关注：```textRecall```因为漏掉风险样本代价高。### 误杀代价高的任务更关注：```textPrecision```因为错判正常样本为异常会影响用户体验。------## 4.混淆矩阵分析"
+        }
+      ],
+      "item_id": "aa67312a-53dd-447b-9084-3e6e08f215e7",
+      "item_title": "大模型微调指南"
+    },
+    {
+      "id": "q019",
+      "question": "BLEU指标在评估大模型生成的答案时，其核心逻辑是什么",
+      "language": "zh",
+      "parent_chunk_id": "c2ca6f6a-983b-49a0-bc7d-bb493e3a93e5",
+      "parent_chunk_text": "**核心逻辑**：计算大模型“生成的答案”中，有多少个词组（N-gram）在“标准答案”中也出现了。它极其惩罚“胡言乱语”——如果模型生成了一大段废话，哪怕里面包含了正确答案，BLEU 分数也会被大幅拉低。**例子**：- 标准答案：“大理的烤肉很好吃。”- 生成答案 1：“大理的烤肉很好吃。” (BLEU 极高)- 生成答案 2：“大理的烤肉很好吃，而且昨天下雨了，我还买了一顶帽子。” (虽然包含了正确信息，但因为废话太多，精准度下降，BLEU 分数会很低)**在 RAG 中的局限**：BLEU 是典型的“字面匹配”指标。由于现代大模型经常使用同义词或改变句式，BLEU 往往会给出偏低的分数。工业界现在更倾向于使用我们之前提到的基于语义向量的相似度（如 BERTScore）来替代纯字面的 BLEU。##### 2.文本相似度 (Semantic Similarity / 基于向量的语义重合)这是在 RAG 评估中最具现代感、也最抗“大模型改写”干扰的指标。通常使用 **BERTScore** 或 **Embedding 余弦相似度** 来计算。- **核心逻辑**：抛弃字面上的比对，...",
+      "relevant_children": [
+        {
+          "chunk_id": "a48d1da4-e227-4661-83a2-2cc33bc867c6",
+          "chunk_text": "**核心逻辑**：计算大模型“生成的答案”中，有多少个词组（N-gram）在“标准答案”中也出现了。它极其惩罚“胡言乱语”——如果模型生成了一大段废话，哪怕里面包含了正确答案，BLEU 分数也会被大幅拉低。**例子**：- 标准答案：“大理的烤肉很好吃。”- 生成答案 1：“大理的烤肉很好吃。” (BLEU 极高)- 生成答案 2：“大理的烤肉很好吃，而且昨天下雨了，我还买了一顶帽子。"
+        },
+        {
+          "chunk_id": "91656abe-71f8-4a7b-9815-4f8a66d62ba7",
+          "chunk_text": "” (BLEU 极高)- 生成答案 2：“大理的烤肉很好吃，而且昨天下雨了，我还买了一顶帽子。” (虽然包含了正确信息，但因为废话太多，精准度下降，BLEU 分数会很低)**在 RAG 中的局限**：BLEU 是典型的“字面匹配”指标。由于现代大模型经常使用同义词或改变句式，BLEU 往往会给出偏低的分数。工业界现在更倾向于使用我们之前提到的基于语义向量的相似度（如 BERTScore）来替代纯字面的 BLEU。##### 2."
+        },
+        {
+          "chunk_id": "86f5b74a-8944-4dc3-b6c9-e4f3fdcf886b",
+          "chunk_text": "##### 2.文本相似度 (Semantic Similarity / 基于向量的语义重合)这是在 RAG 评估中最具现代感、也最抗“大模型改写”干扰的指标。通常使用 **BERTScore** 或 **Embedding 余弦相似度** 来计算。- **核心逻辑**：抛弃字面上的比对，直接计算两句话在**语义空间里的距离**。- **计算方式**：用一个编码器模型（比如 BGE 或 BERT）把“生成答案”和“标准答案”都变成高维向量，然后计算这两个向量的余弦相似度（通常是 0 到 1 之间的值）。- **优点**：完美应对“换汤不换药”的表达。##### 3."
+        },
+        {
+          "chunk_id": "97c91b71-b550-43ea-8ba5-fbe703ea6cce",
+          "chunk_text": "##### 3.关键词重合度 (Keyword Overlap / Exact Match)这是最严苛、也最传统的业务指标。在很多严谨的行业（如医疗、法律、财务），语义相似是不够的，关键实体必须精准命中。- **核心逻辑**：检查标准答案中的“核心实体”（人名、地名、专业术语、数字等）是否在生成的答案中原封不动地出现了。- **计算方式**：通常会先用 NLP 工具从标准答案中提取出关键词列表，然后统计这些词在生成答案中的**召回率**（比如标准答案有 5 个关键词，生成答案包含了 4 个，得分就是 0.8）。"
+        },
+        {
+          "chunk_id": "92add288-5157-49ed-a0c6-4471fc098e00",
+          "chunk_text": "8）。- **优点**：强力克制大模型的“幻觉”和“含糊其辞”。- **例子**：- 标准答案：“请在 **2026年5月1日** 前，向 **fzu.edu.cn** 发送邮件。”- 如果大模型回答：“请在**下个月初**向**学校邮箱**发邮件。”- 虽然语义上可能说得通，但因为关键的日期和邮箱域名（关键词）没有命中，这个指标的得分会非常低。##### 总结：为什么需要同时看这三个指标？"
+        }
+      ],
+      "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+      "item_title": "面试常见问题"
+    },
+    {
+      "id": "q020",
+      "question": "What is the rule regarding the use of spaces after keywords like if, for, and while",
+      "language": "en",
+      "parent_chunk_id": "d6bf5e42-1e90-495e-8fc4-016a3e7a9bc0",
+      "parent_chunk_text": "2.程序的排版3.2.2.1.空行1)在每个类声明之后、每个函数定义结束之后都要加空行2)在一个函数体内，逻揖上密切相关的语句之间不加空行，其它地方应加空行分隔3.2.2.2.代码行1)一行代码只做一件事情，如只定义一个变量，或只写一条语句。这样的代码容易阅读，C/C++编码规范任子行内部资料不得外传8 / 17并且方便于写注释2)if、for、while、do 等语句自占一行，执行语句不得紧跟其后。不论执行语句有多少都要加{}。这样可以防止书写失误3)尽可能在定义变量的同时初始化该变量（就近原则）。如果变量的引用处和其定义处相隔比较远，变量的初始化很容易被忘记。如果引用了未被初始化的变量，可能会导致程序错误3.2.2.3.代码行内的空格1)关键字之后要留空格。像if、for、while 等关键字之后应留一个空格再跟左括号‘（’，以突出关键字。函数名之后不要留空格，紧跟左括号‘（’，以与关键字区别2)‘（’向后紧跟，‘）’、‘，’、‘;’向前紧跟，紧跟处不留空格。‘，’之后要留空格，如Function(x, y, z)。如果‘;’不是一行的结束符号，其后要留空格，如for(initia...",
+      "relevant_children": [
+        {
+          "chunk_id": "c63f684f-e8f2-4ee1-a294-ad92162dccae",
+          "chunk_text": "2.程序的排版3.2.2.1.空行1)在每个类声明之后、每个函数定义结束之后都要加空行2)在一个函数体内，逻揖上密切相关的语句之间不加空行，其它地方应加空行分隔3.2.2.2.代码行1)一行代码只做一件事情，如只定义一个变量，或只写一条语句。这样的代码容易阅读，C/C++编码规范任子行内部资料不得外传8 / 17并且方便于写注释2)if、for、while、do 等语句自占一行，执行语句不得紧跟其后。不论执行语句有多少都要加{}。这样可以防止书写失误3)尽可能在定义变量的同时初始化该变量（就近原则）。"
+        },
+        {
+          "chunk_id": "3a4ab074-5324-4ba3-81ae-b8ea8af54674",
+          "chunk_text": "这样可以防止书写失误3)尽可能在定义变量的同时初始化该变量（就近原则）。如果变量的引用处和其定义处相隔比较远，变量的初始化很容易被忘记。如果引用了未被初始化的变量，可能会导致程序错误3.2.2.3.代码行内的空格1)关键字之后要留空格。像if、for、while 等关键字之后应留一个空格再跟左括号‘（’，以突出关键字。函数名之后不要留空格，紧跟左括号‘（’，以与关键字区别2)‘（’向后紧跟，‘）’、‘，’、‘;’向前紧跟，紧跟处不留空格。‘，’之后要留空格，如Function(x, y, z)。"
+        },
+        {
+          "chunk_id": "650d67e0-b04f-43b6-9df6-742d779fc770",
+          "chunk_text": "‘，’之后要留空格，如Function(x, y, z)。如果‘;’不是一行的结束符号，其后要留空格，如for(initialization; condition; update)3)赋值操作符、比较操作符、算术操作符、逻辑操作符、位域操作符，如“=”、“+=” 、“>=”、“<=”、“+”、“*”、“%”、“&&”、“||”、“<<”,“^”等二元操作符的前后应当加空格4)一元操作符如“!”、“~”、“++”、“--”、“&”（地址运算符）等前后不加空格。象“［］”、“."
+        },
+        {
+          "chunk_id": "32715dbb-c8d4-484e-ac86-ab3e42fef72f",
+          "chunk_text": "”、“->”这类操作符前后不加空格5)对于表达式比较长的for 语句和if 语句，为了紧凑起见可以适当地去掉一些空格，如for(i=0; i<10; i++)和if((a<=b) && (c<=d))void Func1(int x, int y, int z); // 良好的风格void Func1 (int x,int y,int z); // 不良的风格if (year >= 2000) // 良好的风格if(year>=2000) // 不良的风格if ((a>=b) && (c<=d)) // 良好的风格if(a>=b&&c<=d) // 不良的风格for (i=0; i<10; i++) // 良好的风格for(i=0;i<10;i++) // 不良的风格for (i = 0; i < 10; i ++) // 过多的空格x = a < b ?"
+        },
+        {
+          "chunk_id": "e23cc66a-039a-4a75-8a7e-94a7a989e83d",
+          "chunk_text": "a : b; // 良好的风格x=a<b?a:b; // 不好的风格C/C++编码规范任子行内部资料不得外传9 / 17int *x = &y; // 良好的风格int * x = & y; // 不良的风格array[5] = 0; // 不要写成array [ 5 ] = 0;a.Function(); // 不要写成a .Function();b->Function(); // 不要写成b -> Function();3.2.2.4.对齐1)"
+        }
+      ],
+      "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+      "item_title": "C++编码规范V01.00"
+    }
+  ]
+}

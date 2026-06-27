@@ -57,6 +57,8 @@ class MemoryCandidate:
     explicitness: float = 0.7
     sensitivity_flag: bool = False
     evidence_message_id: str = ""
+    decision_hint: str = "review"
+    risk_level: str = "medium"
 
 
 @dataclass
@@ -225,6 +227,8 @@ def parse_memory_candidates(raw: str) -> list[MemoryCandidate]:
                 explicitness=_as_float(item.get("explicitness"), 0.7),
                 sensitivity_flag=sensitivity_flag,
                 evidence_message_id=str(item.get("evidence_message_id") or ""),
+                decision_hint=str(item.get("decision_hint") or "review"),
+                risk_level=str(item.get("risk_level") or "medium"),
             )
         )
     return candidates

@@ -5,6 +5,7 @@ from engine.app.agent.tools.base import BUILTIN_REGISTRY, ToolContext, build_ena
 import engine.app.agent.tools.assets as asset_tools
 import engine.app.agent.tools.governed_knowledge  # noqa: F401
 import engine.app.agent.tools.knowledge  # noqa: F401
+import engine.app.agent.tools.page_index  # noqa: F401
 import engine.app.agent.tools.memory as memory_tools
 import engine.app.agent.tools.clarify  # noqa: F401
 import engine.app.agent.tools.datetime  # noqa: F401
@@ -28,6 +29,9 @@ def test_builtin_registry_contains_initial_tools():
         "knowledge_evidence_search",
         "knowledge_material_search",
         "raw_document_search",
+        "page_index_get_document",
+        "page_index_get_document_structure",
+        "page_index_get_page_content",
         "governed_knowledge_search",
         "knowledge_search",
         "asset_search",
@@ -51,6 +55,9 @@ def test_build_enabled_tools_skips_disabled_web_search():
     assert "knowledge_evidence_search" in names
     assert "knowledge_material_search" in names
     assert "raw_document_search" in names
+    assert "page_index_get_document" not in names
+    assert "page_index_get_document_structure" not in names
+    assert "page_index_get_page_content" not in names
     assert "memory_search" in names
     assert "clarify_user" in names
     assert "datetime" in names

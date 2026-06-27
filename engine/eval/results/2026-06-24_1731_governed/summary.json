@@ -1,0 +1,106 @@
+{
+  "meta": {
+    "dataset": "evaluation\\datasets\\formal_docs_v1.json",
+    "run_at": "2026-06-24T17:31:21.216251+00:00",
+    "total_queries": 60,
+    "evaluated": 60,
+    "llm_model": "deepseek-v4-flash",
+    "embedding_model": "jina-embeddings-v3",
+    "hybrid_params": {
+      "rrf_k": 60,
+      "vector_weight": 0.6,
+      "bm25_weight": 0.4
+    },
+    "v2_params": {
+      "top_k_chunks": 20,
+      "retrieval_path": "vector_first"
+    }
+  },
+  "baseline_aggregates": {
+    "a_recall@10": {
+      "mean": 0.4087,
+      "median": 0.4,
+      "std": 0.2354,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "a_recall@20": {
+      "mean": 0.5114,
+      "median": 0.5,
+      "std": 0.2746,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "a_hit@10": {
+      "mean": 0.95,
+      "median": 1,
+      "std": 0.2179,
+      "min": 0,
+      "max": 1
+    },
+    "a_mrr": {
+      "mean": 0.7662,
+      "median": 1.0,
+      "std": 0.3385,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "a_ndcg@10": {
+      "mean": 0.4375,
+      "median": 0.4539,
+      "std": 0.2026,
+      "min": 0.0,
+      "max": 0.8304
+    }
+  },
+  "v2_aggregates": {
+    "b_recall@10": {
+      "mean": 0.4087,
+      "median": 0.4,
+      "std": 0.2354,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "b_recall@20": {
+      "mean": 0.5114,
+      "median": 0.5,
+      "std": 0.2746,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "b_hit@10": {
+      "mean": 0.95,
+      "median": 1,
+      "std": 0.2179,
+      "min": 0,
+      "max": 1
+    },
+    "b_mrr": {
+      "mean": 0.7662,
+      "median": 1.0,
+      "std": 0.3385,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "b_ndcg@10": {
+      "mean": 0.4375,
+      "median": 0.4539,
+      "std": 0.2026,
+      "min": 0.0,
+      "max": 0.8304
+    }
+  },
+  "ckp_layer": {
+    "queries_with_ckp_ground_truth": 60,
+    "ckp_hit_rate": 0.9833,
+    "avg_ckp_precision": 0.2626,
+    "avg_ckp_recall": 0.975,
+    "avg_ckp_returned": 6.95
+  },
+  "comparison": {
+    "recall@10_delta_mean": 0.0,
+    "mrr_delta_mean": 0.0,
+    "hit@10_rate_a": 0.95,
+    "hit@10_rate_b": 0.95
+  }
+}

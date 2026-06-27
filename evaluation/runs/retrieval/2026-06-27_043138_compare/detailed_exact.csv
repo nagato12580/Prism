@@ -1,0 +1,1 @@
+﻿chain,query_id,question,language,item_title,relevant_count,recall@5,recall@10,recall@20,precision@5,precision@10,precision@20,hit@5,hit@10,hit@20,ndcg@5,ndcg@10,ndcg@20,mrr,first_relevant_rank,retrieved_detail

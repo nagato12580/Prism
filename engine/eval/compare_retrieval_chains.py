@@ -22,13 +22,19 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from backend.app.database import SessionLocal
+from backend.app.models.knowledge_governance import PKUCanonicalLink, PersonalKnowledgeUnit
 from backend.app.models.knowledge_item import KnowledgeChunk
+from backend.app.services.pku_vectors import search_pku_vectors
 from engine.app.agent.tools.governed_knowledge import (
     _GOVERNED_EVIDENCE_PKU_VECTOR_WEIGHT as GOVERNED_EVIDENCE_PKU_VECTOR_WEIGHT,
+    _query_terms,
+    _score_fields,
     _query_governed_evidence,
     _query_governed_knowledge,
 )
+from engine.app.agent.tools.governed_knowledge_v2 import _query_governed_v2
 from engine.app.config import settings
+from engine.app.retrieval.page_index import PageIndexService
 from engine.app.retrieval.hybrid import BM25_WEIGHT, RRF_K, VECTOR_WEIGHT, hybrid_search
 
 DEFAULT_DATASET = Path(__file__).resolve().parent / "golden_dataset.json"
@@ -36,6 +42,9 @@ EVALUATION_ROOT = _project_root / "evaluation"
 RESULTS_DIR = EVALUATION_ROOT / "runs" / "retrieval"
 K_VALUES = [5, 10, 20]
 GOVERNED_EVIDENCE_PKU_EVIDENCE_BOOST = 0.05
+BOTTOM_UP_VECTOR_WEIGHT = 0.65
+BOTTOM_UP_LEXICAL_WEIGHT = 0.35
+BOTTOM_UP_CANDIDATE_MIN = 80
 
 Retriever = Callable[[str, int], list[dict[str, Any]]]
 
@@ -236,11 +245,215 @@ def _governed_evidence(query: str, top_k: int) -> list[dict[str, Any]]:
     return _dedupe_hits(hits)[:top_k]
 
 
+def _safe_search_bottom_up_pku_vectors(query: str, limit: int) -> list[dict[str, Any]]:
+    try:
+        return search_pku_vectors(text=query, user_id="default-user", top_k=limit)
+    except Exception:
+        return []
+
+
+def _bottom_up_pku_fields(pku: PersonalKnowledgeUnit) -> dict[str, str]:
+    return {
+        "statement": str(pku.statement or "").lower(),
+        "normalized_statement": str(pku.normalized_statement or "").lower(),
+        "evidence_span": str(pku.evidence_span or "").lower(),
+        "keywords": " ".join(str(item).lower() for item in (pku.keywords or [])),
+        "concepts": " ".join(str(item).lower() for item in (pku.concepts or [])),
+        "entities": " ".join(str(item).lower() for item in (pku.entities or [])),
+        "domains": " ".join(str(item).lower() for item in (pku.domains or [])),
+    }
+
+
+def _query_bottom_up(query: str, limit: int) -> list[dict[str, Any]]:
+    terms = _query_terms(query)
+    candidate_limit = max(limit * 8, BOTTOM_UP_CANDIDATE_MIN)
+    vector_hits = _safe_search_bottom_up_pku_vectors(query, candidate_limit)
+    vector_score_by_pku_id = {
+        str(hit.get("pku_id")): float(hit.get("score") or 0.0)
+        for hit in vector_hits
+        if hit.get("pku_id")
+    }
+    vector_rank_by_pku_id = {
+        str(hit.get("pku_id")): rank
+        for rank, hit in enumerate(vector_hits)
+        if hit.get("pku_id")
+    }
+
+    db = SessionLocal()
+    try:
+        lexical_rows = (
+            db.query(PersonalKnowledgeUnit)
+            .filter(PersonalKnowledgeUnit.user_id == "default-user", PersonalKnowledgeUnit.status == "active")
+            .order_by(PersonalKnowledgeUnit.updated_at.desc())
+            .limit(max(candidate_limit * 4, 240))
+            .all()
+        )
+        candidate_ids = set(vector_score_by_pku_id)
+        lexical_scores: dict[str, tuple[float, list[str], list[str]]] = {}
+        for pku in lexical_rows:
+            score, matched_terms, reasons = _score_fields(
+                _bottom_up_pku_fields(pku),
+                terms,
+                {
+                    "statement": 4.0,
+                    "normalized_statement": 4.0,
+                    "evidence_span": 5.0,
+                    "keywords": 3.0,
+                    "concepts": 2.0,
+                    "entities": 2.0,
+                    "domains": 1.5,
+                },
+            )
+            if not terms or matched_terms:
+                pku_id = str(pku.id)
+                lexical_scores[pku_id] = (score, matched_terms, reasons)
+                candidate_ids.add(pku_id)
+
+        if not candidate_ids:
+            return []
+
+        pkus = (
+            db.query(PersonalKnowledgeUnit)
+            .filter(PersonalKnowledgeUnit.id.in_(candidate_ids), PersonalKnowledgeUnit.status == "active")
+            .all()
+        )
+        document_chunk_ids = [str(pku.source_id) for pku in pkus if pku.source_kind == "document_chunk" and pku.source_id]
+        chunks_by_id = {
+            str(chunk.id): chunk
+            for chunk in db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(document_chunk_ids)).all()
+        } if document_chunk_ids else {}
+        links = db.query(PKUCanonicalLink).filter(PKUCanonicalLink.pku_id.in_(candidate_ids)).all()
+        ckp_payload_by_pku_id: dict[str, dict[str, list[str]]] = {}
+        for link in links:
+            if not link.canonical:
+                continue
+            payload = ckp_payload_by_pku_id.setdefault(str(link.pku_id), {"ids": [], "titles": []})
+            payload["ids"].append(str(link.canonical_id))
+            payload["titles"].append(str(link.canonical.title or ""))
+
+        results: list[dict[str, Any]] = []
+        for pku in pkus:
+            pku_id = str(pku.id)
+            lexical_score, matched_terms, reasons = lexical_scores.get(pku_id, (0.0, [], []))
+            vector_score = vector_score_by_pku_id.get(pku_id, 0.0)
+            vector_component = min(max(vector_score, 0.0), 1.0) * BOTTOM_UP_VECTOR_WEIGHT
+            lexical_component = min(max(float(lexical_score or 0.0), 0.0), 20.0) / 20.0 * BOTTOM_UP_LEXICAL_WEIGHT
+            score = vector_component + lexical_component + min(float(pku.confidence or 0.0), 1.0) * 0.05
+            rank_hint = vector_rank_by_pku_id.get(pku_id, candidate_limit)
+            ckp_payload = ckp_payload_by_pku_id.get(pku_id, {"ids": [], "titles": []})
+            result = {
+                "pku_id": pku_id,
+                "statement": pku.statement,
+                "source_kind": pku.source_kind,
+                "source_id": pku.source_id,
+                "unit_type": pku.unit_type,
+                "score": round(score, 4),
+                "vector_score": vector_score,
+                "lexical_score": lexical_score,
+                "matched_terms": matched_terms,
+                "match_reasons": reasons,
+                "canonical_ids": ckp_payload["ids"],
+                "canonical_titles": ckp_payload["titles"],
+                "rank_hint": rank_hint,
+            }
+            if pku.source_kind == "document_chunk":
+                chunk = chunks_by_id.get(str(pku.source_id))
+                if chunk:
+                    result["item_id"] = chunk.item_id
+            results.append(result)
+
+        results.sort(key=lambda item: (float(item.get("score") or 0.0), -int(item.get("rank_hint") or 0)), reverse=True)
+        return results[:limit]
+    finally:
+        db.close()
+
+
+def _bottom_up(query: str, top_k: int) -> list[dict[str, Any]]:
+    pku_hits = _query_bottom_up(query, top_k)
+    hits: list[dict[str, Any]] = []
+    for rank, pku in enumerate(pku_hits, start=1):
+        if pku.get("source_kind") != "document_chunk":
+            continue
+        chunk_id = str(pku.get("source_id") or "")
+        if not chunk_id:
+            continue
+        hits.append(
+            {
+                "chunk_id": chunk_id,
+                "item_id": pku.get("item_id"),
+                "score": float(pku.get("score") or 0.0),
+                "source": "bottom_up",
+                "pku_id": pku.get("pku_id"),
+                "statement": pku.get("statement"),
+                "canonical_ids": pku.get("canonical_ids") or [],
+                "canonical_titles": pku.get("canonical_titles") or [],
+                "rank_hint": rank,
+            }
+        )
+    hits.sort(key=lambda item: (float(item.get("score") or 0.0), -int(item.get("rank_hint") or 0)), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
+def _governed_v2(query: str, top_k: int) -> list[dict[str, Any]]:
+    chunk_hits, bundles, _knowledge_results, _raw_sources = _query_governed_v2(
+        query,
+        limit=top_k,
+        top_k_chunks=top_k,
+    )
+    canonical_ids = [str(bundle.get("canonical_id")) for bundle in bundles if bundle.get("canonical_id")]
+    canonical_titles = [str(bundle.get("title")) for bundle in bundles if bundle.get("title")]
+    hits: list[dict[str, Any]] = []
+    for rank, hit in enumerate(chunk_hits, start=1):
+        chunk_id = str(hit.get("chunk_id") or "")
+        if not chunk_id:
+            continue
+        hits.append(
+            {
+                "chunk_id": chunk_id,
+                "item_id": hit.get("item_id"),
+                "score": float(hit.get("score") or 0.0),
+                "source": "governed_v2",
+                "canonical_ids": canonical_ids,
+                "canonical_titles": canonical_titles,
+                "rank_hint": rank,
+            }
+        )
+    hits.sort(key=lambda item: (float(item.get("score") or 0.0), -int(item.get("rank_hint") or 0)), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
+def _page_index(query: str, top_k: int) -> list[dict[str, Any]]:
+    page_hits = PageIndexService(SessionLocal).search_pages(query, top_k=top_k)
+    hits: list[dict[str, Any]] = []
+    for rank, hit in enumerate(page_hits, start=1):
+        chunk_id = str(hit.get("chunk_id") or "")
+        if not chunk_id:
+            continue
+        hits.append(
+            {
+                "chunk_id": chunk_id,
+                "item_id": hit.get("item_id"),
+                "score": float(hit.get("score") or 0.0),
+                "source": "page_index",
+                "doc_id": hit.get("doc_id"),
+                "doc_name": hit.get("doc_name"),
+                "page": hit.get("page"),
+                "chunk_ids": hit.get("chunk_ids") or [],
+                "rank_hint": rank,
+            }
+        )
+    hits.sort(key=lambda item: (float(item.get("score") or 0.0), -int(item.get("rank_hint") or 0)), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
 def _chain_map() -> dict[str, tuple[str, Retriever]]:
     return {
         "traditional": ("traditional_hybrid", _traditional_hybrid),
         "governed": ("governed_ckp_pku", _governed_ckp_pku),
         "governed_evidence": ("governed_evidence", _governed_evidence),
+        "bottom_up": ("bottom_up", _bottom_up),
+        "governed_v2": ("governed_v2", _governed_v2),
+        "page_index": ("page_index", _page_index),
     }
 
 
@@ -398,7 +611,7 @@ def main() -> None:
     parser.add_argument(
         "--chains",
         nargs="+",
-        choices=["traditional", "governed", "governed_evidence"],
+        choices=["traditional", "governed", "governed_evidence", "bottom_up", "governed_v2", "page_index"],
         default=["traditional", "governed"],
         help="Retrieval chains to evaluate",
     )

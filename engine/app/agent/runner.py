@@ -16,12 +16,14 @@ from .events import (
     done_event,
     error_event,
     sources_event,
+    title_event,
     token_event,
     tool_call_event,
     tool_result_event,
 )
 from .prompts import AGENT_SYSTEM_PROMPT
 from .active_recall import recall_memory_context
+from ..llm.client import chat
 from ..observability import logger, quoted
 
 
@@ -129,6 +131,19 @@ def _is_casual_chat_query(query: str) -> bool:
     return normalized in casual_phrases
 
 
+def _generate_title(query: str, answer: str) -> str:
+    """Generate a short conversation title from the first Q&A pair."""
+    prompt = (
+        "用简体中文生成一个简短的会话标题（10个字以内），概括以下问答内容：\n"
+        f"用户问：{query}\n"
+        f"助手答：{answer[:500]}\n"
+        "标题："
+    )
+    result = chat([{"role": "user", "content": prompt}])
+    result = result.strip().strip('"''""').strip()
+    return result[:30] if result else ""
+
+
 class LangChainAgentRunner:
     def __init__(
         self,
@@ -149,6 +164,9 @@ class LangChainAgentRunner:
     def stream(self, query: str, history: list[dict[str, Any]] | None = None):
         history = history or []
         is_casual_chat = _is_casual_chat_query(query)
+        is_first_exchange = not history or not any(
+            msg.get("role") == "user" for msg in history
+        )
         logger.info(
             "[agent] start query=%s history_messages=%s max_iterations=%s",
             quoted(query),
@@ -196,6 +214,16 @@ class LangChainAgentRunner:
                         self._pending_clarify = None
                         question, options = pending
                         yield clarify_event(question, options)
+
+                    # Auto-generate title on first exchange
+                    if is_first_exchange and text:
+                        try:
+                            title = _generate_title(query, text)
+                            if title:
+                                logger.info("[agent] title_generated title=%s", quoted(title))
+                                yield title_event(title)
+                        except Exception as exc:
+                            logger.warning("[agent] title_generation_failed: %s", quoted(str(exc), limit=200))
 
                     logger.info("[agent] done")
                     yield done_event()

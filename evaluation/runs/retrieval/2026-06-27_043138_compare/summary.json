@@ -1,0 +1,335 @@
+{
+  "meta": {
+    "dataset": "evaluation\\datasets\\formal_docs_v1_first20.json",
+    "run_at": "2026-06-27T04:33:00.342425+00:00",
+    "total_queries": 20,
+    "chains": [
+      "page_index"
+    ],
+    "llm_model": "deepseek-v4-flash",
+    "embedding_model": "jina-embeddings-v3",
+    "traditional_hybrid_params": {
+      "rrf_k": 60,
+      "vector_weight": 0.6,
+      "bm25_weight": 0.4,
+      "eval_k_values": [
+        5,
+        10,
+        20
+      ]
+    },
+    "governed_evidence_params": {
+      "ckp_vector_recall": true,
+      "ckp_lexical_recall": true,
+      "pku_vector_recall": true,
+      "pku_vector_weight": 0.25,
+      "pku_query_aware_rerank": true,
+      "pku_evidence_boost": 0.05,
+      "parent_child_expansion": true,
+      "eval_k_values": [
+        5,
+        10,
+        20
+      ]
+    }
+  },
+  "chains": {
+    "page_index": {
+      "evaluated": 0,
+      "failed": 20,
+      "exact": {
+        "recall@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "mrr": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      },
+      "expanded": {
+        "recall@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "recall@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "precision@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "hit@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@5": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@10": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "ndcg@20": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "mrr": {
+          "mean": 0.0,
+          "median": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      },
+      "overview": {
+        "exact_hit@10_rate": 0,
+        "expanded_hit@10_rate": 0,
+        "expanded_mrr_zero_count": 0
+      },
+      "failures": [
+        {
+          "query_id": "q001",
+          "question": "在RAG系统中，父子块之间的映射关系通常通过什么方式在工程落地中建立",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q002",
+          "question": "在Skill管理中，两阶段调用的第一阶段应检索多少个最相关的Skill",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q003",
+          "question": "What is the LLM-as-a-Judge evaluation method and how does it work",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q004",
+          "question": "What is the core of Gemini CLI design and what are its optimization points",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q005",
+          "question": "What is the recommended workflow for beginners when fine-tuning a model, according to the document",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q006",
+          "question": "LangSmith链路可观测的核心价值有哪些？请结合文档举例说明如何通过它定位RAG系统中的问题。",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q007",
+          "question": "在GRPO训练中，思考长度与答案正确性之间存在怎样的相关性？请结合短期与长期奖励、探索与利用以及任务复杂度等方面进行解释。",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q008",
+          "question": "What is the effective date of the C/C++ coding standard document",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q009",
+          "question": "PPO算法中用于限制策略更新幅度的clip范围通常设为多少",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q010",
+          "question": "在文本分类任务的最小可行方案中，推荐的数据量是多少",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q011",
+          "question": "策略迭代和值迭代的主要区别是什么",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q012",
+          "question": "根据C++编码规范，数据库表存储引擎必须使用什么",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q013",
+          "question": "在Python编码规范中，当函数参数过多时，文档推荐使用哪种方式来封装参数",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q014",
+          "question": "处理Tavily返回的超长内容时，Map-Reduce策略具体包含哪三个核心阶段",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q015",
+          "question": "在大模型微调中，评估指标应当如何正确组合使用",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q016",
+          "question": "在Transformer模型的解码优化中，束搜索（Beam Search）是如何工作的",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q017",
+          "question": "在好未来的面经中，为什么选择用高斯分布初始化A，而不是让A为0",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q018",
+          "question": "lora_dropout的默认值是多少",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q019",
+          "question": "BLEU指标在评估大模型生成的答案时，其核心逻辑是什么",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        },
+        {
+          "query_id": "q020",
+          "question": "What is the rule regarding the use of spaces after keywords like if, for, and while",
+          "error": "(pymysql.err.OperationalError) (2003, \"Can't connect to MySQL server on 'localhost' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+        }
+      ]
+    }
+  }
+}

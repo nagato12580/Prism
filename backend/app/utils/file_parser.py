@@ -24,7 +24,7 @@ def _extract_pdf(file_path: str) -> str:
     import fitz  # PyMuPDF
 
     with fitz.open(file_path) as doc:
-        text_parts = [page.get_text() for page in doc]
+        text_parts = [f"[[PAGE:{index}]]\n{page.get_text()}" for index, page in enumerate(doc, start=1)]
     return "\n".join(text_parts)
 
 

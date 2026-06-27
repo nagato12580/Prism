@@ -20,6 +20,18 @@ _Session = sessionmaker(bind=_engine)
 logger = logging.getLogger("uvicorn.error")
 
 
+def _chunk_content(chunk) -> str:
+    return getattr(chunk, "content", chunk)
+
+
+def _chunk_page_start(chunk):
+    return getattr(chunk, "page_start", None)
+
+
+def _chunk_page_end(chunk):
+    return getattr(chunk, "page_end", None)
+
+
 def _log_stage(item_id: str, stage: str, **fields) -> None:
     details = " ".join(f"{key}={value}" for key, value in fields.items())
     suffix = f" {details}" if details else ""
@@ -82,6 +94,8 @@ def _bulk_index_chunks_es(
                         "source_type": source_type,
                         "chunk_type": "parent",
                         "parent_id": None,
+                        "page_start": pc.page_start,
+                        "page_end": pc.page_end,
                         "created_at": now,
                     },
                 }
@@ -98,11 +112,13 @@ def _bulk_index_chunks_es(
                         "chunk_id": cid,
                         "item_id": item_id,
                         "topic_id": topic_id,
-                        "content": child_text,
+                        "content": _chunk_content(child_text),
                         "doc_name": doc_name,
                         "source_type": source_type,
                         "chunk_type": "child",
                         "parent_id": pid,
+                        "page_start": _chunk_page_start(child_text),
+                        "page_end": _chunk_page_end(child_text),
                         "created_at": now,
                     },
                 }
@@ -149,7 +165,7 @@ def ingest_item(item_id: str) -> int:
 
         child_texts = []
         for pc in parents:
-            child_texts.extend(pc.children)
+            child_texts.extend(_chunk_content(child) for child in pc.children)
 
         if not child_texts:
             _log_stage(item_id, "no_child_chunks", parents=len(parents))
@@ -176,6 +192,7 @@ def ingest_item(item_id: str) -> int:
                 chunk_text=pc.content,
                 chunk_index=parent_index,
                 chunk_type="parent",
+                extra_meta={"page_start": pc.page_start, "page_end": pc.page_end},
             )
             db.add(parent)
             db.flush()
@@ -184,10 +201,14 @@ def ingest_item(item_id: str) -> int:
             for child_index, child_text in enumerate(pc.children):
                 child = KnowledgeChunk(
                     item_id=item_id,
-                    chunk_text=child_text,
+                    chunk_text=_chunk_content(child_text),
                     chunk_index=child_index,
                     chunk_type="child",
                     parent_id=parent.id,
+                    extra_meta={
+                        "page_start": _chunk_page_start(child_text),
+                        "page_end": _chunk_page_end(child_text),
+                    },
                 )
                 db.add(child)
                 db.flush()

@@ -305,6 +305,8 @@ export function ChatPage() {
 
     const userPersistPromise = persistUserMessage(sessionId, query)
 
+    let titleReceived = false
+
     const handleStreamLine = (line: string) => {
       if (!line.trim()) return
 
@@ -334,6 +336,14 @@ export function ChatPage() {
         } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data))
         else if (msg.type === 'token') appendToLast(msg.data)
         else if (msg.type === 'done') finishLast()
+        else if (msg.type === 'title') {
+          const title = safeString(msg.data)
+          if (sessionId && title) {
+            titleReceived = true
+            updateSessionTitle(sessionId, title)
+            chatApi.updateSession(sessionId, { title }).catch(() => {})
+          }
+        }
         else if (msg.type === 'error') {
           appendToLast(`\n\n请求失败：${msg.data}`)
           finishLast()
@@ -405,7 +415,7 @@ export function ChatPage() {
         // 首轮问答后自动生成标题
         const userCount = msgs.filter((m) => m.role === 'user').length
         const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
-        if (userCount === 1 && shouldAutoGenerateTitle(session?.title)) {
+        if (!titleReceived && userCount === 1 && shouldAutoGenerateTitle(session?.title)) {
           try {
             const updated = await chatApi.generateTitle(sessionId)
             updateSessionTitle(sessionId, updated.title)

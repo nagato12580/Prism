@@ -34,9 +34,12 @@ def create_app():
 
     @app.on_event("startup")
     def startup():
-        connect()
-        ensure_collection()
-        print("[engine] Milvus 已连接")
+        try:
+            connect()
+            ensure_collection()
+            print("[engine] Milvus 已连接")
+        except Exception as e:
+            print(f"[engine] Milvus 连接失败（向量检索将不可用，召回降级为 LIKE 关键词）: {e}")
         try:
             ensure_index()
             print("[engine] ES 索引已就绪")

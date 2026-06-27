@@ -54,5 +54,9 @@ def error_event(message: str) -> str:
     return ndjson_event("error", message)
 
 
+def title_event(title: str) -> str:
+    return ndjson_event("title", title)
+
+
 def done_event() -> str:
     return ndjson_event("done")
