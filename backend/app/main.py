@@ -15,12 +15,14 @@ from .config import settings
 from .database import Base, engine, get_db
 from .utils.auto_migrate import auto_migrate
 from .api import register_routers
+from .services.memory_scheduler import MemoryScheduler
 # 导入所有模型，确保注册到 Base.metadata
 from .models import *  # noqa
 
 _engine_proc = None
 _engine_log_file = None
 _engine_log_thread = None
+_memory_scheduler = None
 
 
 def _read_engine_output(process) -> str:
@@ -161,8 +163,21 @@ def create_app() -> FastAPI:
         if os.getenv("SKIP_ENGINE") != "1":
             _start_engine()
 
+        # Start memory extraction scheduler
+        global _memory_scheduler
+        try:
+            _memory_scheduler = MemoryScheduler()
+            _memory_scheduler.start()
+        except Exception as e:
+            print(f"[backend] Memory scheduler failed to start: {e}")
+
     @app.on_event("shutdown")
     def shutdown():
+        if _memory_scheduler:
+            try:
+                _memory_scheduler.shutdown()
+            except Exception as e:
+                print(f"[backend] Memory scheduler shutdown error: {e}")
         _stop_engine()
 
     return app
