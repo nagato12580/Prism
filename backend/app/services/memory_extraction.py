@@ -53,6 +53,99 @@ def load_session_messages(db: Session, session_id: str, limit: int = 20) -> list
     return list(reversed(query.all()))
 
 
+def load_session_messages_with_watermark(
+    db: Session,
+    session_id: str,
+    last_extracted_message_id: str = "",
+    context_window: int = 5,
+) -> tuple[list[ChatMessage], list[ChatMessage]]:
+    """
+    Returns (context_messages, new_messages) split by watermark.
+
+    context_messages: already-extracted messages for context (up to context_window)
+    new_messages: messages after the watermark that need extraction
+    """
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    all_messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at)
+        .all()
+    )
+
+    # Find split point from watermark
+    split_idx = 0
+    if last_extracted_message_id:
+        for i, msg in enumerate(all_messages):
+            if msg.id == last_extracted_message_id:
+                split_idx = i + 1
+                break
+
+    new_messages = all_messages[split_idx:]
+
+    # Context window: messages before split, limited to context_window
+    context_start = max(0, split_idx - context_window)
+    context_messages = all_messages[context_start:split_idx]
+
+    return context_messages, new_messages
+
+
+SUMMARY_PROMPT = """你是一个对话摘要生成器。请根据已有的会话摘要和最近的新消息，生成更新后的会话摘要。
+
+已有摘要：{existing_summary}
+
+最近新消息：
+{recent_messages}
+
+要求：
+- 用 1-3 句中文概括本对话的整体主题
+- 包含已达成的重要结论或决定
+- 包含用户当前关注的方向
+- 保持简洁，不超过 200 字
+- 如果是更新已有摘要，则增量式补充新内容
+
+只输出摘要文本，不要 Markdown，不要解释。"""
+
+
+def generate_or_update_summary(
+    db: Session,
+    session: ChatSession,
+    new_messages: list[ChatMessage],
+) -> str:
+    """Generate or incrementally update the session summary via LLM."""
+    existing_summary = session.summary or ""
+    recent_text = "\n".join(
+        f"[{m.role}] {(m.content or '')[:800]}" for m in new_messages
+    )
+    if not recent_text.strip():
+        return existing_summary or ""
+
+    prompt = SUMMARY_PROMPT.format(
+        existing_summary=existing_summary or "(新会话，无已有摘要)",
+        recent_messages=recent_text,
+    )
+
+    try:
+        client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
+        response = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=300,
+        )
+        new_summary = (response.choices[0].message.content or "").strip()
+    except Exception:
+        new_summary = existing_summary or ""
+
+    if new_summary and new_summary != existing_summary:
+        session.summary = new_summary
+
+    return new_summary or existing_summary or ""
+
+
 def _extract_json_text(raw: str) -> str:
     text = (raw or "").strip()
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
