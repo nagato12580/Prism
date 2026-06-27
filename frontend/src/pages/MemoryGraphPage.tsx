@@ -298,7 +298,8 @@ function buildEntityGraph(eg: MemoryEntityGraph | null, memories: MemoryView[]):
     }
   })
 
-  // 实体关联的记忆节点：挂在实体外侧 2 列网格
+  // 实体关联的记忆节点：挂在实体外侧 2 列网格。同一记忆被多实体引用时只渲染一次，挂在第一个引用它的实体上。
+  const seenMemoryIds = new Set<string>()
   const cols = 2
   const colGap = 146
   const rowGap = 48
@@ -315,7 +316,9 @@ function buildEntityGraph(eg: MemoryEntityGraph | null, memories: MemoryView[]):
     const linkedMemories = (entity.source_ids ?? [])
       .map((sid) => memoryById.get(sid))
       .filter((m): m is MemoryView => Boolean(m))
+      .filter((m) => !seenMemoryIds.has(m.id))
       .slice(0, maxPerEntity)
+    linkedMemories.forEach((item) => { seenMemoryIds.add(item.id) })
     linkedMemories.forEach((item, itemIndex) => {
       const row = Math.floor(itemIndex / cols)
       const col = itemIndex % cols
