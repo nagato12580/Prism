@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from ..agent.events import error_event
 from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult
+from ..agent.prompts import AGENT_SYSTEM_PROMPT
 from ..agent.runner import LangChainAgentRunner, create_chat_model
 from ..agent.tools import ToolContext, build_enabled_tools
 from ..config import settings
@@ -184,6 +185,8 @@ def build_agent_runner(
     topic_id: str | None = None,
     source_types: list[str] | None = None,
     clarify_depth: int = 0,
+    deep_search_enabled: bool = False,
+    deep_search_depth: str = "standard",
 ) -> LangChainAgentRunner:
     """构造 Agent Runner，注入带过滤的搜索闭包。
 
@@ -215,9 +218,18 @@ def build_agent_runner(
         stats_holder={},
         clarify_holder={},
     )
-    tools = build_enabled_tools(ctx)
+    tool_overrides = {"deep_knowledge_search": True} if deep_search_enabled else None
+    tools = build_enabled_tools(ctx, overrides=tool_overrides)
     model = create_chat_model(settings)
-    return LangChainAgentRunner(model=model, tools=tools, clarify_depth=clarify_depth)
+    system_prompt = AGENT_SYSTEM_PROMPT
+    if deep_search_enabled:
+        system_prompt = (
+            AGENT_SYSTEM_PROMPT
+            + "\n\n# 深度搜索已开启\n"
+            + f"本轮用户开启了深度搜索，最大深度为 `{deep_search_depth}`。"
+            + "当问题涉及个人知识库、知识治理层、CKP/PKU、证据完整性或跨资料综合时，优先调用 deep_knowledge_search。"
+        )
+    return LangChainAgentRunner(model=model, tools=tools, system_prompt=system_prompt, clarify_depth=clarify_depth)
 
 
 def answer_stream(
@@ -225,6 +237,8 @@ def answer_stream(
     history: list[dict] | None = None,
     topic_id: str | None = None,
     source_types: list[str] | None = None,
+    deep_search_enabled: bool = False,
+    deep_search_depth: str = "standard",
 ):
     history = history or []
     # P0-3: Count previous clarify rounds from history to limit depth.
@@ -234,15 +248,23 @@ def answer_stream(
         if msg.get("role") == "assistant" and msg.get("clarify")
     )
     logger.info(
-        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s clarify_depth=%s",
+        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s clarify_depth=%s deep_search_enabled=%s deep_search_depth=%s",
         quoted(query),
         len(history),
         topic_id,
         source_types,
         clarify_depth,
+        deep_search_enabled,
+        deep_search_depth,
     )
     try:
-        runner = build_agent_runner(topic_id=topic_id, source_types=source_types, clarify_depth=clarify_depth)
+        runner = build_agent_runner(
+            topic_id=topic_id,
+            source_types=source_types,
+            clarify_depth=clarify_depth,
+            deep_search_enabled=deep_search_enabled,
+            deep_search_depth=deep_search_depth,
+        )
         logger.info("[chat] runner_ready")
         yield from runner.stream(query, history)
         logger.info("[chat] stream_complete")

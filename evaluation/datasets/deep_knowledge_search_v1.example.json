@@ -1,0 +1,27 @@
+{
+  "name": "deep_knowledge_search_v1_example",
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "case_scope_first_001",
+      "question": "How does my Agentic RAG design avoid searching all chunks first?",
+      "depth": "standard",
+      "answerable": true,
+      "expected_ckp_ids": ["replace-with-ckp-id"],
+      "expected_pku_ids": ["replace-with-pku-id"],
+      "expected_source_ids": ["replace-with-source-id"],
+      "required_dimensions": ["scope", "grounding"]
+    },
+    {
+      "id": "case_conflict_001",
+      "question": "Are there conflicting notes about whether judge should search by itself?",
+      "depth": "deep",
+      "answerable": true,
+      "expected_ckp_ids": ["replace-with-conflict-ckp-id"],
+      "expected_pku_ids": ["replace-with-supporting-pku-id", "replace-with-conflicting-pku-id"],
+      "expected_source_ids": ["replace-with-source-id-a", "replace-with-source-id-b"],
+      "required_dimensions": ["conflict", "grounding"]
+    }
+  ]
+}
+

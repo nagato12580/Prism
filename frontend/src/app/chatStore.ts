@@ -27,6 +27,7 @@ export const SOURCE_TYPE_OPTIONS: { value: ResourceMediaType; label: string }[] 
 ]
 
 export type ToolRunStatus = 'running' | 'success' | 'error'
+export type DeepSearchDepth = 'quick' | 'standard' | 'deep'
 
 export interface ToolRun {
   id: string
@@ -71,6 +72,8 @@ interface ChatState {
   selectedTopicId: string | null
   selectedTopicName: string | null
   selectedSourceTypes: ResourceMediaType[]
+  deepSearchEnabled: boolean
+  deepSearchDepth: DeepSearchDepth
   // Session state
   currentSessionId: string | null
   sessions: ChatSessionOut[]
@@ -91,6 +94,8 @@ interface ChatState {
   toggleSourceType: (type: ResourceMediaType) => void
   setSelectedSourceTypes: (types: ResourceMediaType[]) => void
   clearSelectedSourceTypes: () => void
+  setDeepSearchEnabled: (enabled: boolean) => void
+  setDeepSearchDepth: (depth: DeepSearchDepth) => void
   // Session actions
   setCurrentSessionId: (id: string | null) => void
   setSessions: (sessions: ChatSessionOut[]) => void
@@ -118,6 +123,8 @@ export const useChatStore = create<ChatState>((set) => ({
   selectedTopicId: null,
   selectedTopicName: null,
   selectedSourceTypes: [],
+  deepSearchEnabled: false,
+  deepSearchDepth: 'standard',
   currentSessionId: null,
   sessions: [],
   sessionsLoading: false,
@@ -222,6 +229,8 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
   setSelectedSourceTypes: (types) => set({ selectedSourceTypes: types }),
   clearSelectedSourceTypes: () => set({ selectedSourceTypes: [] }),
+  setDeepSearchEnabled: (enabled) => set({ deepSearchEnabled: enabled }),
+  setDeepSearchDepth: (depth) => set({ deepSearchDepth: depth }),
 
   // Session actions
   setCurrentSessionId: (id) => set({ currentSessionId: id }),

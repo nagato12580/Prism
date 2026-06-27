@@ -153,6 +153,8 @@ export function ChatPage() {
   const selectedTopicId = useChatStore((s) => s.selectedTopicId)
   const selectedTopicName = useChatStore((s) => s.selectedTopicName)
   const selectedSourceTypes = useChatStore((s) => s.selectedSourceTypes)
+  const deepSearchEnabled = useChatStore((s) => s.deepSearchEnabled)
+  const deepSearchDepth = useChatStore((s) => s.deepSearchDepth)
   const currentSessionId = useChatStore((s) => s.currentSessionId)
   const sessions = useChatStore((s) => s.sessions)
   const sessionsLoading = useChatStore((s) => s.sessionsLoading)
@@ -169,6 +171,8 @@ export function ChatPage() {
   const clearSelectedTopic = useChatStore((s) => s.clearSelectedTopic)
   const toggleSourceType = useChatStore((s) => s.toggleSourceType)
   const clearSelectedSourceTypes = useChatStore((s) => s.clearSelectedSourceTypes)
+  const setDeepSearchEnabled = useChatStore((s) => s.setDeepSearchEnabled)
+  const setDeepSearchDepth = useChatStore((s) => s.setDeepSearchDepth)
   const setCurrentSessionId = useChatStore((s) => s.setCurrentSessionId)
   const setSessions = useChatStore((s) => s.setSessions)
   const prependSession = useChatStore((s) => s.prependSession)
@@ -362,6 +366,8 @@ export function ChatPage() {
           history,
           topic_id: selectedTopicId || undefined,
           source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
+          deep_search_enabled: deepSearchEnabled,
+          deep_search_depth: deepSearchDepth,
         }),
       })
 
@@ -819,6 +825,46 @@ export function ChatPage() {
               </div>
 
               {/* 右侧间距 + 清除按钮 */}
+              <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
+                  aria-pressed={deepSearchEnabled}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1 px-2 text-[11px] font-medium transition',
+                    deepSearchEnabled
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-transparent text-slate-500 hover:text-emerald-700',
+                  )}
+                >
+                  <Search size={12} />
+                  深度搜索
+                </button>
+                {deepSearchEnabled && (
+                  <div className="flex border-l border-slate-200">
+                    {([
+                      ['quick', '快速'],
+                      ['standard', '标准'],
+                      ['deep', '深入'],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setDeepSearchDepth(value)}
+                        className={cn(
+                          'h-7 px-2 text-[11px] font-medium transition',
+                          deepSearchDepth === value
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-slate-500 hover:bg-white hover:text-emerald-700',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="flex-1" />
               {(selectedTopicId || selectedSourceTypes.length > 0) && (
                 <button
