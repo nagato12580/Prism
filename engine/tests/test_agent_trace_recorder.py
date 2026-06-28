@@ -1,4 +1,9 @@
 import os
+import subprocess
+import sys
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
@@ -114,3 +119,130 @@ def test_agent_trace_recorder_disables_after_session_factory_failure():
     assert recorder.start() is None
     assert recorder.record_step(step_type="tool_result") is None
     recorder.finish("failed")
+
+
+def test_agent_trace_recorder_coerces_non_json_safe_values_and_invalid_score(session_factory):
+    marker = object()
+    payload_uuid = uuid.uuid4()
+    payload_date = date(2026, 6, 29)
+    payload_datetime = datetime(2026, 6, 29, 12, 34, 56)
+
+    recorder = AgentTraceRecorder(
+        session_id="session-2",
+        user_message_id="message-2",
+        user_query="Can tracing survive odd payloads?",
+        model="test-model",
+        session_factory=session_factory,
+    )
+
+    trace_id = recorder.start()
+    step_id = recorder.record_step(
+        step_type="tool_result",
+        input_json={
+            "when": payload_datetime,
+            "price": Decimal("12.5"),
+            "uuid": payload_uuid,
+            "tags": {"alpha", "beta"},
+            "blob": b"hello",
+            "obj": marker,
+        },
+        output_json=("tuple", payload_date),
+        evidence_items=[
+            {
+                "evidence_id": "ev-2",
+                "score": "not-a-float",
+                "retrieval_path": ("root", payload_uuid),
+                "metadata": {payload_uuid: {b"bytes", Decimal("2.5")}},
+            }
+        ],
+    )
+
+    db = session_factory()
+    try:
+        step = db.query(AgentTraceStep).filter(AgentTraceStep.id == step_id).one()
+        evidence = db.query(AgentTraceEvidence).filter(AgentTraceEvidence.trace_step_id == step_id).one()
+
+        assert trace_id is not None
+        assert step.input_json["when"] == "2026-06-29T12:34:56"
+        assert step.input_json["price"] == 12.5
+        assert step.input_json["uuid"] == str(payload_uuid)
+        assert sorted(step.input_json["tags"]) == ["alpha", "beta"]
+        assert step.input_json["blob"] == "hello"
+        assert step.input_json["obj"] == repr(marker)
+        assert step.output_json == ["tuple", "2026-06-29"]
+        assert evidence.score is None
+        assert evidence.retrieval_path_json == ["root", str(payload_uuid)]
+        assert sorted(evidence.metadata_json[str(payload_uuid)], key=str) == [2.5, "bytes"]
+    finally:
+        db.close()
+
+
+def test_agent_trace_recorder_close_failure_does_not_raise(session_factory):
+    class CloseFailingSession:
+        def __init__(self, session):
+            self._session = session
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        def close(self):
+            self._session.close()
+            raise RuntimeError("close failed")
+
+    def close_failing_session_factory():
+        return CloseFailingSession(session_factory())
+
+    recorder = AgentTraceRecorder(
+        session_id="session-3",
+        user_message_id="message-3",
+        user_query="Will close break tracing?",
+        model="test-model",
+        session_factory=close_failing_session_factory,
+    )
+
+    assert recorder.start() is not None
+    assert recorder.record_step(step_type="tool_result") is None
+    recorder.finish("failed")
+
+
+def test_agent_trace_recorder_commit_failure_disables_without_raising():
+    class CommitFailingSession:
+        def add(self, _value):
+            pass
+
+        def commit(self):
+            raise RuntimeError("commit failed")
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    recorder = AgentTraceRecorder(
+        session_id=None,
+        user_message_id=None,
+        user_query="Will commit failure raise?",
+        model="test-model",
+        session_factory=CommitFailingSession,
+    )
+
+    assert recorder.start() is None
+    assert recorder.record_step(step_type="tool_result") is None
+    recorder.finish("failed")
+
+
+def test_agent_trace_module_import_does_not_create_default_engine_when_database_url_missing():
+    env = os.environ.copy()
+    env["DATABASE_URL"] = ""
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import engine.app.agent.trace"],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
