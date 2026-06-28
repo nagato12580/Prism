@@ -1,37 +1,59 @@
 # prism/engine/app/milvus_client.py
-"""Milvus 向量库客户端封装。"""
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
+"""Milvus 向量库客户端封装 — 使用 MilvusClient API（PyMilvus 3.x）。"""
+from pymilvus import MilvusClient, DataType
+
 from .config import settings
 
 COLLECTION_NAME = "prism_knowledge"
 
+_client: MilvusClient | None = None
 
-def connect():
-    connections.connect(alias="default", host=settings.MILVUS_HOST, port=settings.MILVUS_PORT)
+# MilvusClient 兼容的 schema 格式（list of dict）
+_SCHEMA_FIELDS = [
+    {"name": "id", "dtype": DataType.VARCHAR.value, "is_primary": True, "max_length": 64},
+    {"name": "embedding", "dtype": DataType.FLOAT_VECTOR.value, "dim": settings.EMBEDDING_DIM},
+    {"name": "chunk_id", "dtype": DataType.VARCHAR.value, "max_length": 64},
+    {"name": "item_id", "dtype": DataType.VARCHAR.value, "max_length": 64},
+]
+
+_INDEX_PARAMS = {
+    "field_name": "embedding",
+    "index_type": "IVF_FLAT",
+    "metric_type": "COSINE",
+    "params": {"nlist": 128},
+}
+
+
+def _get_client() -> MilvusClient:
+    """获取 MilvusClient 单例。"""
+    global _client
+    if _client is None:
+        _client = MilvusClient(
+            uri=f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}",
+        )
+    return _client
+
+
+def connect() -> MilvusClient:
+    """Initialize and return the shared Milvus client."""
+    return _get_client()
 
 
 def ensure_collection():
     """确保集合存在，不存在则创建。"""
-    connect()
-    if utility.has_collection(COLLECTION_NAME):
-        return Collection(COLLECTION_NAME)
-
-    fields = [
-        FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=64),
-        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=settings.EMBEDDING_DIM),
-        FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=64),
-        FieldSchema(name="item_id", dtype=DataType.VARCHAR, max_length=64),
-    ]
-    schema = CollectionSchema(fields, description="Prism 知识块向量")
-    collection = Collection(COLLECTION_NAME, schema)
-
-    # 创建索引
-    collection.create_index(
-        field_name="embedding",
-        index_params={"index_type": "IVF_FLAT", "metric_type": "COSINE",
-                      "params": {"nlist": 128}},
+    client = _get_client()
+    if client.has_collection(COLLECTION_NAME):
+        return
+    client.create_collection(
+        collection_name=COLLECTION_NAME,
+        schema=_SCHEMA_FIELDS,
+        index_params=_INDEX_PARAMS,
     )
-    return collection
+
+
+def _load_collection():
+    ensure_collection()
+    _get_client().load_collection(collection_name=COLLECTION_NAME)
 
 
 def insert_vectors(chunk_id: str, item_id: str, embedding: list[float]):
@@ -46,18 +68,19 @@ def insert_vectors_batch(rows: list[dict]):
     if not rows:
         return
 
-    coll = ensure_collection()
-    coll.load()  # 确保 collection 已加载
-    chunk_ids = [row["chunk_id"] for row in rows]
-    embeddings = [row["embedding"] for row in rows]
-    item_ids = [row["item_id"] for row in rows]
+    client = _get_client()
+    ensure_collection()
 
-    coll.insert([
-        chunk_ids,      # id (VARCHAR)
-        embeddings,     # embedding (FLOAT_VECTOR)
-        chunk_ids,      # chunk_id (VARCHAR)
-        item_ids,       # item_id (VARCHAR)
-    ])
+    data = []
+    for row in rows:
+        data.append({
+            "id": row["chunk_id"],
+            "chunk_id": row["chunk_id"],
+            "item_id": row["item_id"],
+            "embedding": row["embedding"],
+        })
+
+    client.insert(collection_name=COLLECTION_NAME, data=data)
 
 
 def delete_vectors_by_item(item_id: str):
@@ -65,32 +88,35 @@ def delete_vectors_by_item(item_id: str):
     if not item_id:
         return
 
-    coll = ensure_collection()
-    coll.load()  # collection 必须加载到内存才能 delete
+    client = _get_client()
+    _load_collection()
     escaped_item_id = item_id.replace("\\", "\\\\").replace('"', '\\"')
-    coll.delete(expr=f'item_id == "{escaped_item_id}"')
-    coll.flush()
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        filter=f'item_id == "{escaped_item_id}"',
+    )
 
 
 def search_vectors(query_embedding: list[float], top_k: int = 10) -> list[dict]:
-    """向量检索，返回 [{chunk_id, item_id, score}]。
+    """向量检索，返回 [{chunk_id, item_id, score}]。"""
+    client = _get_client()
+    _load_collection()
 
-    集合常驻内存（load 在已加载时是空操作），不再每次 release。
-    """
-    coll = ensure_collection()
-    coll.load()  # 已加载时为 no-op
-    results = coll.search(
+    results = client.search(
+        collection_name=COLLECTION_NAME,
         data=[query_embedding],
         anns_field="embedding",
-        param={"metric_type": "COSINE", "params": {"nprobe": 32}},
+        search_params={"metric_type": "COSINE", "params": {"nprobe": 32}},
         limit=top_k,
         output_fields=["chunk_id", "item_id"],
     )
+
     hits = []
     for hit in results[0]:
+        entity = hit.get("entity", hit)
         hits.append({
-            "chunk_id": hit.entity.get("chunk_id"),
-            "item_id": hit.entity.get("item_id"),
-            "score": hit.score,
+            "chunk_id": entity.get("chunk_id"),
+            "item_id": entity.get("item_id"),
+            "score": hit.get("distance", hit.get("score", 0)),
         })
     return hits

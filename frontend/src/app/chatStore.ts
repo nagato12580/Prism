@@ -53,6 +53,7 @@ export interface ThinkingStep {
   label: string
   detail?: string
   latencyMs?: number
+  startedAtMs?: number
   agent?: string
   iteration?: number
   status?: ToolRunStatus
@@ -157,6 +158,7 @@ function normalizeThinkingSteps(value: unknown): ThinkingStep[] | undefined {
       label: typeof step.label === 'string' ? step.label : 'step',
       detail: typeof step.detail === 'string' ? step.detail : undefined,
       latencyMs: typeof step.latencyMs === 'number' ? step.latencyMs : undefined,
+      startedAtMs: typeof step.startedAtMs === 'number' ? step.startedAtMs : undefined,
       agent: typeof step.agent === 'string' ? step.agent : undefined,
       iteration: typeof step.iteration === 'number' ? step.iteration : undefined,
       status: normalizeToolRunStatus(step.status),
@@ -220,6 +222,15 @@ function replaceMessage(messages: Message[], messageId: string | undefined, upda
   return next
 }
 
+function finishRunningStep(step: ThinkingStep, now: number, status: ToolRunStatus = 'success') {
+  if (step.status !== 'running') return step
+  return {
+    ...step,
+    latencyMs: step.latencyMs ?? (step.startedAtMs !== undefined ? now - step.startedAtMs : undefined),
+    status,
+  }
+}
+
 function updateMessagesForSession(
   state: ChatState,
   sessionId: string | undefined,
@@ -274,10 +285,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) =>
       updateMessagesForSession(s, sessionId, (messages) =>
         replaceMessage(messages, messageId, (last) => {
-          const previousSteps = (last.thinkingSteps ?? []).map((step) =>
-            step.status === 'running' ? { ...step, status: 'success' as ToolRunStatus } : step,
-          )
-          const step: ThinkingStep = { label, status: 'running', tool: 'agent_status' }
+          const now = Date.now()
+          const previousSteps = (last.thinkingSteps ?? []).map((step) => finishRunningStep(step, now))
+          const step: ThinkingStep = { label, status: 'running', tool: 'agent_status', startedAtMs: now }
           return {
             ...last,
             agentStatus: label,
@@ -290,14 +300,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) =>
       updateMessagesForSession(s, sessionId, (messages) =>
         replaceMessage(messages, messageId, (last) => {
-          const previousSteps = (last.thinkingSteps ?? []).map((step) =>
-            step.status === 'running' ? { ...step, status: 'success' as ToolRunStatus } : step,
-          )
+          const now = Date.now()
+          const previousSteps = (last.thinkingSteps ?? []).map((step) => finishRunningStep(step, now))
           const step: ThinkingStep = {
             label: _toolLabel(run.tool),
             detail: run.query,
             status: 'running',
             tool: run.tool,
+            startedAtMs: now,
           }
           return {
             ...last,
@@ -326,6 +336,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const toolRuns = [...last.toolRuns]
           const updated = { ...toolRuns[runIndex], ...data }
           toolRuns[runIndex] = updated
+          const now = Date.now()
           const traceSteps = Array.isArray(data.traceSteps) ? data.traceSteps : []
           const stepLabel = _toolLabel(tool)
           const stepStatus = updated.status || 'success'
@@ -337,7 +348,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               previousSteps[index] = {
                 ...step,
                 detail: updated.query || updated.summary,
-                latencyMs: updated.latencyMs,
+                latencyMs: updated.latencyMs ?? (step.startedAtMs !== undefined ? now - step.startedAtMs : undefined),
                 status: stepStatus,
                 tool,
               }
@@ -376,13 +387,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   finishLast: (sessionId, messageId) =>
     set((s) =>
       updateMessagesForSession(s, sessionId, (messages) =>
-        replaceMessage(messages, messageId, (last) => ({
-          ...last,
-          streaming: false,
-          thinkingSteps: (last.thinkingSteps ?? []).map((step) =>
-            step.status === 'running' ? { ...step, status: 'success' as ToolRunStatus } : step,
-          ),
-        })),
+        replaceMessage(messages, messageId, (last) => {
+          const now = Date.now()
+          return {
+            ...last,
+            streaming: false,
+            thinkingSteps: (last.thinkingSteps ?? []).map((step) => finishRunningStep(step, now)),
+          }
+        }),
       ),
     ),
   replaceMessageId: (sessionId, fromId, toId) =>

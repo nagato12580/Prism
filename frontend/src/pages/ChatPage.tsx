@@ -1177,10 +1177,25 @@ function formatLatency(ms?: number) {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
+function stepLatencyMs(step: ThinkingStep, nowMs: number) {
+  if (step.latencyMs !== undefined) return step.latencyMs
+  if (step.status === 'running' && step.startedAtMs !== undefined) return nowMs - step.startedAtMs
+  return undefined
+}
+
 function ThinkingPanel({ msg }: { msg: Message }) {
   const [expanded, setExpanded] = useState(false)
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const steps = msg.thinkingSteps
   const runs = msg.toolRuns
+  const hasRunningTimedStep = (steps ?? []).some((step) => step.status === 'running' && step.startedAtMs !== undefined)
+
+  useEffect(() => {
+    if (!expanded || !hasRunningTimedStep) return undefined
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [expanded, hasRunningTimedStep])
+
   if ((!steps || steps.length === 0) && (!runs || runs.length === 0)) return null
 
   return (
@@ -1211,9 +1226,9 @@ function ThinkingPanel({ msg }: { msg: Message }) {
                       {step.iteration ? `#${step.iteration} ` : ''}{step.agent ? `${step.agent} · ` : ''}{step.detail}
                     </span>
                   )}
-                  {step.latencyMs !== undefined && (
+                  {stepLatencyMs(step, nowMs) !== undefined && (
                     <span className="shrink-0 text-[10px] text-slate-400">
-                      {formatLatency(step.latencyMs)}
+                      {formatLatency(stepLatencyMs(step, nowMs))}
                     </span>
                   )}
                 </div>
