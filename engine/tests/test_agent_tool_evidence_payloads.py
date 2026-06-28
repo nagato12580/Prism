@@ -73,6 +73,40 @@ def test_payload_json_with_evidence_items_is_serializable():
     assert serialized["evidence_items"][0]["chunk_id"] == "chunk-1"
 
 
+def test_memory_shaped_sources_normalize_to_evidence_items():
+    payload = {
+        "sources": [
+            {
+                "ref_type": "memory",
+                "ref_id": "mem-1",
+                "title": "Preference",
+                "content": "User prefers source-backed answers.",
+                "score": 0.91,
+            }
+        ],
+        "memories": [],
+    }
+
+    payload["evidence_items"] = normalize_evidence_items("memory_search", payload)
+
+    assert payload["evidence_items"] == [
+        {
+            "evidence_id": "memory:mem-1",
+            "source_kind": "memory",
+            "source_id": "mem-1",
+            "chunk_id": "",
+            "parent_chunk_id": "",
+            "item_id": "",
+            "display_title": "Preference",
+            "excerpt": "User prefers source-backed answers.",
+            "hit_reason": "matched memory_search result",
+            "score": 0.91,
+            "retrieval_path": ["memory_search"],
+            "metadata": {},
+        }
+    ]
+
+
 def test_raw_chunk_direct_lookup_payload_includes_evidence_items(monkeypatch):
     chunk = type(
         "Chunk",

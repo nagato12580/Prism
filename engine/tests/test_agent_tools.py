@@ -177,6 +177,10 @@ def test_memory_search_tool_returns_confirmed_memories(monkeypatch):
 
     assert payload["status"] == "success"
     assert payload["memories"][0]["title"] == "偏好轻量方案"
+    assert payload["evidence_items"][0]["evidence_id"].startswith("memory:")
+    assert payload["evidence_items"][0]["source_kind"] == "memory"
+    assert payload["evidence_items"][0]["source_id"] == payload["memories"][0]["ref_id"]
+    assert payload["evidence_items"][0]["excerpt"] == payload["memories"][0]["content"]
     assert ctx.stats_holder["memory_search"]["hit_count"] == 1
 
 

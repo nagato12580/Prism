@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from backend.app.models import AgentTrace, AgentTraceEvidence, AgentTraceStep
+from backend.app.models import AgentTrace, AgentTraceEvidence, AgentTraceStep, ChatMessage
 
 
 def bind_trace_message(
@@ -19,6 +19,16 @@ def bind_trace_message(
         raise LookupError("trace not found")
     if trace.session_id and trace.session_id != session_id:
         raise ValueError("trace session mismatch")
+    if trace.assistant_message_id and trace.assistant_message_id != assistant_message_id:
+        raise ValueError("trace already bound to a different assistant message")
+
+    message = db.query(ChatMessage).filter(ChatMessage.id == assistant_message_id).first()
+    if message is None:
+        raise ValueError("assistant message not found")
+    if message.session_id != session_id:
+        raise ValueError("assistant message session mismatch")
+    if message.role != "assistant":
+        raise ValueError("assistant message must have assistant role")
 
     trace.session_id = session_id
     trace.assistant_message_id = assistant_message_id
