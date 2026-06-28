@@ -215,6 +215,7 @@ def project_entity_graph(db, graph, user_id: str = "default-user") -> GraphProje
             }
         )
         result.alias_count += 1
+        result.relation_count += 1
 
     seen_source_ids = set()
     mentions = db.query(EntityMention).filter(EntityMention.entity_id.in_(active_entity_ids)).all()

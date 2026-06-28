@@ -16,7 +16,9 @@ from backend.app.models import (
     PKURelation,
     PersonalKnowledgeUnit,
 )
+from backend.app.services.graph_client import ALLOWED_RELATIONSHIP_TYPES
 from backend.app.services.graph_projection import project_ckp_graph, project_entity_graph
+from backend.app.services.graph_projection import ENTITY_RELATION_TYPES
 
 
 class FakeGraph:
@@ -193,6 +195,17 @@ def test_project_ckp_graph_projects_hierarchy_support_and_source():
         ) in graph.relations
     finally:
         db.close()
+
+
+def test_project_entity_graph_relationship_types_match_graph_client_allowlist():
+    projected_relationship_types = {
+        *ENTITY_RELATION_TYPES.values(),
+        "RELATED_TO",
+        "MENTIONED_IN",
+        "ALIAS_OF",
+    }
+
+    assert projected_relationship_types <= ALLOWED_RELATIONSHIP_TYPES
 
 
 def test_project_ckp_graph_projects_ckp_and_pku_related_to_relations():
@@ -467,7 +480,7 @@ def test_project_entity_graph_projects_entities_aliases_mentions_and_relations()
         assert result.entity_count == 2
         assert result.alias_count == 1
         assert result.source_count == 1
-        assert result.relation_count == 2
+        assert result.relation_count == 3
         assert {
             (
                 node["id"],
@@ -584,6 +597,39 @@ def test_project_entity_graph_skips_deprecated_entities_and_relations():
         db.close()
 
 
+def test_project_entity_graph_skips_literal_only_and_dangling_relations():
+    db = _db_session()
+    try:
+        active = _entity("entity-active", "Active Person")
+        literal_relation = EntityRelation(
+            id="relation-literal",
+            subject_entity_id=active.id,
+            predicate="has_email",
+            object_literal="active@example.com",
+            source_kind="manual",
+            source_id="source-1",
+        )
+        dangling_relation = EntityRelation(
+            id="relation-dangling",
+            subject_entity_id=active.id,
+            predicate="authored",
+            object_entity_id="missing-entity",
+            source_kind="manual",
+            source_id="source-2",
+        )
+        db.add_all([active, literal_relation, dangling_relation])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph)
+
+        assert result.entity_count == 1
+        assert result.relation_count == 0
+        assert graph.relations == []
+    finally:
+        db.close()
+
+
 def test_project_entity_graph_maps_unknown_predicate_to_related_to():
     db = _db_session()
     try:
@@ -659,5 +705,48 @@ def test_project_entity_graph_counts_duplicate_mention_sources_once():
         assert result.source_count == 1
         assert len(graph.sources) == 1
         assert sum(1 for relation in graph.relations if relation[2] == "MENTIONED_IN") == 2
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_does_not_use_wrong_user_item_title_for_mention_source():
+    db = _db_session()
+    try:
+        wrong_user_item = KnowledgeItem(
+            id="item-wrong-user",
+            user_id="other-user",
+            title="Private Other User Title",
+            content="paper text",
+        )
+        chunk = KnowledgeChunk(
+            id="chunk-1",
+            item_id=wrong_user_item.id,
+            chunk_text="OpenViewer chunk",
+        )
+        person = _entity("person-1", "Yanchao Tan")
+        mention = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id=chunk.id,
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        db.add_all([wrong_user_item, chunk, person, mention])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph, user_id="default-user")
+
+        assert result.source_count == 1
+        assert graph.sources == [
+            {
+                "id": "document_chunk:chunk-1",
+                "source_kind": "document_chunk",
+                "source_id": "chunk-1",
+                "item_id": "item-wrong-user",
+                "title": "chunk-1",
+            }
+        ]
     finally:
         db.close()
