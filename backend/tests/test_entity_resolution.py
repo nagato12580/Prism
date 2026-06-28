@@ -10,9 +10,10 @@ def test_normalize_entity_key_compacts_latin_names():
 
 
 def test_alias_keys_for_latin_person_generates_name_orders():
-    aliases = alias_keys_for_surface("Yanchao Tan", entity_type="person")
-    assert "yanchaotan" in aliases
-    assert "tanyanchao" in aliases
+    assert alias_keys_for_surface("Yanchao Tan", entity_type="person") == [
+        "yanchaotan",
+        "tanyanchao",
+    ]
 
 
 def test_alias_keys_for_chinese_surface_keeps_original_key():
@@ -22,3 +23,11 @@ def test_alias_keys_for_chinese_surface_keeps_original_key():
 
 def test_alias_keys_preserve_order_without_duplicates():
     assert alias_keys_for_surface("Tan Tan", entity_type="person") == ["tantan"]
+
+
+def test_alias_keys_for_non_person_two_word_surface_do_not_swap():
+    assert alias_keys_for_surface("Open Viewer", entity_type="paper") == ["openviewer"]
+
+
+def test_alias_keys_for_punctuation_separated_person_do_not_swap():
+    assert alias_keys_for_surface("john@doe", entity_type="person") == ["johndoe"]
