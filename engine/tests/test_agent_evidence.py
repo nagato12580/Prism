@@ -1,4 +1,5 @@
 import os
+import json
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
@@ -65,3 +66,60 @@ def test_normalize_material_raw_evidence():
 
     assert items[0]["evidence_id"] == "document_chunk:chunk-2"
     assert items[0]["excerpt"] == "material text"
+
+
+def test_normalize_preserves_explicit_zero_score():
+    payload = {
+        "sources": [
+            {
+                "source_kind": "document_chunk",
+                "source_id": "chunk-zero",
+                "chunk_id": "chunk-zero",
+                "text": "zero score text",
+                "score": 0,
+                "raw_score": 0.72,
+            }
+        ]
+    }
+
+    items = normalize_evidence_items("raw_document_search", payload)
+
+    assert items[0]["score"] == 0.0
+
+
+def test_normalize_skips_source_without_excerpt():
+    payload = {
+        "sources": [
+            {
+                "source_kind": "document_chunk",
+                "source_id": "chunk-id-only",
+                "chunk_id": "chunk-id-only",
+            }
+        ]
+    }
+
+    assert normalize_evidence_items("raw_document_search", payload) == []
+
+
+def test_normalize_metadata_is_json_serializable():
+    class Unserializable:
+        pass
+
+    payload = {
+        "sources": [
+            {
+                "source_kind": "document_chunk",
+                "source_id": "chunk-meta",
+                "chunk_id": "chunk-meta",
+                "text": "metadata text",
+                "chunk_index": Unserializable(),
+                "display_id": Unserializable(),
+            }
+        ]
+    }
+
+    items = normalize_evidence_items("raw_document_search", payload)
+
+    json.dumps(items)
+    assert isinstance(items[0]["metadata"]["chunk_index"], str)
+    assert isinstance(items[0]["metadata"]["display_id"], str)

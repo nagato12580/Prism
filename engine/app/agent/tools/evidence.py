@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -58,8 +59,10 @@ def _source_to_evidence(tool_name: str, source: dict[str, Any]) -> dict[str, Any
         or source.get("content")
         or ""
     )
+    if not excerpt:
+        return None
     metadata = {
-        key: value
+        key: _json_safe_value(value)
         for key, value in {
             "chunk_type": source.get("chunk_type"),
             "chunk_index": source.get("chunk_index"),
@@ -78,7 +81,7 @@ def _source_to_evidence(tool_name: str, source: dict[str, Any]) -> dict[str, Any
         "display_title": _string_or_empty(source.get("display_title") or source.get("doc_name") or source.get("title")),
         "excerpt": excerpt,
         "hit_reason": _string_or_empty(source.get("hit_reason")) or f"matched {tool_name} result",
-        "score": _number_or_none(source.get("score") or source.get("raw_score")),
+        "score": _number_or_none(_first_present(source, "score", "raw_score")),
         "retrieval_path": [tool_name],
         "metadata": metadata,
     }
@@ -93,6 +96,23 @@ def _number_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _first_present(source: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in source:
+            return source[key]
+    return None
+
+
+def _json_safe_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return value
 
 
 def _bounded_excerpt(value: Any) -> str:
