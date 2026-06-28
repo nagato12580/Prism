@@ -212,10 +212,17 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
 
 
 def test_agent_system_prompt_constrains_evidence_identifier_usage():
-    assert "evidence_items" in AGENT_SYSTEM_PROMPT
-    assert "evidence_id" in AGENT_SYSTEM_PROMPT
-    assert "chunk_id" in AGENT_SYSTEM_PROMPT
-    assert "source_id" in AGENT_SYSTEM_PROMPT
+    policy_phrases = [
+        "只能使用本轮工具 JSON 的 `evidence_items` 中真实出现过的 id",
+        "本轮 `evidence_items` 未包含该 id",
+        "当前工具结果未返回该 id、无法验证",
+        "不得编造、补全或猜测 id",
+        "优先依据其中的 `excerpt`、`chunk_id` 和 `source_id`",
+        "而不是只根据 summary 做概括性猜测",
+    ]
+
+    for phrase in policy_phrases:
+        assert phrase in AGENT_SYSTEM_PROMPT
 
 
 class FakeNoToolModel:
