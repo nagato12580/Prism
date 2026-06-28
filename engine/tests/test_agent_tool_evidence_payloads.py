@@ -143,6 +143,33 @@ def test_raw_chunk_direct_lookup_ignores_generic_source_labels(monkeypatch):
     )
 
 
+def test_raw_chunk_direct_lookup_rejects_explicit_date_like_labels(monkeypatch):
+    session_attempts = []
+
+    def fail_session():
+        session_attempts.append("opened")
+        raise AssertionError("date-like source labels must not query the database")
+
+    monkeypatch.setattr(knowledge_governance, "_new_db_session", fail_session)
+
+    assert knowledge_governance._raw_chunk_payload_from_query("source_id: 202401011234") is None
+    assert knowledge_governance._raw_chunk_payload_from_query("chunk_id: 202406290001") is None
+    assert session_attempts == []
+
+
+def test_raw_chunk_direct_lookup_rejects_explicit_short_label(monkeypatch):
+    session_attempts = []
+
+    def fail_session():
+        session_attempts.append("opened")
+        raise AssertionError("short chunk labels must not query the database")
+
+    monkeypatch.setattr(knowledge_governance, "_new_db_session", fail_session)
+
+    assert knowledge_governance._raw_chunk_payload_from_query("chunk_id: abcdef12") is None
+    assert session_attempts == []
+
+
 def test_raw_chunk_direct_lookup_rejects_ambiguous_prefix(monkeypatch):
     chunks = [
         type(
@@ -260,3 +287,54 @@ def test_raw_document_search_uses_direct_chunk_lookup(monkeypatch):
 
     assert payload["evidence_items"][0]["chunk_id"] == "abcdef12"
     assert ctx.stats_holder["raw_document_search"]["direct_lookup"] is True
+
+
+def test_governed_knowledge_tool_payloads_include_serializable_evidence_items(monkeypatch):
+    def fake_query(query, limit):
+        source = {
+            "source_kind": "document_chunk",
+            "source_id": "chunk-1",
+            "chunk_id": "chunk-1",
+            "item_id": "item-1",
+            "display_title": "Doc",
+            "text": "source text",
+            "score": 0.9,
+        }
+        bundle = {
+            "title": "Topic",
+            "summary": "topic summary",
+            "linked_pkus": [
+                {
+                    "statement": "source statement",
+                    "unit_type": "claim",
+                    "source_kind": "document_chunk",
+                    "source_id": "chunk-1",
+                }
+            ],
+            "raw_sources": [source],
+        }
+        return ["term"], [bundle], []
+
+    monkeypatch.setattr(knowledge_governance, "_query", fake_query)
+
+    tool_invocations = [
+        (
+            knowledge_governance._build_knowledge_topic_search(ToolContext()),
+            {"query": "topic", "limit": 8},
+        ),
+        (
+            knowledge_governance._build_knowledge_evidence_search(ToolContext()),
+            {"query": "evidence", "limit": 12},
+        ),
+        (
+            knowledge_governance._build_knowledge_material_search(ToolContext()),
+            {"query": "material", "intent": "summary", "limit": 8},
+        ),
+    ]
+
+    for tool, args in tool_invocations:
+        payload = json.loads(tool.invoke(args))
+
+        assert "evidence_items" in payload
+        assert payload["evidence_items"]
+        json.dumps(payload["evidence_items"], ensure_ascii=False)

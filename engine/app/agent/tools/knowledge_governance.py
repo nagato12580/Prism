@@ -21,6 +21,8 @@ _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=
 _Session = sessionmaker(bind=_engine)
 _UUID_PATTERN = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 _SOURCE_ID_LABEL_PATTERN = re.compile(r"\b(?:chunk_id|source_id)\b\s*[:=]\s*([0-9a-fA-F-]{12,36})\b")
+_HEX_ALPHA_PATTERN = re.compile(r"[a-fA-F]")
+_UUID_HYPHEN_POSITIONS = {8, 13, 18, 23}
 
 
 class KnowledgeTopicSearchInput(BaseModel):
@@ -93,10 +95,28 @@ def _new_db_session():
     return _Session()
 
 
+def _is_valid_direct_chunk_token(token: str) -> bool:
+    if _UUID_PATTERN.fullmatch(token):
+        return True
+    if not (12 <= len(token) < 36):
+        return False
+    for index, char in enumerate(token):
+        if index in _UUID_HYPHEN_POSITIONS:
+            if char != "-":
+                return False
+        elif not char.isdigit() and char.lower() not in {"a", "b", "c", "d", "e", "f"}:
+            return False
+    if token.endswith("-"):
+        return False
+    return bool(_HEX_ALPHA_PATTERN.search(token))
+
+
 def _extract_chunk_id_token(query: str) -> str | None:
     prefix_match = _SOURCE_ID_LABEL_PATTERN.search(query or "")
     if prefix_match:
-        return prefix_match.group(1)
+        token = prefix_match.group(1)
+        if _is_valid_direct_chunk_token(token):
+            return token
     return None
 
 
