@@ -3,6 +3,10 @@ from dataclasses import dataclass
 from backend.app.models import (
     CanonicalKnowledgePoint,
     CanonicalRelation,
+    EntityAlias,
+    EntityMention,
+    EntityRelation,
+    KnowledgeEntity,
     KnowledgeChunk,
     KnowledgeItem,
     PKUCanonicalLink,
@@ -15,12 +19,21 @@ from backend.app.models import (
 class GraphProjectionResult:
     ckp_count: int = 0
     pku_count: int = 0
+    entity_count: int = 0
+    alias_count: int = 0
     source_count: int = 0
     relation_count: int = 0
 
 
 PARENT_TARGET_RELATIONS = {"parent", "part_of", "subtopic_of"}
 PARENT_SOURCE_RELATIONS = {"child", "has_child", "includes", "hierarchy"}
+ENTITY_RELATION_TYPES = {
+    "authored": "AUTHORED",
+    "affiliated_with": "AFFILIATED_WITH",
+    "educated_at": "EDUCATED_AT",
+    "has_email": "HAS_EMAIL",
+    "co_author": "CO_AUTHOR",
+}
 
 
 def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjectionResult:
@@ -165,6 +178,98 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
     return result
 
 
+def project_entity_graph(db, graph, user_id: str = "default-user") -> GraphProjectionResult:
+    result = GraphProjectionResult()
+
+    entities = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.user_id == user_id,
+            KnowledgeEntity.status != "deprecated",
+        )
+        .all()
+    )
+    active_entity_ids = {entity.id for entity in entities}
+    for entity in entities:
+        graph.upsert_entity(
+            {
+                "id": entity.id,
+                "user_id": entity.user_id,
+                "entity_type": entity.entity_type,
+                "canonical_name": entity.canonical_name,
+                "normalized_key": entity.normalized_key,
+                "status": entity.status,
+                "confidence": entity.confidence,
+            }
+        )
+        result.entity_count += 1
+
+    aliases = db.query(EntityAlias).filter(EntityAlias.entity_id.in_(active_entity_ids)).all()
+    for alias in aliases:
+        graph.upsert_alias(
+            {
+                "id": alias.id,
+                "key": alias.normalized_key,
+                "surface_text": alias.alias,
+                "entity_id": alias.entity_id,
+            }
+        )
+        result.alias_count += 1
+
+    seen_source_ids = set()
+    mentions = db.query(EntityMention).filter(EntityMention.entity_id.in_(active_entity_ids)).all()
+    for mention in mentions:
+        source_node = _source_node_for_mention(db, mention, user_id)
+        if source_node["id"] not in seen_source_ids:
+            graph.upsert_source(source_node)
+            seen_source_ids.add(source_node["id"])
+            result.source_count += 1
+        graph.relate(
+            "Entity",
+            mention.entity_id,
+            "MENTIONED_IN",
+            "Source",
+            source_node["id"],
+            _relation_props(
+                mention,
+                [
+                    "confidence",
+                    "evidence_span",
+                    "extraction_method",
+                    "source_kind",
+                    "source_id",
+                ],
+            ),
+        )
+        result.relation_count += 1
+
+    relations = db.query(EntityRelation).filter(EntityRelation.subject_entity_id.in_(active_entity_ids)).all()
+    for relation in relations:
+        if not relation.object_entity_id or relation.object_entity_id not in active_entity_ids:
+            continue
+        graph.relate(
+            "Entity",
+            relation.subject_entity_id,
+            ENTITY_RELATION_TYPES.get(relation.predicate, "RELATED_TO"),
+            "Entity",
+            relation.object_entity_id,
+            _relation_props(
+                relation,
+                [
+                    "predicate",
+                    "confidence",
+                    "evidence_span",
+                    "extraction_method",
+                    "source_kind",
+                    "source_id",
+                ],
+            ),
+        )
+        result.relation_count += 1
+
+    return result
+
+
 def _source_node_for_pku(db, pku: PersonalKnowledgeUnit, user_id: str) -> dict:
     item_id = pku.source_id
     title = pku.source_id
@@ -188,6 +293,34 @@ def _source_node_for_pku(db, pku: PersonalKnowledgeUnit, user_id: str) -> dict:
         "id": f"{pku.source_kind}:{pku.source_id}",
         "source_kind": pku.source_kind,
         "source_id": pku.source_id,
+        "item_id": item_id,
+        "title": title,
+    }
+
+
+def _source_node_for_mention(db, mention: EntityMention, user_id: str) -> dict:
+    item_id = mention.item_id or mention.source_id
+    title = mention.item_id or mention.source_id
+
+    if mention.source_kind == "document_chunk":
+        chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == mention.source_id).first()
+        if chunk:
+            item_id = chunk.item_id
+            item = (
+                db.query(KnowledgeItem)
+                .filter(
+                    KnowledgeItem.id == chunk.item_id,
+                    KnowledgeItem.user_id == user_id,
+                )
+                .first()
+            )
+            if item and item.title:
+                title = item.title
+
+    return {
+        "id": f"{mention.source_kind}:{mention.source_id}",
+        "source_kind": mention.source_kind,
+        "source_id": mention.source_id,
         "item_id": item_id,
         "title": title,
     }

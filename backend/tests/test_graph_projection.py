@@ -6,19 +6,25 @@ from backend.app.database import Base
 from backend.app.models import (
     CanonicalKnowledgePoint,
     CanonicalRelation,
+    EntityAlias,
+    EntityMention,
+    EntityRelation,
+    KnowledgeEntity,
     KnowledgeChunk,
     KnowledgeItem,
     PKUCanonicalLink,
     PKURelation,
     PersonalKnowledgeUnit,
 )
-from backend.app.services.graph_projection import project_ckp_graph
+from backend.app.services.graph_projection import project_ckp_graph, project_entity_graph
 
 
 class FakeGraph:
     def __init__(self):
         self.ckps = []
         self.pkus = []
+        self.entities = []
+        self.aliases = []
         self.sources = []
         self.relations = []
 
@@ -27,6 +33,12 @@ class FakeGraph:
 
     def upsert_pku(self, data):
         self.pkus.append(data)
+
+    def upsert_entity(self, data):
+        self.entities.append(data)
+
+    def upsert_alias(self, data):
+        self.aliases.append(data)
 
     def upsert_source(self, data):
         self.sources.append(data)
@@ -71,6 +83,18 @@ def _pku(pku_id, source_id, *, status="active"):
         normalized_statement=f"{pku_id} normalized",
         normalized_statement_hash=f"{pku_id}-hash",
         confidence=0.7,
+        status=status,
+    )
+
+
+def _entity(entity_id, canonical_name, *, entity_type="person", status="active"):
+    return KnowledgeEntity(
+        id=entity_id,
+        user_id="default-user",
+        entity_type=entity_type,
+        canonical_name=canonical_name,
+        normalized_key=canonical_name.replace(" ", ""),
+        confidence=0.8,
         status=status,
     )
 
@@ -393,5 +417,247 @@ def test_project_ckp_graph_skips_deprecated_nodes():
             relation[2] in {"SUPPORTED_BY", "RELATED_TO"}
             for relation in graph.relations
         )
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_projects_entities_aliases_mentions_and_relations():
+    db = _db_session()
+    try:
+        person = _entity("person-1", "Yanchao Tan")
+        paper = _entity("paper-1", "OpenViewer", entity_type="paper")
+        alias = EntityAlias(
+            id="alias-1",
+            entity_id=person.id,
+            alias="Tan",
+            normalized_key="tan",
+            confidence=0.75,
+            extraction_method="test",
+        )
+        mention = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            item_id="item-1",
+            chunk_id="chunk-1",
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+            evidence_span="Yanchao Tan authored OpenViewer",
+            confidence=0.9,
+            extraction_method="test-extractor",
+        )
+        relation = EntityRelation(
+            id="relation-1",
+            subject_entity_id=person.id,
+            predicate="authored",
+            object_entity_id=paper.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            evidence_span="Yanchao Tan authored OpenViewer",
+            confidence=0.85,
+            extraction_method="test-extractor",
+        )
+        db.add_all([person, paper, alias, mention, relation])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph)
+
+        assert result.entity_count == 2
+        assert result.alias_count == 1
+        assert result.source_count == 1
+        assert result.relation_count == 2
+        assert {
+            (
+                node["id"],
+                node["user_id"],
+                node["entity_type"],
+                node["canonical_name"],
+                node["normalized_key"],
+                node["status"],
+                node["confidence"],
+            )
+            for node in graph.entities
+        } == {
+            ("person-1", "default-user", "person", "Yanchao Tan", "YanchaoTan", "active", 0.8),
+            ("paper-1", "default-user", "paper", "OpenViewer", "OpenViewer", "active", 0.8),
+        }
+        assert graph.aliases == [
+            {
+                "id": "alias-1",
+                "key": "tan",
+                "surface_text": "Tan",
+                "entity_id": "person-1",
+            }
+        ]
+        assert graph.sources == [
+            {
+                "id": "document_chunk:chunk-1",
+                "source_kind": "document_chunk",
+                "source_id": "chunk-1",
+                "item_id": "item-1",
+                "title": "item-1",
+            }
+        ]
+        assert (
+            "Entity",
+            "person-1",
+            "MENTIONED_IN",
+            "Source",
+            "document_chunk:chunk-1",
+            {
+                "confidence": 0.9,
+                "evidence_span": "Yanchao Tan authored OpenViewer",
+                "extraction_method": "test-extractor",
+                "source_kind": "document_chunk",
+                "source_id": "chunk-1",
+            },
+        ) in graph.relations
+        assert (
+            "Entity",
+            "person-1",
+            "AUTHORED",
+            "Entity",
+            "paper-1",
+            {
+                "predicate": "authored",
+                "confidence": 0.85,
+                "evidence_span": "Yanchao Tan authored OpenViewer",
+                "extraction_method": "test-extractor",
+                "source_kind": "document_chunk",
+                "source_id": "chunk-1",
+            },
+        ) in graph.relations
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_skips_deprecated_entities_and_relations():
+    db = _db_session()
+    try:
+        active = _entity("entity-active", "Active Person")
+        deprecated = _entity("entity-deprecated", "Deprecated Paper", entity_type="paper", status="deprecated")
+        alias = EntityAlias(
+            id="alias-deprecated",
+            entity_id=deprecated.id,
+            alias="Deprecated",
+            normalized_key="deprecated",
+        )
+        mention = EntityMention(
+            id="mention-deprecated",
+            entity_id=deprecated.id,
+            source_kind="document_chunk",
+            source_id="chunk-deprecated",
+            item_id="item-deprecated",
+            surface_text="Deprecated Paper",
+            normalized_key="DeprecatedPaper",
+        )
+        relation = EntityRelation(
+            id="relation-deprecated",
+            subject_entity_id=active.id,
+            predicate="authored",
+            object_entity_id=deprecated.id,
+            source_kind="document_chunk",
+            source_id="chunk-deprecated",
+        )
+        db.add_all([active, deprecated, alias, mention, relation])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph)
+
+        assert result.entity_count == 1
+        assert result.alias_count == 0
+        assert result.source_count == 0
+        assert result.relation_count == 0
+        assert [node["id"] for node in graph.entities] == ["entity-active"]
+        assert graph.aliases == []
+        assert graph.sources == []
+        relation_endpoint_ids = {
+            endpoint_id
+            for relation in graph.relations
+            for endpoint_id in (relation[1], relation[4])
+        }
+        assert "entity-deprecated" not in relation_endpoint_ids
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_maps_unknown_predicate_to_related_to():
+    db = _db_session()
+    try:
+        source = _entity("entity-source", "Source Entity")
+        target = _entity("entity-target", "Target Entity", entity_type="organization")
+        relation = EntityRelation(
+            id="relation-unknown",
+            subject_entity_id=source.id,
+            predicate="collaborates_near",
+            object_entity_id=target.id,
+            source_kind="manual",
+            source_id="source-1",
+            evidence_span="Source collaborates near target",
+            confidence=0.65,
+            extraction_method="human",
+        )
+        db.add_all([source, target, relation])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph)
+
+        assert result.entity_count == 2
+        assert result.relation_count == 1
+        assert (
+            "Entity",
+            "entity-source",
+            "RELATED_TO",
+            "Entity",
+            "entity-target",
+            {
+                "predicate": "collaborates_near",
+                "confidence": 0.65,
+                "evidence_span": "Source collaborates near target",
+                "extraction_method": "human",
+                "source_kind": "manual",
+                "source_id": "source-1",
+            },
+        ) in graph.relations
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_counts_duplicate_mention_sources_once():
+    db = _db_session()
+    try:
+        person = _entity("person-1", "Yanchao Tan")
+        first = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            item_id="item-1",
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        second = EntityMention(
+            id="mention-2",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            item_id="item-1",
+            surface_text="Tan",
+            normalized_key="Tan",
+        )
+        db.add_all([person, first, second])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph)
+
+        assert result.entity_count == 1
+        assert result.source_count == 1
+        assert len(graph.sources) == 1
+        assert sum(1 for relation in graph.relations if relation[2] == "MENTIONED_IN") == 2
     finally:
         db.close()
