@@ -8,9 +8,30 @@ from engine.app.chat import answer
 
 
 class FakeRunner:
-    def stream(self, query, history):
+    def stream(self, query, history, trace_recorder=None):
         yield json.dumps({"type": "agent_status", "data": {"label": query}}) + "\n"
         yield json.dumps({"type": "done"}) + "\n"
+
+
+class CapturingRunner:
+    def __init__(self):
+        self.trace_recorder = "unset"
+
+    def stream(self, query, history, trace_recorder=None):
+        self.trace_recorder = trace_recorder
+        yield json.dumps({"type": "agent_status", "data": {"label": query}}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+
+
+class FakeTraceRecorder:
+    instances = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        FakeTraceRecorder.instances.append(self)
+
+    def start(self):
+        return None
 
 
 def test_answer_stream_delegates_to_agent_runner(monkeypatch):
@@ -50,6 +71,42 @@ def test_answer_stream_forwards_deep_search_options(monkeypatch):
 
     assert captured["deep_search_enabled"] is True
     assert captured["deep_search_depth"] == "deep"
+
+
+def test_answer_stream_continues_when_trace_start_returns_none(monkeypatch):
+    FakeTraceRecorder.instances = []
+    runner = CapturingRunner()
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: runner)
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeTraceRecorder)
+
+    lines = list(
+        answer.answer_stream(
+            "hello",
+            [],
+            session_id="session-1",
+            user_message_id="message-1",
+        )
+    )
+
+    assert [json.loads(line)["type"] for line in lines] == ["agent_status", "done"]
+    assert runner.trace_recorder is None
+    assert FakeTraceRecorder.instances[0].kwargs["session_id"] == "session-1"
+    assert FakeTraceRecorder.instances[0].kwargs["user_message_id"] == "message-1"
+
+
+def test_answer_stream_continues_when_trace_start_raises(monkeypatch):
+    class RaisingTraceRecorder(FakeTraceRecorder):
+        def start(self):
+            raise RuntimeError("trace unavailable")
+
+    runner = CapturingRunner()
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: runner)
+    monkeypatch.setattr(answer, "AgentTraceRecorder", RaisingTraceRecorder)
+
+    lines = list(answer.answer_stream("hello", []))
+
+    assert [json.loads(line)["type"] for line in lines] == ["agent_status", "done"]
+    assert runner.trace_recorder is None
 
 
 def test_build_agent_runner_enables_deep_search_tool_when_requested(monkeypatch):

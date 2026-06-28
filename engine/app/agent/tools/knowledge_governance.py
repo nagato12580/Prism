@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile, KnowledgeItem
 from engine.app.agent.rag.agentic import AgenticRagResult
 from engine.app.agent.tools import governed_knowledge
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.evidence import normalize_evidence_items
+from engine.app.config import settings
+
+
+_engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
+_Session = sessionmaker(bind=_engine)
+_UUID_PATTERN = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+_SOURCE_ID_LABEL_PATTERN = re.compile(r"\b(?:chunk_id|source_id)\b\s*[:=]\s*([0-9a-fA-F-]{12,36})\b")
+_HEX_ALPHA_PATTERN = re.compile(r"[a-fA-F]")
+_UUID_HYPHEN_POSITIONS = {8, 13, 18, 23}
 
 
 class KnowledgeTopicSearchInput(BaseModel):
@@ -77,6 +91,35 @@ def _query(query: str, limit: int) -> tuple[list[str], list[dict[str, Any]], lis
     return governed_knowledge._query_governed_knowledge(query, limit)
 
 
+def _new_db_session():
+    return _Session()
+
+
+def _is_valid_direct_chunk_token(token: str) -> bool:
+    if _UUID_PATTERN.fullmatch(token):
+        return True
+    if not (12 <= len(token) < 36):
+        return False
+    for index, char in enumerate(token):
+        if index in _UUID_HYPHEN_POSITIONS:
+            if char != "-":
+                return False
+        elif not char.isdigit() and char.lower() not in {"a", "b", "c", "d", "e", "f"}:
+            return False
+    if token.endswith("-"):
+        return False
+    return bool(_HEX_ALPHA_PATTERN.search(token))
+
+
+def _extract_chunk_id_token(query: str) -> str | None:
+    prefix_match = _SOURCE_ID_LABEL_PATTERN.search(query or "")
+    if prefix_match:
+        token = prefix_match.group(1)
+        if _is_valid_direct_chunk_token(token):
+            return token
+    return None
+
+
 def _build_knowledge_topic_search(ctx: ToolContext) -> StructuredTool:
     def run(query: str, limit: int = 8) -> str:
         terms, bundles, knowledge_results = _query(query, limit)
@@ -88,17 +131,16 @@ def _build_knowledge_topic_search(ctx: ToolContext) -> StructuredTool:
             "source_count": len(sources),
             "query_terms": terms,
         }
-        return json.dumps(
-            {
-                "status": _result_status(topics, knowledge_results),
-                "summary": f"Found {len(topics)} CKP topics and {len(knowledge_results)} synthesized knowledge items.",
-                "query_terms": terms,
-                "topics": topics,
-                "synthesized_knowledge": knowledge_results,
-                "sources": sources,
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "status": _result_status(topics, knowledge_results),
+            "summary": f"Found {len(topics)} CKP topics and {len(knowledge_results)} synthesized knowledge items.",
+            "query_terms": terms,
+            "topics": topics,
+            "synthesized_knowledge": knowledge_results,
+            "sources": sources,
+        }
+        payload["evidence_items"] = normalize_evidence_items("knowledge_topic_search", payload)
+        return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(
         func=run,
@@ -158,16 +200,15 @@ def _build_knowledge_evidence_search(ctx: ToolContext) -> StructuredTool:
             "evidence_types": sorted(evidence_type_set),
             "source_kinds": sorted(source_kind_set),
         }
-        return json.dumps(
-            {
-                "status": _result_status(evidence),
-                "summary": f"Found {len(evidence)} PKU evidence items across governed knowledge sources.",
-                "query_terms": terms,
-                "evidence": evidence,
-                "sources": sources,
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "status": _result_status(evidence),
+            "summary": f"Found {len(evidence)} PKU evidence items across governed knowledge sources.",
+            "query_terms": terms,
+            "evidence": evidence,
+            "sources": sources,
+        }
+        payload["evidence_items"] = normalize_evidence_items("knowledge_evidence_search", payload)
+        return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(
         func=run,
@@ -226,17 +267,16 @@ def _build_knowledge_material_search(ctx: ToolContext) -> StructuredTool:
             "query_terms": terms,
             "intent": intent,
         }
-        return json.dumps(
-            {
-                "status": _result_status(materials),
-                "summary": f"Found {len(materials)} source materials through CKP/PKU backtracking.",
-                "query_terms": terms,
-                "intent": intent,
-                "materials": materials,
-                "sources": sources,
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "status": _result_status(materials),
+            "summary": f"Found {len(materials)} source materials through CKP/PKU backtracking.",
+            "query_terms": terms,
+            "intent": intent,
+            "materials": materials,
+            "sources": sources,
+        }
+        payload["evidence_items"] = normalize_evidence_items("knowledge_material_search", payload)
+        return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(
         func=run,
@@ -265,7 +305,7 @@ def _raw_document_payload(result: AgenticRagResult) -> dict[str, Any]:
         for source in sources
         if isinstance(source, dict)
     ]
-    return {
+    payload = {
         "status": getattr(result, "status", "insufficient"),
         "summary": getattr(result, "summary", ""),
         "missing": getattr(result, "missing", []),
@@ -273,10 +313,87 @@ def _raw_document_payload(result: AgenticRagResult) -> dict[str, Any]:
         "sources": normalized_sources,
         "evidence": getattr(result, "evidence", []),
     }
+    payload["evidence_items"] = normalize_evidence_items("raw_document_search", payload)
+    return payload
+
+
+def _raw_chunk_payload_from_query(query: str) -> dict[str, Any] | None:
+    token = _extract_chunk_id_token(query)
+    if not token:
+        return None
+
+    db = None
+    try:
+        db = _new_db_session()
+        if _UUID_PATTERN.fullmatch(token):
+            chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == token).first()
+        else:
+            chunks = (
+                db.query(KnowledgeChunk)
+                .filter(KnowledgeChunk.id.like(f"{token}%"))
+                .order_by(KnowledgeChunk.id.asc())
+                .limit(2)
+                .all()
+            )
+            if len(chunks) != 1:
+                return None
+            chunk = chunks[0]
+        if chunk is None:
+            return None
+
+        item = db.query(KnowledgeItem).filter(KnowledgeItem.id == chunk.item_id).first()
+        file = db.query(KnowledgeFile).filter(KnowledgeFile.item_id == chunk.item_id).first()
+        title = (
+            getattr(item, "title", None)
+            or getattr(file, "title", None)
+            or getattr(file, "original_filename", None)
+            or str(getattr(chunk, "item_id", ""))
+        )
+        source = {
+            "source_kind": "document_chunk",
+            "source_id": chunk.id,
+            "chunk_id": chunk.id,
+            "item_id": chunk.item_id,
+            "display_type": "knowledge_item",
+            "display_id": chunk.item_id,
+            "display_title": title,
+            "display_label": "鐭ヨ瘑鏂囨。",
+            "snippet": chunk.chunk_text,
+            "text": chunk.chunk_text,
+            "chunk_index": chunk.chunk_index,
+            "chunk_type": chunk.chunk_type,
+            "parent_id": chunk.parent_id,
+            "parent_chunk_id": chunk.parent_id,
+            "score": 1.0,
+        }
+        payload = {
+            "status": "sufficient",
+            "summary": "Found the requested raw document chunk by source_id.",
+            "sources": [source],
+            "evidence": [{**source}],
+            "missing": [],
+        }
+        payload["evidence_items"] = normalize_evidence_items("raw_document_search", payload)
+        return payload
+    except Exception:
+        return None
+    finally:
+        if db is not None:
+            db.close()
 
 
 def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
     def run(query: str) -> str:
+        direct_payload = _raw_chunk_payload_from_query(query)
+        if direct_payload is not None:
+            governed_knowledge._append_unique_citations(ctx.citations, direct_payload["sources"])
+            ctx.stats_holder["raw_document_search"] = {
+                "hit_count": len(direct_payload["sources"]),
+                "iterations": 0,
+                "direct_lookup": True,
+            }
+            return json.dumps(direct_payload, ensure_ascii=False)
+
         if ctx.rag_runner is None:
             ctx.stats_holder["raw_document_search"] = {"hit_count": 0, "iterations": 0}
             return json.dumps(
@@ -286,6 +403,7 @@ def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
                     "missing": ["No RAG runner is available."],
                     "sources": [],
                     "evidence": [],
+                    "evidence_items": [],
                 },
                 ensure_ascii=False,
             )

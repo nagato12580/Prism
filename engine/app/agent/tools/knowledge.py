@@ -7,6 +7,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.evidence import normalize_evidence_items
 
 
 KEY = "knowledge_search"
@@ -46,6 +47,7 @@ def build(ctx: ToolContext) -> StructuredTool:
                     "clarify": None,
                     "sources": [],
                     "evidence": [],
+                    "evidence_items": [],
                 },
                 ensure_ascii=False,
             )
@@ -75,6 +77,7 @@ def build(ctx: ToolContext) -> StructuredTool:
             "sources": sources,
             "evidence": result.evidence,
         }
+        payload["evidence_items"] = normalize_evidence_items(KEY, payload)
         return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(

@@ -12,6 +12,7 @@ from backend.app.models.memory import MemoryEntry, MemoryInsight, MemoryStatemen
 from backend.app.services.memory_access import bump_memory_access
 from backend.app.services.memory_vectors import search_memory_vectors
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.evidence import normalize_evidence_items
 from engine.app.config import settings
 
 
@@ -184,15 +185,14 @@ def _build_memory_search(ctx: ToolContext) -> StructuredTool:
 
             ctx.citations.extend(merged)
             ctx.stats_holder["memory_search"] = {"hit_count": len(merged)}
-            return json.dumps(
-                {
-                    "status": "success" if merged else "insufficient",
-                    "summary": f"找到 {len(merged)} 条长期记忆。" if merged else "未找到匹配的长期记忆。",
-                    "sources": merged,
-                    "memories": merged,
-                },
-                ensure_ascii=False,
-            )
+            payload = {
+                "status": "success" if merged else "insufficient",
+                "summary": f"找到 {len(merged)} 条长期记忆。" if merged else "未找到匹配的长期记忆。",
+                "sources": merged,
+                "memories": merged,
+            }
+            payload["evidence_items"] = normalize_evidence_items("memory_search", payload)
+            return json.dumps(payload, ensure_ascii=False)
         finally:
             db.close()
 

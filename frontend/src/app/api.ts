@@ -224,6 +224,18 @@ export interface ChatMessageUpdate {
   process?: any | null
 }
 
+export interface TraceBindRequest {
+  session_id: string
+  assistant_message_id: string
+}
+
+export interface TraceBindResponse {
+  trace_id: string
+  session_id: string
+  assistant_message_id: string
+  status: string
+}
+
 export const chatApi = {
   listSessions: () =>
     request<ChatSessionOut[]>('/chat/sessions'),
@@ -262,6 +274,16 @@ export const chatApi = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+}
+
+export const traceApi = {
+  bindMessage: (traceId: string, data: TraceBindRequest) =>
+    request<TraceBindResponse>(`/traces/${traceId}/bind-message`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  exportTrace: (traceId: string) =>
+    request<Record<string, unknown>>(`/traces/${traceId}/export`),
 }
 
 export const knowledgeApi = {

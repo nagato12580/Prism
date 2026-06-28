@@ -27,6 +27,7 @@ import {
 import {
   useChatStore,
   SOURCE_TYPE_OPTIONS,
+  normalizeEvidenceItems,
   type ClarifyOption,
   type ClarifyRequest,
   type Message,
@@ -36,7 +37,7 @@ import {
   type ThinkingStep,
 } from '@/app/chatStore'
 import type { ResourceMediaType } from '@/app/api'
-import { knowledgeApi, chatApi, type KnowledgeTopic } from '@/app/api'
+import { knowledgeApi, chatApi, traceApi, type KnowledgeTopic } from '@/app/api'
 import { cn, genId } from '@/lib/utils'
 
 const starterPrompts = [
@@ -178,6 +179,7 @@ function shouldAutoGenerateTitle(title?: string | null) {
 
 function buildAssistantProcess(message: Message) {
   return {
+    trace_id: message.traceId || null,
     agent_status: message.agentStatus || null,
     tool_runs: message.toolRuns || [],
     thinking_steps: message.thinkingSteps || [],
@@ -206,6 +208,7 @@ export function ChatPage() {
   const addLastToolRun = useChatStore((s) => s.addLastToolRun)
   const finishLastToolRun = useChatStore((s) => s.finishLastToolRun)
   const setLastClarify = useChatStore((s) => s.setLastClarify)
+  const setLastTraceId = useChatStore((s) => s.setLastTraceId)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
   const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
@@ -231,6 +234,10 @@ export function ChatPage() {
   const pendingClarifyRef = useRef<string | null>(null)
   const topicPickerRef = useRef<HTMLDivElement>(null)
   const sourcePickerRef = useRef<HTMLDivElement>(null)
+  const processPersistenceQueuesRef = useRef<Record<string, {
+    running: Promise<void> | null
+    latest: { sessionId: string; messageId: string } | null
+  }>>({})
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -349,13 +356,22 @@ export function ChatPage() {
 
     const userMessageId = genId()
     const temporaryAssistantMessageId = genId()
+    let engineUserMessageId = userMessageId
     let assistantMessageId = temporaryAssistantMessageId
     let assistantPersistedId: string | null = null
+    let traceId: string | null = null
     addMessage({ id: userMessageId, role: 'user', content: query }, sessionId)
     addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
 
     const userPersistPromise = persistUserMessage(sessionId, query)
     const assistantPersistPromise = persistAssistantPlaceholder(sessionId)
+    try {
+      const persistedUserMessage = await userPersistPromise
+      if (persistedUserMessage) {
+        replaceMessageId(sessionId, userMessageId, persistedUserMessage.id)
+        engineUserMessageId = persistedUserMessage.id
+      }
+    } catch { /* user persistence failure falls back to the optimistic id */ }
     try {
       const persisted = await assistantPersistPromise
       if (persisted) {
@@ -372,9 +388,15 @@ export function ChatPage() {
 
       try {
         const msg = JSON.parse(line)
-        if (msg.type === 'agent_status') {
+        if (msg.type === 'trace') {
+          traceId = safeString(msg.data?.trace_id)
+          if (traceId) {
+            setLastTraceId(traceId, sessionId, assistantMessageId)
+            if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          }
+        } else if (msg.type === 'agent_status') {
           setLastAgentStatus(safeString(msg.data?.label), sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_call') {
           addLastToolRun({
             id: genId(),
@@ -382,20 +404,21 @@ export function ChatPage() {
             query: safeString(msg.data?.query),
             status: 'running',
           }, sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_result') {
           finishLastToolRun(safeString(msg.data?.tool, 'tool'), {
             status: safeString(msg.data?.status) === 'error' ? 'error' : 'success',
             summary: safeString(msg.data?.summary),
             stats: msg.data?.stats,
             latencyMs: msg.data?.latency_ms,
+            evidenceItems: normalizeEvidenceItems(msg.data?.evidence_items),
             traceSteps: mergeThinkingSteps(
               msg.data?.trace_steps,
               msg.data?.stats?.deep_trace_steps,
               msg.data?.stats?.trace_steps,
             ),
           }, sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'clarify') {
           setLastClarify({
             question: normalizeClarifyQuestion(msg.data?.question),
@@ -405,7 +428,7 @@ export function ChatPage() {
         else if (msg.type === 'token') appendToLast(msg.data, sessionId, assistantMessageId)
         else if (msg.type === 'done') {
           finishLast(sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         }
         else if (msg.type === 'title') {
           const title = safeString(msg.data)
@@ -431,6 +454,8 @@ export function ChatPage() {
         body: JSON.stringify({
           query,
           history,
+          session_id: sessionId,
+          user_message_id: engineUserMessageId,
           topic_id: selectedTopicId || undefined,
           source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
           deep_search_enabled: deepSearchEnabled,
@@ -476,7 +501,6 @@ export function ChatPage() {
         const aiMsg = msgs.find((m) => m.id === assistantMessageId && m.role === 'assistant' && !m.streaming)
         if (aiMsg) {
           try {
-            await userPersistPromise
             if (!assistantPersistedId) {
               const persisted = await assistantPersistPromise
               assistantPersistedId = persisted?.id || null
@@ -487,13 +511,27 @@ export function ChatPage() {
               clarify: aiMsg.clarify || undefined,
               process: buildAssistantProcess(aiMsg),
             })
-            else await chatApi.addMessage(sessionId, {
-              role: 'assistant',
-              content: aiMsg.content,
-              sources: aiMsg.sources || undefined,
-              clarify: aiMsg.clarify || undefined,
-              process: buildAssistantProcess(aiMsg),
-            })
+            else {
+              const persistedAssistant = await chatApi.addMessage(sessionId, {
+                role: 'assistant',
+                content: aiMsg.content,
+                sources: aiMsg.sources || undefined,
+                clarify: aiMsg.clarify || undefined,
+                process: buildAssistantProcess(aiMsg),
+              })
+              assistantPersistedId = persistedAssistant.id
+              replaceMessageId(sessionId, assistantMessageId, persistedAssistant.id)
+              assistantMessageId = persistedAssistant.id
+            }
+            if (assistantPersistedId) {
+              await flushAssistantProcessSnapshot(sessionId, assistantPersistedId)
+            }
+            if (traceId && assistantPersistedId) {
+              await traceApi.bindMessage(traceId, {
+                session_id: sessionId,
+                assistant_message_id: assistantPersistedId,
+              })
+            }
           } catch { /* persistence is best-effort for the chat UI */ }
         }
         // 首轮问答后自动生成标题
@@ -517,10 +555,53 @@ export function ChatPage() {
     return chatApi.addMessage(sessionId, { role: 'assistant', content: '' }).catch(() => undefined)
   }
 
-  const persistAssistantProcessSnapshot = (sessionId: string, messageId: string) => {
+  const persistAssistantProcessSnapshot = async (sessionId: string, messageId: string) => {
     const msg = getSessionMessages(sessionId).find((message) => message.id === messageId)
     if (!msg) return
-    chatApi.updateMessage(sessionId, messageId, { process: buildAssistantProcess(msg) }).catch(() => {})
+    await chatApi.updateMessage(sessionId, messageId, { process: buildAssistantProcess(msg) })
+  }
+
+  const processPersistenceKey = (sessionId: string, messageId: string) => `${sessionId}:${messageId}`
+
+  const queueAssistantProcessSnapshot = (sessionId: string, messageId: string) => {
+    // Queues persistAssistantProcessSnapshot(sessionId, assistantPersistedId) calls during streaming.
+    const key = processPersistenceKey(sessionId, messageId)
+    const queue = processPersistenceQueuesRef.current[key] ?? {
+      running: null,
+      latest: null,
+    }
+    queue.latest = { sessionId, messageId }
+    processPersistenceQueuesRef.current[key] = queue
+
+    if (!queue.running) {
+      queue.running = runAssistantProcessSnapshotQueue(key)
+    }
+    return queue.running
+  }
+
+  const runAssistantProcessSnapshotQueue = async (key: string): Promise<void> => {
+    const queue = processPersistenceQueuesRef.current[key]
+    if (!queue) return
+
+    while (queue.latest) {
+      const snapshot = queue.latest
+      queue.latest = null
+      try {
+        await persistAssistantProcessSnapshot(snapshot.sessionId, snapshot.messageId)
+      } catch { /* process persistence is best-effort while streaming */ }
+    }
+
+    queue.running = null
+    if (queue.latest) {
+      queue.running = runAssistantProcessSnapshotQueue(key)
+      await queue.running
+    } else {
+      delete processPersistenceQueuesRef.current[key]
+    }
+  }
+
+  const flushAssistantProcessSnapshot = async (sessionId: string, messageId: string) => {
+    await queueAssistantProcessSnapshot(sessionId, messageId)
   }
 
   const sendClarifyFollowup = (value: string) => {

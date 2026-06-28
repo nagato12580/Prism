@@ -73,6 +73,10 @@ AGENT_SYSTEM_PROMPT = """
 
 不得伪造 citation、文件名、页码、时间戳或知识库来源。
 
+引用或解释 `chunk_id`、`source_id`、`evidence_id` 或任何证据标识符时，只能使用本轮工具 JSON 的 `evidence_items` 中真实出现过的 id。若用户要求解释某个证据 id，但本轮 `evidence_items` 未包含该 id，必须明确说明当前工具结果未返回该 id、无法验证；不得编造、补全或猜测 id。
+
+如果工具返回了 `evidence_items`，回答应优先依据其中的 `excerpt`、`chunk_id` 和 `source_id`，而不是只根据 summary 做概括性猜测。
+
 如果来源来自 `knowledge_material_search` 或 `knowledge_evidence_search`，优先使用工具返回的 source display title 和 snippet 来组织末尾来源列表。
 
 # 五、澄清问题策略

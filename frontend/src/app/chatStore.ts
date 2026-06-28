@@ -29,6 +29,21 @@ export const SOURCE_TYPE_OPTIONS: { value: ResourceMediaType; label: string }[] 
 export type ToolRunStatus = 'running' | 'success' | 'error'
 export type DeepSearchDepth = 'quick' | 'standard' | 'deep'
 
+export interface EvidenceItem {
+  evidence_id: string
+  source_kind?: string
+  source_id?: string
+  chunk_id?: string
+  parent_chunk_id?: string | null
+  item_id?: string
+  display_title?: string
+  excerpt?: string
+  hit_reason?: string
+  score?: number | null
+  retrieval_path?: string[]
+  metadata?: Record<string, unknown>
+}
+
 export interface ToolRun {
   id: string
   tool: string
@@ -37,6 +52,7 @@ export interface ToolRun {
   summary?: string
   stats?: Record<string, unknown>
   latencyMs?: number
+  evidenceItems?: EvidenceItem[]
 }
 
 export interface ClarifyOption {
@@ -62,6 +78,7 @@ export interface ThinkingStep {
 
 type ToolRunPatch = Partial<ToolRun> & {
   traceSteps?: ThinkingStep[]
+  evidenceItems?: EvidenceItem[]
 }
 
 export interface Message {
@@ -74,6 +91,7 @@ export interface Message {
   thinkingSteps?: ThinkingStep[]
   clarify?: ClarifyRequest
   agentStatus?: string
+  traceId?: string
 }
 
 interface ChatState {
@@ -96,6 +114,7 @@ interface ChatState {
   addLastToolRun: (run: ToolRun, sessionId?: string, messageId?: string) => void
   finishLastToolRun: (tool: string, data: ToolRunPatch, sessionId?: string, messageId?: string) => void
   setLastClarify: (clarify: ClarifyRequest, sessionId?: string, messageId?: string) => void
+  setLastTraceId: (traceId: string, sessionId?: string, messageId?: string) => void
   finishLast: (sessionId?: string, messageId?: string) => void
   replaceMessageId: (sessionId: string, fromId: string, toId: string) => void
   clear: () => void
@@ -134,6 +153,43 @@ function normalizeToolRunStatus(value: unknown): ToolRunStatus {
   return value === 'running' || value === 'error' ? value : 'success'
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function normalizeEvidenceItems(value: unknown): EvidenceItem[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => {
+      const normalizedScore = typeof item.score === 'number'
+        ? item.score
+        : typeof item.score === 'string'
+          ? Number(item.score)
+          : NaN
+      return {
+        evidence_id: typeof item.evidence_id === 'string' ? item.evidence_id : '',
+        source_kind: typeof item.source_kind === 'string' ? item.source_kind : undefined,
+        source_id: typeof item.source_id === 'string' ? item.source_id : undefined,
+        chunk_id: typeof item.chunk_id === 'string' ? item.chunk_id : undefined,
+        parent_chunk_id: typeof item.parent_chunk_id === 'string' ? item.parent_chunk_id : null,
+        item_id: typeof item.item_id === 'string' ? item.item_id : undefined,
+        display_title: typeof item.display_title === 'string' ? item.display_title : undefined,
+        excerpt: typeof item.excerpt === 'string' ? item.excerpt : undefined,
+        hit_reason: typeof item.hit_reason === 'string' ? item.hit_reason : undefined,
+        score: Number.isFinite(normalizedScore) ? normalizedScore : null,
+        retrieval_path: Array.isArray(item.retrieval_path)
+          ? item.retrieval_path.filter((entry): entry is string => typeof entry === 'string')
+          : undefined,
+        metadata: isPlainRecord(item.metadata)
+          ? item.metadata
+          : undefined,
+      }
+    })
+    .filter((item) => item.evidence_id)
+  return items.length > 0 ? items : undefined
+}
+
 function normalizeToolRuns(value: unknown): ToolRun[] | undefined {
   if (!Array.isArray(value)) return undefined
   const runs = value
@@ -146,6 +202,7 @@ function normalizeToolRuns(value: unknown): ToolRun[] | undefined {
       summary: typeof run.summary === 'string' ? run.summary : undefined,
       stats: typeof run.stats === 'object' && run.stats !== null ? run.stats as Record<string, unknown> : undefined,
       latencyMs: typeof run.latencyMs === 'number' ? run.latencyMs : undefined,
+      evidenceItems: normalizeEvidenceItems(run.evidenceItems ?? run.evidence_items),
     }))
   return runs.length > 0 ? runs : undefined
 }
@@ -173,6 +230,7 @@ function toMessages(msgs: ChatMessageOut[]): Message[] {
     const toolRuns = normalizeToolRuns(process?.tool_runs)
     const thinkingSteps = normalizeThinkingSteps(process?.thinking_steps)
     const agentStatus = typeof process?.agent_status === 'string' ? process.agent_status : undefined
+    const traceId = typeof process?.trace_id === 'string' ? process.trace_id : undefined
     const isPendingAssistantMessage =
       m.role === 'assistant' &&
       !(m.content || '').trim() &&
@@ -189,6 +247,7 @@ function toMessages(msgs: ChatMessageOut[]): Message[] {
       toolRuns,
       thinkingSteps,
       agentStatus,
+      traceId,
     }
   })
 }
@@ -382,6 +441,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) =>
       updateMessagesForSession(s, sessionId, (messages) =>
         replaceMessage(messages, messageId, (last) => ({ ...last, clarify })),
+      ),
+    ),
+  setLastTraceId: (traceId, sessionId, messageId) =>
+    set((s) =>
+      updateMessagesForSession(s, sessionId, (messages) =>
+        replaceMessage(messages, messageId, (last) => ({ ...last, traceId })),
       ),
     ),
   finishLast: (sessionId, messageId) =>

@@ -15,6 +15,8 @@ class ChatRequest(BaseModel):
     query: str
     history: Optional[list[dict]] = None
     topic_id: Optional[str] = None
+    session_id: Optional[str] = None
+    user_message_id: Optional[str] = None
     source_types: Optional[list[str]] = None
     deep_search_enabled: bool = False
     deep_search_depth: str = "standard"
@@ -40,6 +42,8 @@ def chat_answer(req: ChatRequest):
             source_types=req.source_types,
             deep_search_enabled=req.deep_search_enabled,
             deep_search_depth=req.deep_search_depth,
+            session_id=req.session_id,
+            user_message_id=req.user_message_id,
         ):
             yield line
 
