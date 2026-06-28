@@ -269,15 +269,23 @@ def answer_stream(
             deep_search_depth=deep_search_depth,
         )
         logger.info("[chat] runner_ready")
-        trace_recorder = AgentTraceRecorder(
-            session_id=session_id,
-            user_message_id=user_message_id,
-            user_query=query,
-            model=settings.LLM_MODEL,
-        )
-        trace_id = trace_recorder.start()
-        if trace_id:
-            yield trace_event(trace_id)
+        trace_recorder = None
+        try:
+            candidate_recorder = AgentTraceRecorder(
+                session_id=session_id,
+                user_message_id=user_message_id,
+                user_query=query,
+                model=settings.LLM_MODEL,
+            )
+            trace_id = candidate_recorder.start()
+            if trace_id:
+                trace_recorder = candidate_recorder
+                yield trace_event(trace_id)
+        except Exception as exc:
+            logger.warning(
+                "[chat] trace_start_failed; continuing without trace error=%s",
+                quoted(str(exc), limit=300),
+            )
         yield from runner.stream(query, history, trace_recorder=trace_recorder)
         logger.info("[chat] stream_complete")
     except Exception as exc:

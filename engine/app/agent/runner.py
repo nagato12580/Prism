@@ -360,16 +360,6 @@ class LangChainAgentRunner:
                     if not isinstance(evidence_items, list):
                         evidence_items = None
 
-                    yield tool_result_event(
-                        tool=name,
-                        status=status,
-                        summary=summary,
-                        query=query_arg,
-                        stats=stats,
-                        latency_ms=latency_ms,
-                        trace_steps=trace_steps,
-                        evidence_items=evidence_items,
-                    )
                     _record_trace_step(
                         trace_recorder,
                         step_type="tool_result",
@@ -390,6 +380,16 @@ class LangChainAgentRunner:
                         tool_name=name,
                         tool_call_id=tool_call_id,
                         latency_ms=latency_ms,
+                        evidence_items=evidence_items,
+                    )
+                    yield tool_result_event(
+                        tool=name,
+                        status=status,
+                        summary=summary,
+                        query=query_arg,
+                        stats=stats,
+                        latency_ms=latency_ms,
+                        trace_steps=trace_steps,
                         evidence_items=evidence_items,
                     )
 
