@@ -318,3 +318,52 @@ def test_auto_migrate_upgrades_existing_text_columns_to_mediumtext(monkeypatch):
 
     assert any("MODIFY COLUMN `content` MEDIUMTEXT" in sql for sql in executed_sql)
     assert any("MODIFY COLUMN `content_text` MEDIUMTEXT" in sql for sql in executed_sql)
+
+
+def test_knowledge_job_and_resource_governance_fields(db_session):
+    from backend.app.models import KnowledgeFile, KnowledgeJob, KnowledgeTopic
+
+    topic = KnowledgeTopic(user_id="default-user", name="Queue")
+    db_session.add(topic)
+    db_session.flush()
+
+    resource = KnowledgeFile(
+        user_id="default-user",
+        topic_id=topic.id,
+        title="Paper",
+        original_filename="paper.pdf",
+        media_type="document",
+        file_ext=".pdf",
+        file_size=123,
+        md5="abc123",
+        storage_path="/tmp/paper.pdf",
+        processing_status="queued",
+        governance_status="queued",
+        governance_progress_current=1,
+        governance_progress_total=10,
+    )
+    db_session.add(resource)
+    db_session.flush()
+
+    job = KnowledgeJob(
+        job_type="ingest",
+        resource_id=resource.id,
+        item_id="item-1",
+        topic_id=topic.id,
+        status="queued",
+        progress_current=0,
+        progress_total=10,
+        max_attempts=3,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    loaded = db_session.query(KnowledgeJob).filter_by(resource_id=resource.id).one()
+    assert loaded.status == "queued"
+    assert loaded.max_attempts == 3
+    assert loaded.resource_id == resource.id
+
+    loaded_resource = db_session.query(KnowledgeFile).filter_by(id=resource.id).one()
+    assert loaded_resource.governance_status == "queued"
+    assert loaded_resource.governance_progress_current == 1
+    assert loaded_resource.governance_progress_total == 10

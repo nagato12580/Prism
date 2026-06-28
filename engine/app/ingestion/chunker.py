@@ -6,6 +6,8 @@ import re
 
 import tiktoken
 
+from engine.app.config import settings
+
 
 CHILD_CHUNK_TOKENS = 256
 PARENT_CHUNK_TOKENS = 1024
@@ -109,13 +111,15 @@ def chunk_parent_child(text: str) -> list[ParentChunk]:
     if not text:
         return []
     sentences = _split_sentences(text)
-    parent_contents = _merge_to_chunks(sentences, PARENT_CHUNK_TOKENS)
+    parent_contents = _merge_to_chunks(sentences, settings.PARENT_CHUNK_TOKENS)
     result: list[ParentChunk] = []
     for pc in parent_contents:
         parent = ParentChunk(pc.content, pc.page_start, pc.page_end)
         child_sents = _split_sentences(pc.content)
         parent.children = _merge_to_chunks(
-            child_sents, CHILD_CHUNK_TOKENS, CHILD_OVERLAP_RATIO
+            child_sents,
+            settings.CHILD_CHUNK_TOKENS,
+            settings.CHILD_OVERLAP_RATIO,
         )
         for child in parent.children:
             if child.page_start is None:

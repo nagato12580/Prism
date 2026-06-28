@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+import redis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import cast, String, func
 from sqlalchemy.exc import IntegrityError
@@ -17,8 +18,10 @@ from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
     KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut, KnowledgeResourceOut,
-    KnowledgeResourceUpdate,
+    KnowledgeResourceUpdate, TopicIngestOut,
 )
+from ..services.knowledge_job_queue import enqueue_governance_job, enqueue_ingest_job, enqueue_topic_ingest_jobs
+from ..services.document_text_quality import assess_document_text
 from ..utils.file_parser import count_pages, extract_text
 from ..utils.media_type import infer_media_type
 
@@ -27,6 +30,10 @@ DEFAULT_USER_ID = "default-user"
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESOURCE_INGEST_TIMEOUT_SECONDS = 1800
+
+
+def _redis_client():
+    return redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 def _topic_out(topic: KnowledgeTopic, resource_count: int = 0) -> KnowledgeTopicOut:
@@ -263,6 +270,24 @@ def get_topic(topic_id: str, db: Session = Depends(get_db)):
     return _topic_out(topic, count)
 
 
+@router.post("/topics/{topic_id}/ingest", response_model=TopicIngestOut)
+def ingest_topic(topic_id: str, db: Session = Depends(get_db)):
+    _get_topic_or_404(topic_id, db)
+    result = enqueue_topic_ingest_jobs(
+        db,
+        _redis_client(),
+        topic_id,
+        queue_name=settings.KNOWLEDGE_INGEST_QUEUE,
+    )
+    return TopicIngestOut(
+        queued=result.queued,
+        skipped=result.skipped,
+        failed=result.failed,
+        job_ids=result.job_ids,
+        messages=result.messages,
+    )
+
+
 @router.put("/topics/{topic_id}", response_model=KnowledgeTopicOut)
 def update_topic(topic_id: str, payload: KnowledgeTopicUpdate, db: Session = Depends(get_db)):
     topic = _get_topic_or_404(topic_id, db)
@@ -347,6 +372,18 @@ async def upload_topic_resource(
             text = extract_text(str(saved_path))
             resource.content_text = text
             resource.page_count = count_pages(str(saved_path))
+            quality = assess_document_text(
+                text,
+                page_count=resource.page_count,
+                max_chars=settings.KNOWLEDGE_TEXT_MAX_CHARS,
+                max_chars_per_page=settings.KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE,
+            )
+            if not quality.ok:
+                resource.processing_status = "text_invalid"
+                resource.error_message = quality.message
+                db.commit()
+                db.refresh(resource)
+                return resource
             item = KnowledgeItem(
                 title=resource.title,
                 content=text,
@@ -430,7 +467,7 @@ def delete_resource(resource_id: str, db: Session = Depends(get_db)):
 
 @router.post("/resources/{resource_id}/ingest", response_model=KnowledgeResourceOut)
 def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
-    """Trigger resource ingestion without waiting for Engine to finish."""
+    """Queue resource ingestion without waiting for Engine to finish."""
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
@@ -445,15 +482,65 @@ def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
             status_code=400,
             detail={"code": "no_item", "message": "Resource has no associated knowledge item"},
         )
-    if resource.processing_status == "processing":
-        return resource
-
-    resource.processing_status = "processing"
-    resource.error_message = None
-    db.commit()
+    if resource.processing_status == "text_invalid":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "text_invalid",
+                "message": resource.error_message or "Resource text is invalid",
+            },
+        )
+    try:
+        enqueue_ingest_job(
+            db,
+            _redis_client(),
+            resource.id,
+            queue_name=settings.KNOWLEDGE_INGEST_QUEUE,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
     db.refresh(resource)
+    return resource
 
-    _trigger_resource_ingestion(resource.id, resource.item_id)
+
+@router.post("/resources/{resource_id}/governance/retry", response_model=KnowledgeResourceOut)
+def retry_resource_governance(resource_id: str, db: Session = Depends(get_db)):
+    resource = db.query(KnowledgeFile).filter(
+        KnowledgeFile.id == resource_id,
+        KnowledgeFile.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "Resource not found"},
+        )
+    if resource.processing_status != "done":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "not_vectorized", "message": "Resource is not vectorized"},
+        )
+    if resource.governance_status != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "governance_not_failed", "message": "Governance is not failed"},
+        )
+
+    try:
+        enqueue_governance_job(
+            db,
+            _redis_client(),
+            resource.id,
+            queue_name=settings.KNOWLEDGE_GOVERNANCE_QUEUE,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    db.refresh(resource)
     return resource
 
 

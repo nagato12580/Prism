@@ -1,5 +1,6 @@
 # prism/backend/app/models/__init__.py
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
+from .knowledge_job import KnowledgeJob
 from .chat import ChatSession, ChatMessage
 from .wiki import WikiDocument, WikiConcept, WikiKnowledgePoint, WikiKnowledgeRelation, WikiImage, WikiExtractionLog
 from .memory import (
@@ -26,6 +27,7 @@ __all__ = [
     "KnowledgeItem",
     "KnowledgeChunk",
     "KnowledgeFile",
+    "KnowledgeJob",
     "ChatSession",
     "ChatMessage",
     "WikiDocument",

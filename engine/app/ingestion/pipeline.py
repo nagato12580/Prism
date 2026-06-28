@@ -1,5 +1,5 @@
 # prism/engine/app/ingestion/pipeline.py
-"""Ingestion pipeline: chunk, embed, store vectors, index text, settle governance."""
+"""Ingestion pipeline: chunk, embed, store vectors, and index text."""
 
 import logging
 import time
@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from ..config import settings
 from ..es_client import CHUNKS_INDEX, get_es
-from ..milvus_client import insert_vectors
+from ..milvus_client import delete_vectors_by_item, insert_vectors_batch
 from .chunker import chunk_parent_child
 from .vectorizer import embed_texts
 
@@ -38,6 +38,15 @@ def _log_stage(item_id: str, stage: str, **fields) -> None:
     logger.info("[ingest.pipeline] %s item_id=%s stage=%s%s", stage, item_id, stage, suffix)
 
 
+def _report(progress, stage: str, current: int = 0, total: int = 0) -> None:
+    if not progress:
+        return
+    try:
+        progress(stage=stage, current=current, total=total)
+    except Exception as exc:
+        logger.warning("[ingest.pipeline] progress callback skipped stage=%s error=%s", stage, exc)
+
+
 def _resolve_topic_info(db, item_id: str) -> tuple[str | None, str | None, str | None]:
     from backend.app.models.knowledge_item import KnowledgeFile, KnowledgeItem
 
@@ -55,14 +64,22 @@ def _resolve_topic_info(db, item_id: str) -> tuple[str | None, str | None, str |
 
 def _delete_es_chunks_by_item(item_id: str) -> None:
     es = get_es()
+    response = None
     try:
-        es.delete_by_query(
+        response = es.delete_by_query(
             index=CHUNKS_INDEX,
             body={"query": {"term": {"item_id": item_id}}},
             refresh=True,
         )
     except Exception as exc:
-        logger.warning("[ingest.pipeline] delete_es_chunks skipped item_id=%s error=%s", item_id, exc)
+        logger.exception("[ingest.pipeline] delete_es_chunks failed item_id=%s error=%s", item_id, exc)
+        raise
+    body = getattr(response, "body", response)
+    getter = body.get if hasattr(body, "get") else None
+    timed_out = getter("timed_out", False) if getter else getattr(body, "timed_out", False)
+    failures = getter("failures", None) if getter else getattr(body, "failures", None)
+    if timed_out or failures:
+        raise RuntimeError(f"delete_es_chunks failed item_id={item_id} timed_out={timed_out} failures={failures}")
 
 
 def _bulk_index_chunks_es(
@@ -132,17 +149,14 @@ def _bulk_index_chunks_es(
         es.indices.refresh(index=CHUNKS_INDEX)
         return success
     except Exception as exc:
-        logger.warning("[ingest.pipeline] index_es skipped item_id=%s error=%s", item_id, exc)
-        return 0
+        logger.exception("[ingest.pipeline] index_es failed item_id=%s error=%s", item_id, exc)
+        raise
 
 
-def ingest_item(item_id: str) -> int:
+def ingest_item(item_id: str, progress=None) -> int:
     """Process one knowledge item and return the number of child chunks."""
     from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem
-    from backend.app.services.knowledge_governance import (
-        clear_document_item_governance,
-        settle_document_item_to_governance,
-    )
+    from backend.app.services.knowledge_governance import clear_document_item_governance
 
     started_at = time.monotonic()
     db = _Session()
@@ -153,12 +167,15 @@ def ingest_item(item_id: str) -> int:
             _log_stage(item_id, "empty_item")
             return 0
 
-        _log_stage(item_id, "cleanup")
-        clear_document_item_governance(db, item_id)
-        db.query(KnowledgeChunk).filter(KnowledgeChunk.item_id == item_id).delete()
+        content = item.content
+        item_summary = content[:200]
 
-        _log_stage(item_id, "chunking", chars=len(item.content or ""))
-        parents = chunk_parent_child(item.content)
+        _log_stage(item_id, "resolve_topic")
+        topic_id, doc_name, source_type = _resolve_topic_info(db, item_id)
+
+        _log_stage(item_id, "chunking", chars=len(content or ""))
+        _report(progress, "chunking", 0, 0)
+        parents = chunk_parent_child(content)
         if not parents:
             _log_stage(item_id, "no_parent_chunks")
             return 0
@@ -172,20 +189,26 @@ def ingest_item(item_id: str) -> int:
             return 0
 
         _log_stage(item_id, "embedding", parents=len(parents), children=len(child_texts))
+        _report(progress, "embedding", 0, len(child_texts))
         embeddings = embed_texts(child_texts)
+        if len(embeddings) != len(child_texts):
+            raise RuntimeError(
+                f"Embedding count mismatch for item_id={item_id}: "
+                f"expected={len(child_texts)} actual={len(embeddings)}"
+            )
+        _report(progress, "embedding", len(embeddings), len(child_texts))
         _log_stage(item_id, "embedding_done", vectors=len(embeddings))
-
-        _log_stage(item_id, "resolve_topic")
-        topic_id, doc_name, source_type = _resolve_topic_info(db, item_id)
-
-        _log_stage(item_id, "delete_es_chunks")
-        _delete_es_chunks_by_item(item_id)
 
         parent_id_map_by_index: dict[int, str] = {}
         child_id_map_by_position: dict[tuple[int, int], str] = {}
         child_parent_id_map: dict[tuple[int, int], str] = {}
 
+        _log_stage(item_id, "cleanup")
+        clear_document_item_governance(db, item_id)
+        db.query(KnowledgeChunk).filter(KnowledgeChunk.item_id == item_id).delete()
+
         _log_stage(item_id, "store_mysql_chunks", parents=len(parents), children=len(child_texts))
+        _report(progress, "store_mysql_chunks", 0, len(child_texts))
         for parent_index, pc in enumerate(parents):
             parent = KnowledgeChunk(
                 item_id=item_id,
@@ -216,16 +239,30 @@ def ingest_item(item_id: str) -> int:
                 child_id_map_by_position[child_position] = child.id
                 child_parent_id_map[child_position] = parent.id
 
+        item.summary = item_summary
+        db.flush()
+        db.commit()
+        _report(progress, "store_mysql_chunks", len(child_texts), len(child_texts))
+
+        _log_stage(item_id, "delete_es_chunks")
+        _delete_es_chunks_by_item(item_id)
+
         _log_stage(item_id, "store_milvus", vectors=len(embeddings))
+        _report(progress, "store_milvus", 0, len(embeddings))
+        vector_rows = []
         child_embedding_index = 0
         for parent_index, pc in enumerate(parents):
             for child_index, _child_text in enumerate(pc.children):
                 cid = child_id_map_by_position[(parent_index, child_index)]
                 emb = embeddings[child_embedding_index]
-                insert_vectors(chunk_id=cid, item_id=item_id, embedding=emb)
+                vector_rows.append({"chunk_id": cid, "item_id": item_id, "embedding": emb})
                 child_embedding_index += 1
+        delete_vectors_by_item(item_id)
+        insert_vectors_batch(vector_rows)
+        _report(progress, "store_milvus", len(vector_rows), len(embeddings))
 
         _log_stage(item_id, "index_es", parents=len(parents), children=len(child_texts))
+        _report(progress, "index_es", 0, len(child_texts))
         es_count = _bulk_index_chunks_es(
             item_id=item_id,
             topic_id=topic_id,
@@ -237,10 +274,8 @@ def ingest_item(item_id: str) -> int:
             child_parent_id_map=child_parent_id_map,
         )
         _log_stage(item_id, "index_es_done", indexed=es_count)
+        _report(progress, "index_es", len(child_texts), len(child_texts))
 
-        item.summary = item.content[:200]
-        _log_stage(item_id, "settle_governance")
-        settle_document_item_to_governance(db, item_id)
         _log_stage(item_id, "commit")
         db.commit()
         elapsed_ms = int((time.monotonic() - started_at) * 1000)

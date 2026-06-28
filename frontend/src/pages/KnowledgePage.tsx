@@ -41,6 +41,55 @@ const MEDIA_LABEL: Record<ResourceMediaType, string> = {
   video: '视频',
 }
 
+type ResourcePrimaryStatus =
+  | 'text-invalid'
+  | 'queued'
+  | 'vectorizing'
+  | 'vectorization-failed'
+  | 'ready'
+  | 'complete'
+  | 'governance-running'
+  | 'partial-complete'
+  | 'vectorized'
+  | string
+
+const RESOURCE_STATUS_LABELS: Record<string, string> = {
+  'text-invalid': '文本异常',
+  queued: '排队中',
+  vectorizing: '向量化中',
+  'vectorization-failed': '向量化失败',
+  ready: '待向量化',
+  complete: '已完成',
+  'governance-running': '整理中',
+  'partial-complete': '部分完成',
+  vectorized: '已向量化',
+  metadata_only: '仅元数据',
+}
+
+function resourcePrimaryStatus(resource: KnowledgeResource): ResourcePrimaryStatus {
+  if (resource.processing_status === 'text_invalid') return 'text-invalid'
+  if (resource.processing_status === 'queued') return 'queued'
+  if (resource.processing_status === 'processing') return 'vectorizing'
+  if (resource.processing_status === 'failed') return 'vectorization-failed'
+  if (resource.processing_status === 'completed') return 'ready'
+
+  if (resource.processing_status === 'done') {
+    if (resource.governance_status === 'done') return 'complete'
+    if (resource.governance_status === 'queued' || resource.governance_status === 'processing') {
+      return 'governance-running'
+    }
+    if (resource.governance_status === 'failed') return 'partial-complete'
+    return 'vectorized'
+  }
+
+  return resource.processing_status
+}
+
+function resourceNeedsPolling(resource: KnowledgeResource) {
+  const status = resourcePrimaryStatus(resource)
+  return status === 'queued' || status === 'vectorizing' || status === 'governance-running'
+}
+
 function formatDate(value: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -84,18 +133,32 @@ export function KnowledgePage() {
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [editingResourceTitle, setEditingResourceTitle] = useState('')
   const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set())
+  const [retryingGovernanceIds, setRetryingGovernanceIds] = useState<Set<string>>(new Set())
+  const [ingestingTopic, setIngestingTopic] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const activeTopicIdRef = useRef<string | null>(activeTopicId)
+
+  const selectTopic = (topicId: string | null) => {
+    activeTopicIdRef.current = topicId
+    setActiveTopicId(topicId)
+  }
 
   const activeTopic = topics.find((topic) => topic.id === activeTopicId) || null
-  const hasProcessingResources = resources.some((resource) => resource.processing_status === 'processing')
+  const hasProcessingResources = resources.some(resourceNeedsPolling)
+
+  useEffect(() => {
+    activeTopicIdRef.current = activeTopicId
+  }, [activeTopicId])
 
   const loadTopics = async () => {
     setLoadingTopics(true)
     try {
       const loaded = await knowledgeApi.listTopics()
       setTopics(loaded)
-      setActiveTopicId((current) => current || loaded[0]?.id || null)
+      if (!activeTopicIdRef.current) {
+        selectTopic(loaded[0]?.id || null)
+      }
     } catch (err) {
       setError(`知识库主题加载失败：${getErrorMessage(err)}`)
     } finally {
@@ -103,15 +166,19 @@ export function KnowledgePage() {
     }
   }
 
-  const loadResources = async (topicId: string, nextFilter = filter, options?: { silent?: boolean }) => {
+  const loadResourcesForTopic = async (topicId: string, nextFilter = filter, options?: { silent?: boolean }) => {
     if (!options?.silent) setLoadingResources(true)
     try {
       const params = nextFilter === 'all' ? undefined : { media_type: nextFilter }
-      setResources(await knowledgeApi.listResources(topicId, params))
+      const loaded = await knowledgeApi.listResources(topicId, params)
+      if (activeTopicIdRef.current === topicId) {
+        setResources(loaded)
+      }
     } catch (err) {
+      if (activeTopicIdRef.current !== topicId) return
       setError(`资源加载失败：${getErrorMessage(err)}`)
     } finally {
-      if (!options?.silent) setLoadingResources(false)
+      if (!options?.silent && activeTopicIdRef.current === topicId) setLoadingResources(false)
     }
   }
 
@@ -121,7 +188,7 @@ export function KnowledgePage() {
 
   useEffect(() => {
     if (activeTopicId) {
-      loadResources(activeTopicId)
+      loadResourcesForTopic(activeTopicId)
     } else {
       setResources([])
     }
@@ -131,7 +198,7 @@ export function KnowledgePage() {
     if (!activeTopicId || !hasProcessingResources) return
 
     const timer = window.setInterval(() => {
-      void loadResources(activeTopicId, filter, { silent: true })
+      void loadResourcesForTopic(activeTopicId, filter, { silent: true })
     }, 3000)
     return () => window.clearInterval(timer)
   }, [activeTopicId, filter, hasProcessingResources])
@@ -151,7 +218,7 @@ export function KnowledgePage() {
         description: newTopicDescription.trim() || undefined,
       })
       setTopics((current) => [topic, ...current])
-      setActiveTopicId(topic.id)
+      selectTopic(topic.id)
       setNewTopicName('')
       setNewTopicDescription('')
       setShowTopicForm(false)
@@ -197,8 +264,8 @@ export function KnowledgePage() {
     try {
       await knowledgeApi.deleteTopic(topic.id)
       setTopics((current) => current.filter((item) => item.id !== topic.id))
-      if (activeTopicId === topic.id) {
-        setActiveTopicId(topics.find((item) => item.id !== topic.id)?.id || null)
+      if (activeTopicIdRef.current === topic.id) {
+        selectTopic(topics.find((item) => item.id !== topic.id)?.id || null)
       }
     } catch (err) {
       setError(readApiError(err, '目录删除失败'))
@@ -226,7 +293,7 @@ export function KnowledgePage() {
           }
         }),
       )
-      await Promise.all([loadTopics(), loadResources(activeTopicId)])
+      await Promise.all([loadTopics(), loadResourcesForTopic(activeTopicId)])
       if (failed > 0) {
         setError(`${success} 个上传成功，${failed} 个失败`)
       }
@@ -266,7 +333,16 @@ export function KnowledgePage() {
   }
 
   const handleIngest = async (resourceId: string) => {
-    if (busy || ingestingIds.has(resourceId) || !activeTopicId) return
+    const resource = resources.find((item) => item.id === resourceId)
+    const status = resource ? resourcePrimaryStatus(resource) : null
+    if (
+      busy ||
+      ingestingIds.has(resourceId) ||
+      !activeTopicId ||
+      (status !== 'ready' && status !== 'vectorization-failed')
+    ) {
+      return
+    }
 
     setIngestingIds((current) => new Set(current).add(resourceId))
     setError(null)
@@ -286,6 +362,57 @@ export function KnowledgePage() {
     }
   }
 
+  const handleRetryGovernance = async (resourceId: string) => {
+    const topicId = activeTopicId
+    const resource = resources.find((item) => item.id === resourceId)
+    const status = resource ? resourcePrimaryStatus(resource) : null
+    if (!topicId || busy || retryingGovernanceIds.has(resourceId) || status !== 'partial-complete') {
+      return
+    }
+
+    setRetryingGovernanceIds((current) => new Set(current).add(resourceId))
+    setError(null)
+    try {
+      const updated = await knowledgeApi.retryGovernance(resourceId)
+      if (activeTopicIdRef.current !== topicId) return
+      setResources((current) =>
+        current.map((r) => (r.id === resourceId ? updated : r)),
+      )
+    } catch (err) {
+      if (activeTopicIdRef.current !== topicId) return
+      setError(readApiError(err, '知识整理重试失败'))
+    } finally {
+      setRetryingGovernanceIds((current) => {
+        const next = new Set(current)
+        next.delete(resourceId)
+        return next
+      })
+    }
+  }
+
+  const handleIngestTopic = async () => {
+    if (busy || ingestingTopic || !activeTopicId) return
+    const topicId = activeTopicId
+
+    setIngestingTopic(true)
+    setError(null)
+    try {
+      const result = await knowledgeApi.ingestTopicResources(topicId)
+      await loadResourcesForTopic(topicId)
+      if (activeTopicIdRef.current !== topicId) return
+      if (result.failed > 0 || result.messages.length > 0) {
+        setError(
+          `批量向量化已排队 ${result.queued} 个，跳过 ${result.skipped} 个，失败 ${result.failed} 个。${result.messages.join('；')}`,
+        )
+      }
+    } catch (err) {
+      if (activeTopicIdRef.current !== topicId) return
+      setError(readApiError(err, '批量向量化失败'))
+    } finally {
+      setIngestingTopic(false)
+    }
+  }
+
   const handleDeleteResource = async (resourceId: string) => {
     if (busy || !activeTopicId || !confirm('确认删除这个资源吗？')) return
 
@@ -293,7 +420,7 @@ export function KnowledgePage() {
     setError(null)
     try {
       await knowledgeApi.deleteResource(resourceId)
-      await Promise.all([loadTopics(), loadResources(activeTopicId)])
+      await Promise.all([loadTopics(), loadResourcesForTopic(activeTopicId)])
     } catch (err) {
       setError(readApiError(err, '资源删除失败'))
     } finally {
@@ -361,7 +488,7 @@ export function KnowledgePage() {
                   busy={busy}
                   editing={editingTopicId === topic.id}
                   editingName={editingTopicName}
-                  onSelect={() => setActiveTopicId(topic.id)}
+                  onSelect={() => selectTopic(topic.id)}
                   onStartEdit={() => startTopicEdit(topic)}
                   onChangeEdit={setEditingTopicName}
                   onSaveEdit={saveTopicName}
@@ -389,6 +516,16 @@ export function KnowledgePage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <input ref={fileRef} type="file" className="hidden" accept={ACCEPTED_RESOURCE_EXTENSIONS} onChange={handleUpload} multiple />
+                    <button
+                      type="button"
+                      disabled={busy || ingestingTopic}
+                      onClick={handleIngestTopic}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-55"
+                      title="批量向量化当前主题文档"
+                    >
+                      {ingestingTopic ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                      批量向量化
+                    </button>
                     <button
                       type="button"
                       disabled={busy}
@@ -436,6 +573,7 @@ export function KnowledgePage() {
                       resource={resource}
                       busy={busy}
                       ingesting={ingestingIds.has(resource.id)}
+                      retryingGovernance={retryingGovernanceIds.has(resource.id)}
                       editing={editingResourceId === resource.id}
                       editingTitle={editingResourceTitle}
                       onStartEdit={() => startResourceEdit(resource)}
@@ -443,6 +581,7 @@ export function KnowledgePage() {
                       onSaveEdit={saveResourceTitle}
                       onCancelEdit={() => setEditingResourceId(null)}
                       onIngest={() => handleIngest(resource.id)}
+                      onRetryGovernance={() => handleRetryGovernance(resource.id)}
                       onDelete={handleDeleteResource}
                     />
                   ))}
@@ -586,6 +725,7 @@ function EmptyState({
 }
 
 function statusLabel(status: string) {
+  if (RESOURCE_STATUS_LABELS[status]) return RESOURCE_STATUS_LABELS[status]
   const labels: Record<string, string> = {
     pending: '待解析',
     processing: '处理中',
@@ -598,9 +738,9 @@ function statusLabel(status: string) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const isError = status === 'failed'
-  const isDone = status === 'done'
-  const isProcessing = status === 'processing'
+  const isError = status === 'vectorization-failed' || status === 'text-invalid' || status === 'partial-complete'
+  const isDone = status === 'complete' || status === 'vectorized'
+  const isProcessing = status === 'queued' || status === 'vectorizing' || status === 'governance-running'
 
   return (
     <span
@@ -634,6 +774,7 @@ function ResourceCard({
   resource,
   busy,
   ingesting,
+  retryingGovernance,
   editing,
   editingTitle,
   onStartEdit,
@@ -641,11 +782,13 @@ function ResourceCard({
   onSaveEdit,
   onCancelEdit,
   onIngest,
+  onRetryGovernance,
   onDelete,
 }: {
   resource: KnowledgeResource
   busy: boolean
   ingesting: boolean
+  retryingGovernance: boolean
   editing: boolean
   editingTitle: string
   onStartEdit: () => void
@@ -653,10 +796,16 @@ function ResourceCard({
   onSaveEdit: () => void
   onCancelEdit: () => void
   onIngest: () => void
+  onRetryGovernance: () => void
   onDelete: (id: string) => void
 }) {
   const uploadedDate = formatDate(resource.uploaded_at)
   const displayTitle = resource.title || resource.original_filename
+  const primaryStatus = resourcePrimaryStatus(resource)
+  const canIngest = primaryStatus === 'ready' || primaryStatus === 'vectorization-failed'
+  const isActive = primaryStatus === 'queued' || primaryStatus === 'vectorizing' || primaryStatus === 'governance-running'
+  const governanceProgressTotal = resource.governance_progress_total || 0
+  const governanceProgressCurrent = resource.governance_progress_current || 0
   const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') onSaveEdit()
     if (event.key === 'Escape') onCancelEdit()
@@ -682,14 +831,14 @@ function ResourceCard({
           )}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{resource.file_ext.replace('.', '').toUpperCase() || MEDIA_LABEL[resource.media_type]}</span>
-            <StatusBadge status={resource.processing_status} />
+            <StatusBadge status={primaryStatus} />
             <span>{formatSize(resource.file_size)}</span>
             {uploadedDate && <span>{uploadedDate}</span>}
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-1">
           {/* 已向量化：实心紫色闪电 */}
-          {resource.media_type === 'document' && resource.processing_status === 'done' && (
+          {resource.media_type === 'document' && (primaryStatus === 'complete' || primaryStatus === 'vectorized') && (
             <span
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-500"
               title="已向量化"
@@ -698,7 +847,7 @@ function ResourceCard({
             </span>
           )}
           {/* 未向量化：空心闪电，可点击触发 */}
-          {resource.media_type === 'document' && resource.processing_status === 'completed' && (
+          {resource.media_type === 'document' && canIngest && (
             <button
               type="button"
               disabled={ingesting}
@@ -714,7 +863,7 @@ function ResourceCard({
             </button>
           )}
           {/* 处理中：旋转 */}
-          {resource.media_type === 'document' && resource.processing_status === 'processing' && (
+          {resource.media_type === 'document' && isActive && (
             <span
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-400"
               title="向量化处理中"
@@ -723,14 +872,19 @@ function ResourceCard({
             </span>
           )}
           {/* 失败：红色警告 */}
-          {resource.media_type === 'document' && resource.processing_status === 'failed' && (
+          {resource.media_type === 'document' && primaryStatus === 'partial-complete' && (
             <button
               type="button"
-              onClick={onIngest}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-red-400 transition hover:bg-red-50 hover:text-red-600"
-              title="向量化失败，点击重试"
+              disabled={busy || retryingGovernance}
+              onClick={onRetryGovernance}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-400 transition hover:bg-amber-100 hover:text-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              title="知识整理失败，后续可重试"
             >
-              <Zap size={15} />
+              {retryingGovernance ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Zap size={15} fill="currentColor" />
+              )}
             </button>
           )}
           {editing ? (
@@ -755,7 +909,27 @@ function ResourceCard({
         </div>
       </div>
 
+      {resource.governance_status === 'processing' && governanceProgressTotal > 0 && (
+        <div className="mt-3 rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-700">
+          <div className="flex items-center justify-between gap-3">
+            <span>知识整理进度</span>
+            <span>
+              {governanceProgressCurrent}/{governanceProgressTotal}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-violet-100">
+            <div
+              className="h-full rounded-full bg-violet-500 transition-all"
+              style={{
+                width: `${Math.min(100, Math.max(0, (governanceProgressCurrent / governanceProgressTotal) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {resource.error_message && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">{resource.error_message}</p>}
+      {resource.governance_error_message && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-700">{resource.governance_error_message}</p>}
 
       {resource.tags?.length ? (
         <div className="mt-auto flex flex-wrap gap-2 pt-4">

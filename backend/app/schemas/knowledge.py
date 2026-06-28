@@ -77,6 +77,30 @@ class KnowledgeTopicOut(BaseModel):
         from_attributes = True
 
 
+class KnowledgeJobSummary(BaseModel):
+    id: str
+    job_type: str
+    status: str
+    stage: str
+    attempts: int
+    max_attempts: int
+    progress_current: int
+    progress_total: int
+    error_code: str
+    error_message: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class TopicIngestOut(BaseModel):
+    queued: int
+    skipped: int
+    failed: int
+    job_ids: list[str] = Field(default_factory=list)
+    messages: list[str] = Field(default_factory=list)
+
+
 class KnowledgeResourceUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
 
@@ -105,6 +129,13 @@ class KnowledgeResourceOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     error_message: Optional[str]
+    governance_status: str = "not_started"
+    governance_progress_current: int = 0
+    governance_progress_total: int = 0
+    governance_error_message: Optional[str] = None
+    governance_started_at: Optional[datetime] = None
+    governance_finished_at: Optional[datetime] = None
+    latest_job: Optional[KnowledgeJobSummary] = None
 
     class Config:
         from_attributes = True
