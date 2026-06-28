@@ -24,6 +24,7 @@ def tool_result_event(
     query: str = "",
     stats: dict[str, Any] | None = None,
     latency_ms: int | None = None,
+    trace_steps: list[dict[str, Any]] | None = None,
 ) -> str:
     data: dict[str, Any] = {
         "tool": tool,
@@ -35,6 +36,8 @@ def tool_result_event(
         data["stats"] = stats
     if latency_ms is not None:
         data["latency_ms"] = latency_ms
+    if trace_steps:
+        data["trace_steps"] = trace_steps
     return ndjson_event("tool_result", data)
 
 

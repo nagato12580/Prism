@@ -47,6 +47,7 @@ def insert_vectors_batch(rows: list[dict]):
         return
 
     coll = ensure_collection()
+    coll.load()  # 确保 collection 已加载
     chunk_ids = [row["chunk_id"] for row in rows]
     embeddings = [row["embedding"] for row in rows]
     item_ids = [row["item_id"] for row in rows]
@@ -65,6 +66,7 @@ def delete_vectors_by_item(item_id: str):
         return
 
     coll = ensure_collection()
+    coll.load()  # collection 必须加载到内存才能 delete
     escaped_item_id = item_id.replace("\\", "\\\\").replace('"', '\\"')
     coll.delete(expr=f'item_id == "{escaped_item_id}"')
     coll.flush()

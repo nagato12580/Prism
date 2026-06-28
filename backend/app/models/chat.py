@@ -38,6 +38,7 @@ class ChatMessage(Base):
     content = Column(Text, comment="消息内容")
     sources = Column(JSON, comment="引用的知识块ID列表")
     clarify = Column(JSON, nullable=True, default=None, comment="追问卡片数据")
+    process = Column(JSON, nullable=True, default=None, comment="assistant process state")
     created_at = Column(DateTime, default=local_now)
 
     session = relationship("ChatSession", back_populates="messages")

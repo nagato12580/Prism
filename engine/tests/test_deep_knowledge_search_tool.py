@@ -109,5 +109,11 @@ def test_deep_knowledge_search_returns_judged_evidence(monkeypatch):
     assert payload["judge"]["overall_score"] > 0
     assert len(payload["evidence"]) >= 1
     assert len(payload["sources"]) >= 1
+    assert len(payload["trace_steps"]) >= 3
+    assert any(step["agent"] == "SearcherAgent" for step in payload["trace_steps"])
+    assert any(step["agent"] == "JudgeAgent" for step in payload["trace_steps"])
+    assert all("label" in step and "detail" in step for step in payload["trace_steps"])
+    assert payload["stats"]["trace_step_count"] == len(payload["trace_steps"])
+    assert payload["stats"]["deep_trace_steps"] == payload["trace_steps"]
     assert ctx.citations == payload["sources"]
     assert ctx.stats_holder["deep_knowledge_search"]["evidence_count"] == len(payload["evidence"])

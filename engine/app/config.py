@@ -37,6 +37,11 @@ class Settings:
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen-plus")
+    DEEP_SEARCH_JUDGE_API_BASE: str = os.getenv("DEEP_SEARCH_JUDGE_API_BASE", "")
+    DEEP_SEARCH_JUDGE_API_KEY: str = os.getenv("DEEP_SEARCH_JUDGE_API_KEY", "")
+    DEEP_SEARCH_JUDGE_MODEL: str = os.getenv("DEEP_SEARCH_JUDGE_MODEL", "")
+    DEEP_SEARCH_JUDGE_MIN_OVERALL_SCORE: float = float(os.getenv("DEEP_SEARCH_JUDGE_MIN_OVERALL_SCORE", "0.72"))
+    DEEP_SEARCH_JUDGE_MIN_SOURCE_EVIDENCE: int = int(os.getenv("DEEP_SEARCH_JUDGE_MIN_SOURCE_EVIDENCE", "1"))
 
     EMBEDDING_API_BASE: str = os.getenv("EMBEDDING_API_BASE", "")
     EMBEDDING_API_KEY: str = os.getenv("EMBEDDING_API_KEY", "")

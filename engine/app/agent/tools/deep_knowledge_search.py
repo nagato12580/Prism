@@ -33,14 +33,18 @@ def _build_deep_knowledge_search(ctx: ToolContext) -> StructuredTool:
         result = orchestrator.run(query)
         payload = result.to_payload()
         _append_unique_citations(ctx.citations, payload["sources"])
+        trace_steps = payload.get("trace_steps") or []
         ctx.stats_holder[KEY] = {
             "status": payload["status"],
             "iterations": payload["iterations"],
             "evidence_count": len(payload["evidence"]),
             "source_count": len(payload["sources"]),
             "judge_overall_score": payload["judge"]["overall_score"],
+            "trace_step_count": len(trace_steps),
+            "deep_trace_steps": trace_steps,
             "depth": config.depth,
         }
+        payload["stats"] = ctx.stats_holder[KEY]
         return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(

@@ -23,6 +23,33 @@ class FakeTool:
         )
 
 
+class FakeTraceTool:
+    name = "deep_knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "partial",
+                "summary": "Deep search collected evidence.",
+                "trace_steps": [
+                    {
+                        "agent": "SearcherAgent",
+                        "iteration": 1,
+                        "label": "第 1 轮 · Searcher · Scope Finder",
+                        "detail": "命中 1 个 CKP、2 个 PKU",
+                    },
+                    {
+                        "agent": "JudgeAgent",
+                        "iteration": 1,
+                        "label": "第 1 轮 · Judge",
+                        "detail": "overall=0.68 status=incomplete",
+                    },
+                ],
+                "sources": [],
+            }
+        )
+
+
 class FakeModel:
     def __init__(self):
         self.calls = 0
@@ -39,6 +66,28 @@ class FakeModel:
                         "id": "call_1",
                         "name": "knowledge_search",
                         "args": {"query": "phase 2"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="Final answer")
+
+
+class FakeTraceModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_trace",
+                        "name": "deep_knowledge_search",
+                        "args": {"query": "deep search"},
                     }
                 ]
             )
@@ -65,6 +114,28 @@ def test_runner_emits_tool_sources_tokens_and_done():
         "done",
     ]
     assert json.loads(lines[-2])["data"] == "Final answer"
+
+
+def test_runner_includes_tool_trace_steps_in_tool_result_event():
+    runner = LangChainAgentRunner(model=FakeTraceModel(), tools=[FakeTraceTool()])
+
+    lines = list(runner.stream("How?", [{"role": "user", "content": "previous"}]))
+    tool_result = next(json.loads(line) for line in lines if json.loads(line)["type"] == "tool_result")
+
+    assert tool_result["data"]["trace_steps"] == [
+        {
+            "agent": "SearcherAgent",
+            "iteration": 1,
+            "label": "第 1 轮 · Searcher · Scope Finder",
+            "detail": "命中 1 个 CKP、2 个 PKU",
+        },
+        {
+            "agent": "JudgeAgent",
+            "iteration": 1,
+            "label": "第 1 轮 · Judge",
+            "detail": "overall=0.68 status=incomplete",
+        },
+    ]
 
 
 def test_runner_emits_title_on_first_exchange(monkeypatch):

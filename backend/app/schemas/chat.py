@@ -37,6 +37,7 @@ class ChatMessageOut(BaseModel):
     content: Optional[str]
     sources: Optional[list]
     clarify: Optional[dict] = None
+    process: Optional[dict] = None
     created_at: datetime
 
     class Config:
@@ -48,3 +49,11 @@ class ChatMessageCreate(BaseModel):
     content: str
     sources: Optional[list] = None
     clarify: Optional[dict] = None
+    process: Optional[dict] = None
+
+
+class ChatMessageUpdate(BaseModel):
+    content: Optional[str] = None
+    sources: Optional[list] = None
+    clarify: Optional[dict] = None
+    process: Optional[dict] = None

@@ -31,6 +31,7 @@ import {
   type ClarifyRequest,
   type Message,
   type Source,
+  type ToolRunStatus,
   type ToolRun,
   type ThinkingStep,
 } from '@/app/chatStore'
@@ -75,6 +76,10 @@ function safeString(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback
 }
 
+function normalizeStepStatus(value: unknown): ToolRunStatus {
+  return value === 'running' || value === 'error' ? value : 'success'
+}
+
 function normalizeSources(value: unknown): Source[] {
   if (!Array.isArray(value)) return []
   return value
@@ -96,6 +101,34 @@ function normalizeSources(value: unknown): Source[] {
       text: typeof source.text === 'string' ? source.text : undefined,
     }))
     .filter((source) => source.chunk_id || source.item_id || source.display_id || source.source_id)
+}
+
+function normalizeThinkingSteps(value: unknown): ThinkingStep[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((step): step is Record<string, unknown> => typeof step === 'object' && step !== null)
+    .map((step) => ({
+      label: safeString(step.label, safeString(step.agent, 'step')),
+      detail: safeString(step.detail),
+      agent: typeof step.agent === 'string' ? step.agent : undefined,
+      iteration: typeof step.iteration === 'number' ? step.iteration : undefined,
+      status: normalizeStepStatus(step.status),
+    }))
+    .filter((step) => step.label)
+}
+
+function mergeThinkingSteps(...values: unknown[]): ThinkingStep[] {
+  const steps: ThinkingStep[] = []
+  const seen = new Set<string>()
+  for (const value of values) {
+    for (const step of normalizeThinkingSteps(value)) {
+      const key = `${step.iteration || ''}:${step.agent || ''}:${step.label}:${step.detail || ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      steps.push(step)
+    }
+  }
+  return steps
 }
 
 function sourceDisplayTitle(source: Source) {
@@ -143,6 +176,14 @@ function shouldAutoGenerateTitle(title?: string | null) {
   return !normalized || normalized === '新对话' || normalized === 'New conversation' || normalized === 'Untitled session'
 }
 
+function buildAssistantProcess(message: Message) {
+  return {
+    agent_status: message.agentStatus || null,
+    tool_runs: message.toolRuns || [],
+    thinking_steps: message.thinkingSteps || [],
+  }
+}
+
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -179,6 +220,8 @@ export function ChatPage() {
   const updateSessionTitle = useChatStore((s) => s.updateSessionTitle)
   const removeSession = useChatStore((s) => s.removeSession)
   const loadMessages = useChatStore((s) => s.loadMessages)
+  const replaceMessageId = useChatStore((s) => s.replaceMessageId)
+  const getSessionMessages = useChatStore((s) => s.getSessionMessages)
   const restoreFromSession = useChatStore((s) => s.restoreFromSession)
   const [showTopicPicker, setShowTopicPicker] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
@@ -216,7 +259,7 @@ export function ChatPage() {
           }
           try {
             const msgs = await chatApi.listMessages(latest.id)
-            if (!cancelled) loadMessages(msgs)
+            if (!cancelled) loadMessages(latest.id, msgs)
           } catch { /* messages restore best-effort */ }
         }
       } catch { /* sessions load failed — stay empty */ }
@@ -304,10 +347,23 @@ export function ChatPage() {
       .filter((m) => !m.streaming)
       .map((m) => ({ role: m.role, content: historyContent(m) }))
 
-    addMessage({ id: genId(), role: 'user', content: query })
-    addMessage({ id: genId(), role: 'assistant', content: '', streaming: true })
+    const userMessageId = genId()
+    const temporaryAssistantMessageId = genId()
+    let assistantMessageId = temporaryAssistantMessageId
+    let assistantPersistedId: string | null = null
+    addMessage({ id: userMessageId, role: 'user', content: query }, sessionId)
+    addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
 
     const userPersistPromise = persistUserMessage(sessionId, query)
+    const assistantPersistPromise = persistAssistantPlaceholder(sessionId)
+    try {
+      const persisted = await assistantPersistPromise
+      if (persisted) {
+        assistantPersistedId = persisted.id
+        replaceMessageId(sessionId, temporaryAssistantMessageId, persisted.id)
+        assistantMessageId = persisted.id
+      }
+    } catch { /* placeholder persistence is best-effort */ }
 
     let titleReceived = false
 
@@ -317,29 +373,40 @@ export function ChatPage() {
       try {
         const msg = JSON.parse(line)
         if (msg.type === 'agent_status') {
-          setLastAgentStatus(safeString(msg.data?.label))
+          setLastAgentStatus(safeString(msg.data?.label), sessionId, assistantMessageId)
+          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_call') {
           addLastToolRun({
             id: genId(),
             tool: safeString(msg.data?.tool, 'tool'),
             query: safeString(msg.data?.query),
             status: 'running',
-          })
+          }, sessionId, assistantMessageId)
+          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_result') {
           finishLastToolRun(safeString(msg.data?.tool, 'tool'), {
             status: safeString(msg.data?.status) === 'error' ? 'error' : 'success',
             summary: safeString(msg.data?.summary),
             stats: msg.data?.stats,
             latencyMs: msg.data?.latency_ms,
-          })
+            traceSteps: mergeThinkingSteps(
+              msg.data?.trace_steps,
+              msg.data?.stats?.deep_trace_steps,
+              msg.data?.stats?.trace_steps,
+            ),
+          }, sessionId, assistantMessageId)
+          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'clarify') {
           setLastClarify({
             question: normalizeClarifyQuestion(msg.data?.question),
             options: normalizeClarifyOptions(msg.data?.options),
-          })
-        } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data))
-        else if (msg.type === 'token') appendToLast(msg.data)
-        else if (msg.type === 'done') finishLast()
+          }, sessionId, assistantMessageId)
+        } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data), sessionId, assistantMessageId)
+        else if (msg.type === 'token') appendToLast(msg.data, sessionId, assistantMessageId)
+        else if (msg.type === 'done') {
+          finishLast(sessionId, assistantMessageId)
+          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+        }
         else if (msg.type === 'title') {
           const title = safeString(msg.data)
           if (sessionId && title) {
@@ -349,11 +416,11 @@ export function ChatPage() {
           }
         }
         else if (msg.type === 'error') {
-          appendToLast(`\n\n请求失败：${msg.data}`)
-          finishLast()
+          appendToLast(`\n\n请求失败：${msg.data}`, sessionId, assistantMessageId)
+          finishLast(sessionId, assistantMessageId)
         }
       } catch {
-        appendToLast('收到了一段无法解析的流式响应。')
+        appendToLast('收到了一段无法解析的流式响应。', sessionId, assistantMessageId)
       }
     }
 
@@ -397,24 +464,35 @@ export function ChatPage() {
 
       buffer += decoder.decode()
       handleStreamLine(buffer)
-      finishLast()
+      finishLast(sessionId, assistantMessageId)
     } catch (e) {
-      appendToLast('请求失败：' + (e as Error).message)
-      finishLast()
+      appendToLast('请求失败：' + (e as Error).message, sessionId, assistantMessageId)
+      finishLast(sessionId, assistantMessageId)
     } finally {
       setSending(false)
       // 持久化 AI 回复 + 标题生成
       if (sessionId) {
-        const msgs = useChatStore.getState().messages
-        const aiMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && !m.streaming)
+        const msgs = getSessionMessages(sessionId)
+        const aiMsg = msgs.find((m) => m.id === assistantMessageId && m.role === 'assistant' && !m.streaming)
         if (aiMsg) {
           try {
             await userPersistPromise
-            await chatApi.addMessage(sessionId, {
+            if (!assistantPersistedId) {
+              const persisted = await assistantPersistPromise
+              assistantPersistedId = persisted?.id || null
+            }
+            if (assistantPersistedId) await chatApi.updateMessage(sessionId, assistantPersistedId, {
+              content: aiMsg.content,
+              sources: aiMsg.sources || undefined,
+              clarify: aiMsg.clarify || undefined,
+              process: buildAssistantProcess(aiMsg),
+            })
+            else await chatApi.addMessage(sessionId, {
               role: 'assistant',
               content: aiMsg.content,
               sources: aiMsg.sources || undefined,
               clarify: aiMsg.clarify || undefined,
+              process: buildAssistantProcess(aiMsg),
             })
           } catch { /* persistence is best-effort for the chat UI */ }
         }
@@ -433,6 +511,16 @@ export function ChatPage() {
 
   const persistUserMessage = (sessionId: string, content: string) => {
     return chatApi.addMessage(sessionId, { role: 'user', content }).catch(() => undefined)
+  }
+
+  const persistAssistantPlaceholder = (sessionId: string) => {
+    return chatApi.addMessage(sessionId, { role: 'assistant', content: '' }).catch(() => undefined)
+  }
+
+  const persistAssistantProcessSnapshot = (sessionId: string, messageId: string) => {
+    const msg = getSessionMessages(sessionId).find((message) => message.id === messageId)
+    if (!msg) return
+    chatApi.updateMessage(sessionId, messageId, { process: buildAssistantProcess(msg) }).catch(() => {})
   }
 
   const sendClarifyFollowup = (value: string) => {
@@ -460,7 +548,6 @@ export function ChatPage() {
 
   const switchSession = async (sessionId: string) => {
     if (sessionId === currentSessionId) return
-    clear()
     clearSelectedTopic()
     clearSelectedSourceTypes()
     setExpandedSources({})
@@ -479,7 +566,7 @@ export function ChatPage() {
     }
     try {
       const msgs = await chatApi.listMessages(sessionId)
-      loadMessages(msgs)
+      loadMessages(sessionId, msgs)
     } catch { /* best effort */ }
   }
 
@@ -1072,10 +1159,16 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
   )
 }
 
-function stepIcon(tool: string) {
+function stepIcon(tool: string, status?: string) {
+  if (status === 'running') return <Loader2 size={13} className="animate-spin" />
+  if (status === 'error') return <AlertTriangle size={13} />
+  if (status === 'success') return <Check size={13} />
   if (tool === 'knowledge_search') return <Search size={13} />
+  if (tool === 'deep_knowledge_search') return <Search size={13} />
+  if (tool === 'SearcherAgent') return <Search size={13} />
+  if (tool === 'JudgeAgent') return <Check size={13} />
   if (tool === 'clarify_user') return <HelpCircle size={13} />
-  return <Loader2 size={13} className="animate-spin" />
+  return <Check size={13} />
 }
 
 function formatLatency(ms?: number) {
@@ -1110,12 +1203,12 @@ function ThinkingPanel({ msg }: { msg: Message }) {
               {steps.map((step, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs">
                   <span className="mt-0.5 shrink-0 text-slate-400">
-                    {stepIcon(runs?.[0]?.tool || '')}
+                    {stepIcon(step.agent || step.tool || runs?.[0]?.tool || '', step.status)}
                   </span>
                   <span className="min-w-0 flex-1 text-slate-700">{step.label}</span>
                   {step.detail && (
-                    <span className="max-w-32 shrink-0 truncate text-slate-400 sm:max-w-48">
-                      {step.detail}
+                    <span className="max-w-40 shrink-0 truncate text-slate-400 sm:max-w-64">
+                      {step.iteration ? `#${step.iteration} ` : ''}{step.agent ? `${step.agent} · ` : ''}{step.detail}
                     </span>
                   )}
                   {step.latencyMs !== undefined && (

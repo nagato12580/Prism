@@ -193,6 +193,7 @@ export interface ChatMessageOut {
   content: string | null
   sources: any[] | null
   clarify: any | null
+  process?: any | null
   created_at: string
 }
 
@@ -213,6 +214,14 @@ export interface ChatMessageCreate {
   content: string
   sources?: any[] | null
   clarify?: any | null
+  process?: any | null
+}
+
+export interface ChatMessageUpdate {
+  content?: string
+  sources?: any[] | null
+  clarify?: any | null
+  process?: any | null
 }
 
 export const chatApi = {
@@ -245,6 +254,12 @@ export const chatApi = {
   addMessage: (sessionId: string, data: ChatMessageCreate) =>
     request<ChatMessageOut>(`/chat/sessions/${sessionId}/messages`, {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateMessage: (sessionId: string, messageId: string, data: ChatMessageUpdate) =>
+    request<ChatMessageOut>(`/chat/sessions/${sessionId}/messages/${messageId}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     }),
 }

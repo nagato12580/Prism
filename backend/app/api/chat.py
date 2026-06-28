@@ -8,7 +8,7 @@ from ..database import get_db, SessionLocal
 from ..models.chat import ChatSession, ChatMessage
 from ..schemas.chat import (
     ChatSessionCreate, ChatSessionOut, ChatSessionUpdate,
-    ChatMessageOut, ChatMessageCreate,
+    ChatMessageOut, ChatMessageCreate, ChatMessageUpdate,
 )
 from ..config import settings
 from ..services.memory_extraction import extract_session_memories
@@ -29,8 +29,8 @@ def _run_memory_extraction_best_effort(session_id: str, limit: int = 20):
             db.close()
 
 
-def _maybe_trigger_memory_extraction(session_id: str, role: str):
-    if role != "assistant" or not settings.MEMORY_EXTRACTION_AUTO_ENABLED:
+def _maybe_trigger_memory_extraction(session_id: str, role: str, content: str | None = None):
+    if role != "assistant" or not (content or "").strip() or not settings.MEMORY_EXTRACTION_AUTO_ENABLED:
         return
     try:
         thread = threading.Thread(
@@ -106,14 +106,44 @@ def add_message(session_id: str, payload: ChatMessageCreate, db: Session = Depen
     msg = ChatMessage(
         session_id=session_id, role=payload.role,
         content=payload.content, sources=payload.sources,
-        clarify=payload.clarify,
+        clarify=payload.clarify, process=payload.process,
     )
     db.add(msg)
     # Touch session.updated_at so list order reflects recent activity
     session.updated_at = local_now()
     db.commit()
     db.refresh(msg)
-    _maybe_trigger_memory_extraction(session_id, payload.role)
+    _maybe_trigger_memory_extraction(session_id, payload.role, payload.content)
+    return msg
+
+
+@router.patch("/sessions/{session_id}/messages/{message_id}", response_model=ChatMessageOut)
+def update_message(
+    session_id: str,
+    message_id: str,
+    payload: ChatMessageUpdate,
+    db: Session = Depends(get_db),
+):
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    msg = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id, ChatMessage.id == message_id)
+        .first()
+    )
+    if not msg:
+        raise HTTPException(status_code=404, detail="message not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(msg, key, value)
+
+    session.updated_at = local_now()
+    db.commit()
+    db.refresh(msg)
+    _maybe_trigger_memory_extraction(session_id, msg.role, msg.content)
     return msg
 
 

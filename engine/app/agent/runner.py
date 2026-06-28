@@ -260,13 +260,19 @@ class LangChainAgentRunner:
                         latency_ms,
                         quoted(summary),
                     )
+                    stats = payload.get("stats")
+                    trace_steps = payload.get("trace_steps")
+                    if not trace_steps and isinstance(stats, dict):
+                        trace_steps = stats.get("deep_trace_steps") or stats.get("trace_steps")
+
                     yield tool_result_event(
                         tool=name,
                         status=status,
                         summary=summary,
                         query=query_arg,
-                        stats=payload.get("stats"),
+                        stats=stats,
                         latency_ms=latency_ms,
+                        trace_steps=trace_steps,
                     )
 
                     sources = payload.get("sources") or []
@@ -373,4 +379,3 @@ class LangChainAgentRunner:
             payload = {"summary": result_text}
 
         return result_text, payload, status, latency_ms
-
