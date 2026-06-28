@@ -1,7 +1,8 @@
 # prism/backend/app/models/entity.py
+import hashlib
 import uuid
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, event
 from sqlalchemy.dialects.mysql import CHAR, JSON
 from sqlalchemy.orm import relationship
 
@@ -40,11 +41,14 @@ class KnowledgeEntity(Base):
         foreign_keys="EntityRelation.subject_entity_id",
         back_populates="subject_entity",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     incoming_relations = relationship(
         "EntityRelation",
         foreign_keys="EntityRelation.object_entity_id",
         back_populates="object_entity",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -100,15 +104,7 @@ class EntityMention(Base):
 class EntityRelation(Base):
     __tablename__ = "entity_relation"
     __table_args__ = (
-        UniqueConstraint(
-            "subject_entity_id",
-            "predicate",
-            "object_entity_id",
-            "object_literal",
-            "source_kind",
-            "source_id",
-            name="uq_entity_relation_evidence",
-        ),
+        UniqueConstraint("relation_key", name="uq_entity_relation_evidence"),
     )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
@@ -121,6 +117,7 @@ class EntityRelation(Base):
     predicate = Column(String(128), nullable=False, index=True)
     object_entity_id = Column(CHAR(36), ForeignKey("knowledge_entity.id", ondelete="CASCADE"), nullable=True, index=True)
     object_literal = Column(Text)
+    relation_key = Column(String(64), nullable=False, index=True)
     source_kind = Column(String(64), nullable=False, index=True)
     source_id = Column(CHAR(36), nullable=False, index=True)
     evidence_span = Column(Text)
@@ -139,3 +136,37 @@ class EntityRelation(Base):
         foreign_keys=[object_entity_id],
         back_populates="incoming_relations",
     )
+
+
+def compute_relation_key(
+    subject_entity_id: str,
+    predicate: str,
+    object_entity_id: str | None,
+    object_literal: str | None,
+    source_kind: str,
+    source_id: str,
+) -> str:
+    parts = [
+        subject_entity_id or "",
+        predicate or "",
+        object_entity_id or "",
+        object_literal or "",
+        source_kind or "",
+        source_id or "",
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+
+
+def _set_relation_key(mapper, connection, target):
+    target.relation_key = compute_relation_key(
+        target.subject_entity_id,
+        target.predicate,
+        target.object_entity_id,
+        target.object_literal,
+        target.source_kind,
+        target.source_id,
+    )
+
+
+event.listen(EntityRelation, "before_insert", _set_relation_key)
+event.listen(EntityRelation, "before_update", _set_relation_key)

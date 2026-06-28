@@ -1,6 +1,9 @@
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import mysql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.schema import CreateTable
 
 from backend.app.database import Base
 from backend.app.models import KnowledgeEntity, EntityMention, EntityAlias, EntityRelation
@@ -92,5 +95,68 @@ def test_entity_models_persist_entities_aliases_mentions_and_relations():
         assert loaded_relation.predicate == "authored"
         assert loaded_relation.evidence_span == "Yanchao Tan authored OpenViewer"
         assert loaded_relation.confidence == 0.88
+    finally:
+        db.close()
+
+
+def test_entity_relation_mysql_unique_constraint_uses_relation_key_not_text_columns():
+    ddl = str(CreateTable(EntityRelation.__table__).compile(dialect=mysql.dialect()))
+
+    constraint_line = next(
+        line for line in ddl.splitlines() if "uq_entity_relation_evidence" in line
+    )
+    assert "relation_key" in ddl
+    assert "UNIQUE (relation_key)" in constraint_line
+    assert "object_literal" not in constraint_line
+
+
+def test_entity_relation_dedupes_on_deterministic_relation_key():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    Base.metadata.create_all(engine)
+    db = TestingSessionLocal()
+    try:
+        person = KnowledgeEntity(
+            entity_type="person",
+            canonical_name="Yanchao Tan",
+            normalized_key="yanchaotan",
+        )
+        paper = KnowledgeEntity(
+            entity_type="paper",
+            canonical_name="OpenViewer",
+            normalized_key="openviewer",
+        )
+        db.add_all([person, paper])
+        db.flush()
+
+        first = EntityRelation(
+            subject_entity_id=person.id,
+            predicate="authored",
+            object_entity_id=paper.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            evidence_span="first evidence",
+        )
+        duplicate = EntityRelation(
+            subject_entity_id=person.id,
+            predicate="authored",
+            object_entity_id=paper.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            evidence_span="second evidence",
+        )
+        db.add_all([first, duplicate])
+
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        else:
+            raise AssertionError("duplicate relation should violate uq_entity_relation_evidence")
     finally:
         db.close()
