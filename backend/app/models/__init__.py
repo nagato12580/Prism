@@ -21,6 +21,7 @@ from .knowledge_governance import (
     PKURelation,
     PersonalKnowledgeUnit,
 )
+from .entity import KnowledgeEntity, EntityAlias, EntityMention, EntityRelation
 
 __all__ = [
     "KnowledgeTopic",
@@ -55,4 +56,8 @@ __all__ = [
     "PKUCanonicalLink",
     "PKURelation",
     "CanonicalRelation",
+    "KnowledgeEntity",
+    "EntityAlias",
+    "EntityMention",
+    "EntityRelation",
 ]

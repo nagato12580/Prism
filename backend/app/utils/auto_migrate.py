@@ -10,6 +10,10 @@ KNOWN_UNIQUE_CONSTRAINTS = {
     "uq_pku_ckp_relation",
     "uq_pku_relation",
     "uq_ckp_relation",
+    "uq_entity_user_type_key",
+    "uq_entity_alias_key",
+    "uq_entity_mention_source_surface",
+    "uq_entity_relation_evidence",
 }
 
 
