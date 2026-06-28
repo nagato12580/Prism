@@ -17,6 +17,11 @@ class Settings:
     KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE: int = int(os.getenv("KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE", "12000"))
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
+    NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")
+    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "password")
+    NEO4J_DATABASE: str = os.getenv("NEO4J_DATABASE", "neo4j")
+    ENTITY_GRAPH_ENABLED: bool = os.getenv("ENTITY_GRAPH_ENABLED", "0") == "1"
 
     KMC_HOST: str = os.getenv("KMC_HOST", "0.0.0.0")
     KMC_PORT: int = int(os.getenv("KMC_PORT", "5175"))
