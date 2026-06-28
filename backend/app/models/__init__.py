@@ -2,6 +2,7 @@
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
 from .knowledge_job import KnowledgeJob
 from .chat import ChatSession, ChatMessage
+from .agent_trace import AgentTrace, AgentTraceEvidence, AgentTraceStep
 from .wiki import WikiDocument, WikiConcept, WikiKnowledgePoint, WikiKnowledgeRelation, WikiImage, WikiExtractionLog
 from .memory import (
     MemoryDraft,
@@ -30,6 +31,9 @@ __all__ = [
     "KnowledgeJob",
     "ChatSession",
     "ChatMessage",
+    "AgentTrace",
+    "AgentTraceStep",
+    "AgentTraceEvidence",
     "WikiDocument",
     "WikiConcept",
     "WikiKnowledgePoint",
