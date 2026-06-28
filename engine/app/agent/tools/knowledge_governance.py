@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from engine.app.agent.rag.agentic import AgenticRagResult
 from engine.app.agent.tools import governed_knowledge
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.evidence import normalize_evidence_items
 
 
 class KnowledgeTopicSearchInput(BaseModel):
@@ -88,17 +89,16 @@ def _build_knowledge_topic_search(ctx: ToolContext) -> StructuredTool:
             "source_count": len(sources),
             "query_terms": terms,
         }
-        return json.dumps(
-            {
-                "status": _result_status(topics, knowledge_results),
-                "summary": f"Found {len(topics)} CKP topics and {len(knowledge_results)} synthesized knowledge items.",
-                "query_terms": terms,
-                "topics": topics,
-                "synthesized_knowledge": knowledge_results,
-                "sources": sources,
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "status": _result_status(topics, knowledge_results),
+            "summary": f"Found {len(topics)} CKP topics and {len(knowledge_results)} synthesized knowledge items.",
+            "query_terms": terms,
+            "topics": topics,
+            "synthesized_knowledge": knowledge_results,
+            "sources": sources,
+        }
+        payload["evidence_items"] = normalize_evidence_items("knowledge_topic_search", payload)
+        return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(
         func=run,
@@ -158,16 +158,15 @@ def _build_knowledge_evidence_search(ctx: ToolContext) -> StructuredTool:
             "evidence_types": sorted(evidence_type_set),
             "source_kinds": sorted(source_kind_set),
         }
-        return json.dumps(
-            {
-                "status": _result_status(evidence),
-                "summary": f"Found {len(evidence)} PKU evidence items across governed knowledge sources.",
-                "query_terms": terms,
-                "evidence": evidence,
-                "sources": sources,
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "status": _result_status(evidence),
+            "summary": f"Found {len(evidence)} PKU evidence items across governed knowledge sources.",
+            "query_terms": terms,
+            "evidence": evidence,
+            "sources": sources,
+        }
+        payload["evidence_items"] = normalize_evidence_items("knowledge_evidence_search", payload)
+        return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(
         func=run,
@@ -226,17 +225,16 @@ def _build_knowledge_material_search(ctx: ToolContext) -> StructuredTool:
             "query_terms": terms,
             "intent": intent,
         }
-        return json.dumps(
-            {
-                "status": _result_status(materials),
-                "summary": f"Found {len(materials)} source materials through CKP/PKU backtracking.",
-                "query_terms": terms,
-                "intent": intent,
-                "materials": materials,
-                "sources": sources,
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "status": _result_status(materials),
+            "summary": f"Found {len(materials)} source materials through CKP/PKU backtracking.",
+            "query_terms": terms,
+            "intent": intent,
+            "materials": materials,
+            "sources": sources,
+        }
+        payload["evidence_items"] = normalize_evidence_items("knowledge_material_search", payload)
+        return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(
         func=run,
@@ -265,7 +263,7 @@ def _raw_document_payload(result: AgenticRagResult) -> dict[str, Any]:
         for source in sources
         if isinstance(source, dict)
     ]
-    return {
+    payload = {
         "status": getattr(result, "status", "insufficient"),
         "summary": getattr(result, "summary", ""),
         "missing": getattr(result, "missing", []),
@@ -273,6 +271,8 @@ def _raw_document_payload(result: AgenticRagResult) -> dict[str, Any]:
         "sources": normalized_sources,
         "evidence": getattr(result, "evidence", []),
     }
+    payload["evidence_items"] = normalize_evidence_items("raw_document_search", payload)
+    return payload
 
 
 def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
@@ -286,6 +286,7 @@ def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
                     "missing": ["No RAG runner is available."],
                     "sources": [],
                     "evidence": [],
+                    "evidence_items": [],
                 },
                 ensure_ascii=False,
             )
