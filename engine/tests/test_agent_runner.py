@@ -2,9 +2,12 @@ import json
 import logging
 import os
 
+from langchain_core.messages import ToolMessage
+
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///./_agent_runner_test.db"
 
+from engine.app.agent.prompts import AGENT_SYSTEM_PROMPT
 from engine.app.agent.runner import LangChainAgentRunner
 
 
@@ -128,8 +131,8 @@ class FakeEvidenceTool:
                 "evidence_items": [
                     {
                         "evidence_id": "ev-1",
-                        "chunk_id": "chunk-1",
-                        "item_id": "item-1",
+                        "chunk_id": "c1",
+                        "source_id": "s1",
                         "display_title": "Evidence title",
                         "excerpt": "Useful evidence",
                         "score": 0.9,
@@ -143,6 +146,7 @@ class FakeEvidenceModel:
     def __init__(self):
         self.calls = 0
         self.seen_tool_content = None
+        self.seen_tool_message = None
 
     def bind_tools(self, tools):
         return self
@@ -159,6 +163,7 @@ class FakeEvidenceModel:
                     }
                 ]
             )
+        self.seen_tool_message = messages[-1]
         self.seen_tool_content = messages[-1].content
         return FakeToolCall(content="Final answer")
 
@@ -182,14 +187,17 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
     assert tool_result["data"]["evidence_items"] == [
         {
             "evidence_id": "ev-1",
-            "chunk_id": "chunk-1",
-            "item_id": "item-1",
+            "chunk_id": "c1",
+            "source_id": "s1",
             "display_title": "Evidence title",
             "excerpt": "Useful evidence",
             "score": 0.9,
         }
     ]
-    assert json.loads(model.seen_tool_content)["evidence_items"] == tool_result["data"]["evidence_items"]
+    assert isinstance(model.seen_tool_message, ToolMessage)
+    tool_message_json = json.loads(model.seen_tool_content)
+    assert tool_message_json["evidence_items"] == tool_result["data"]["evidence_items"]
+    assert tool_message_json["evidence_items"][0]["chunk_id"] == "c1"
     assert [step["step_type"] for step in recorder.steps] == [
         "model_invoke",
         "model_response",
@@ -201,6 +209,13 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
     ]
     assert recorder.steps[3]["evidence_items"] == tool_result["data"]["evidence_items"]
     assert recorder.finished_status == "success"
+
+
+def test_agent_system_prompt_constrains_evidence_identifier_usage():
+    assert "evidence_items" in AGENT_SYSTEM_PROMPT
+    assert "evidence_id" in AGENT_SYSTEM_PROMPT
+    assert "chunk_id" in AGENT_SYSTEM_PROMPT
+    assert "source_id" in AGENT_SYSTEM_PROMPT
 
 
 class FakeNoToolModel:
