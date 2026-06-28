@@ -73,7 +73,7 @@ def extract_entity_candidates_from_text(text: str, source_kind: str = "") -> lis
 
     if organizations and authors:
         for author in authors:
-            for organization in organizations[:1]:
+            for organization in organizations:
                 candidates.append(
                     EntityCandidate(
                         kind="relation",
@@ -153,7 +153,7 @@ def _entity_candidate(
 
 
 def _extract_paper_title(lines: list[str]) -> str:
-    for line in lines[:6]:
+    for line in lines:
         if ":" in line and "@" not in line:
             return line
     return ""
