@@ -205,12 +205,57 @@ def test_agent_trace_recorder_close_failure_does_not_raise(session_factory):
     recorder.finish("failed")
 
 
+def test_agent_trace_recorder_step_refresh_failure_after_commit_still_allows_finish(session_factory):
+    class RefreshFailingSession:
+        def __init__(self, session):
+            self._session = session
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        def refresh(self, _value):
+            raise RuntimeError("refresh failed")
+
+    def refresh_failing_session_factory():
+        return RefreshFailingSession(session_factory())
+
+    recorder = AgentTraceRecorder(
+        session_id="session-4",
+        user_message_id="message-4",
+        user_query="Will refresh failure break finish?",
+        model="test-model",
+        session_factory=refresh_failing_session_factory,
+    )
+
+    trace_id = recorder.start()
+    step_id = recorder.record_step(step_type="tool_result")
+    recorder.finish("success")
+
+    db = session_factory()
+    try:
+        trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).one()
+        step = db.query(AgentTraceStep).filter(AgentTraceStep.id == step_id).one()
+
+        assert step.step_index == 0
+        assert trace.status == "success"
+        assert trace.ended_at is not None
+    finally:
+        db.close()
+
+
 def test_agent_trace_recorder_commit_failure_disables_without_raising():
     class CommitFailingSession:
+        def __init__(self):
+            self.commit_called = False
+
         def add(self, _value):
-            pass
+            self._value = _value
+
+        def flush(self):
+            self._value.id = self._value.id or str(uuid.uuid4())
 
         def commit(self):
+            self.commit_called = True
             raise RuntimeError("commit failed")
 
         def rollback(self):
@@ -219,15 +264,23 @@ def test_agent_trace_recorder_commit_failure_disables_without_raising():
         def close(self):
             pass
 
+    sessions = []
+
+    def commit_failing_session_factory():
+        session = CommitFailingSession()
+        sessions.append(session)
+        return session
+
     recorder = AgentTraceRecorder(
         session_id=None,
         user_message_id=None,
         user_query="Will commit failure raise?",
         model="test-model",
-        session_factory=CommitFailingSession,
+        session_factory=commit_failing_session_factory,
     )
 
     assert recorder.start() is None
+    assert sessions[0].commit_called
     assert recorder.record_step(step_type="tool_result") is None
     recorder.finish("failed")
 

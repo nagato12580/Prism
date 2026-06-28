@@ -117,14 +117,22 @@ class AgentTraceRecorder:
             )
             db.add(step)
             db.flush()
+            step_id = step.id
 
             for item in evidence_items or []:
-                db.add(_evidence_from_item(step.id, item))
+                db.add(_evidence_from_item(step_id, item))
 
             db.commit()
-            db.refresh(step)
+            try:
+                db.refresh(step)
+            except Exception as exc:
+                logger.warning(
+                    "[agent.trace] record_step refresh failed; continuing step_id=%s error=%s",
+                    quoted(str(step_id), limit=80),
+                    quoted(str(exc), limit=300),
+                )
             self._next_step_index += 1
-            return step.id
+            return step_id
         except Exception as exc:
             self._disable("record_step", exc, db)
             return None
