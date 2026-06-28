@@ -1,45 +1,37 @@
-import os
-
 import pytest
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.database import get_db
+from backend.app.api.traces import router as traces_router
 from backend.app.models import AgentTrace, AgentTraceEvidence, AgentTraceStep
 
 
 @pytest.fixture()
-def client(db_session, monkeypatch):
-    prev_skip_engine = os.environ.get("SKIP_ENGINE")
-    os.environ["SKIP_ENGINE"] = "1"
-    try:
-        from backend.app import main
+def client(db_session):
+    app = FastAPI()
+    api_prefix = APIRouter(prefix="/api/v1")
+    api_prefix.include_router(traces_router)
+    app.include_router(api_prefix)
 
-        monkeypatch.setattr(main, "auto_migrate", lambda Base, engine: None)
-        app = main.create_app()
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
 
-        def override_get_db():
-            try:
-                yield db_session
-            finally:
-                pass
-
-        app.dependency_overrides[get_db] = override_get_db
-        with TestClient(app) as test_client:
-            yield test_client
-        app.dependency_overrides.clear()
-    finally:
-        if prev_skip_engine is None:
-            os.environ.pop("SKIP_ENGINE", None)
-        else:
-            os.environ["SKIP_ENGINE"] = prev_skip_engine
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
-def _seed_trace(db_session):
+def _seed_trace(db_session, *, status="success"):
     trace = AgentTrace(
         session_id="session-1",
         user_message_id="user-1",
         user_query="query",
-        status="success",
+        status=status,
         model="test-model",
     )
     db_session.add(trace)
@@ -92,6 +84,22 @@ def test_bind_trace_message(client, db_session):
     db_session.expire_all()
     trace = db_session.query(AgentTrace).filter_by(id=trace_id).one()
     assert trace.assistant_message_id == "assistant-1"
+
+
+def test_bind_trace_message_preserves_running_status(client, db_session):
+    trace_id = _seed_trace(db_session, status="running")
+
+    resp = client.post(
+        f"/api/v1/traces/{trace_id}/bind-message",
+        json={"session_id": "session-1", "assistant_message_id": "assistant-1"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "running"
+    db_session.expire_all()
+    trace = db_session.query(AgentTrace).filter_by(id=trace_id).one()
+    assert trace.assistant_message_id == "assistant-1"
+    assert trace.status == "running"
 
 
 def test_export_trace(client, db_session):

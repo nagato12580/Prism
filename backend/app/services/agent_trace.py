@@ -22,8 +22,6 @@ def bind_trace_message(
 
     trace.session_id = session_id
     trace.assistant_message_id = assistant_message_id
-    if trace.status == "running":
-        trace.status = "orphaned"
     db.commit()
     db.refresh(trace)
     return trace
