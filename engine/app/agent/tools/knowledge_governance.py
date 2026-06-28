@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile, KnowledgeItem
 from engine.app.agent.rag.agentic import AgenticRagResult
 from engine.app.agent.tools import governed_knowledge
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 from engine.app.agent.tools.evidence import normalize_evidence_items
+from engine.app.config import settings
+
+
+_engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
+_Session = sessionmaker(bind=_engine)
+_UUID_PATTERN = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+_SOURCE_ID_PREFIX_PATTERN = re.compile(r"(?:chunk_id|source_id|chunk|source)\s*[:=]\s*([0-9a-fA-F-]{8,36})\b")
 
 
 class KnowledgeTopicSearchInput(BaseModel):
@@ -76,6 +87,20 @@ def _result_status(*collections: list[Any]) -> str:
 
 def _query(query: str, limit: int) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]]]:
     return governed_knowledge._query_governed_knowledge(query, limit)
+
+
+def _new_db_session():
+    return _Session()
+
+
+def _extract_chunk_id_token(query: str) -> str | None:
+    uuid_match = _UUID_PATTERN.search(query or "")
+    if uuid_match:
+        return uuid_match.group(0)
+    prefix_match = _SOURCE_ID_PREFIX_PATTERN.search(query or "")
+    if prefix_match:
+        return prefix_match.group(1)
+    return None
 
 
 def _build_knowledge_topic_search(ctx: ToolContext) -> StructuredTool:
@@ -275,8 +300,75 @@ def _raw_document_payload(result: AgenticRagResult) -> dict[str, Any]:
     return payload
 
 
+def _raw_chunk_payload_from_query(query: str) -> dict[str, Any] | None:
+    token = _extract_chunk_id_token(query)
+    if not token:
+        return None
+
+    db = _new_db_session()
+    try:
+        if _UUID_PATTERN.fullmatch(token):
+            chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == token).first()
+        else:
+            chunk = (
+                db.query(KnowledgeChunk)
+                .filter(KnowledgeChunk.id.like(f"{token}%"))
+                .order_by(KnowledgeChunk.id.asc())
+                .first()
+            )
+        if chunk is None:
+            return None
+
+        item = db.query(KnowledgeItem).filter(KnowledgeItem.id == chunk.item_id).first()
+        file = db.query(KnowledgeFile).filter(KnowledgeFile.item_id == chunk.item_id).first()
+        title = (
+            getattr(item, "title", None)
+            or getattr(file, "title", None)
+            or getattr(file, "original_filename", None)
+            or str(getattr(chunk, "item_id", ""))
+        )
+        source = {
+            "source_kind": "document_chunk",
+            "source_id": chunk.id,
+            "chunk_id": chunk.id,
+            "item_id": chunk.item_id,
+            "display_type": "knowledge_item",
+            "display_id": chunk.item_id,
+            "display_title": title,
+            "display_label": "鐭ヨ瘑鏂囨。",
+            "snippet": chunk.chunk_text,
+            "text": chunk.chunk_text,
+            "chunk_index": chunk.chunk_index,
+            "chunk_type": chunk.chunk_type,
+            "parent_id": chunk.parent_id,
+            "parent_chunk_id": chunk.parent_id,
+            "score": 1.0,
+        }
+        payload = {
+            "status": "sufficient",
+            "summary": "Found the requested raw document chunk by source_id.",
+            "sources": [source],
+            "evidence": [{**source}],
+            "missing": [],
+        }
+        payload["evidence_items"] = normalize_evidence_items("raw_document_search", payload)
+        return payload
+    finally:
+        db.close()
+
+
 def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
     def run(query: str) -> str:
+        direct_payload = _raw_chunk_payload_from_query(query)
+        if direct_payload is not None:
+            governed_knowledge._append_unique_citations(ctx.citations, direct_payload["sources"])
+            ctx.stats_holder["raw_document_search"] = {
+                "hit_count": len(direct_payload["sources"]),
+                "iterations": 0,
+                "direct_lookup": True,
+            }
+            return json.dumps(direct_payload, ensure_ascii=False)
+
         if ctx.rag_runner is None:
             ctx.stats_holder["raw_document_search"] = {"hit_count": 0, "iterations": 0}
             return json.dumps(
