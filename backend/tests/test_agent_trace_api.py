@@ -74,7 +74,15 @@ def _seed_trace(db_session, *, status="success"):
 def test_bind_trace_message(client, db_session):
     trace_id = _seed_trace(db_session)
     db_session.add(ChatSession(id="session-1", title="Trace session"))
-    db_session.add(ChatMessage(id="assistant-1", session_id="session-1", role="assistant", content="answer"))
+    db_session.add(
+        ChatMessage(
+            id="assistant-1",
+            session_id="session-1",
+            role="assistant",
+            content="answer",
+            process={"trace_id": trace_id},
+        )
+    )
     db_session.commit()
 
     resp = client.post(
@@ -92,7 +100,15 @@ def test_bind_trace_message(client, db_session):
 def test_bind_trace_message_preserves_running_status(client, db_session):
     trace_id = _seed_trace(db_session, status="running")
     db_session.add(ChatSession(id="session-1", title="Trace session"))
-    db_session.add(ChatMessage(id="assistant-1", session_id="session-1", role="assistant", content="answer"))
+    db_session.add(
+        ChatMessage(
+            id="assistant-1",
+            session_id="session-1",
+            role="assistant",
+            content="answer",
+            process={"trace_id": trace_id},
+        )
+    )
     db_session.commit()
 
     resp = client.post(
@@ -143,13 +159,63 @@ def test_bind_trace_message_rejects_wrong_session(client, db_session):
     assert resp.json()["detail"] == "assistant message session mismatch"
 
 
+def test_bind_trace_message_rejects_missing_process_trace_id(client, db_session):
+    trace_id = _seed_trace(db_session)
+    db_session.add(ChatSession(id="session-1", title="Trace session"))
+    db_session.add(ChatMessage(id="assistant-1", session_id="session-1", role="assistant", content="answer"))
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/traces/{trace_id}/bind-message",
+        json={"session_id": "session-1", "assistant_message_id": "assistant-1"},
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "assistant message process trace_id mismatch"
+
+
+def test_bind_trace_message_rejects_mismatched_process_trace_id(client, db_session):
+    trace_id = _seed_trace(db_session)
+    db_session.add(ChatSession(id="session-1", title="Trace session"))
+    db_session.add(
+        ChatMessage(
+            id="assistant-1",
+            session_id="session-1",
+            role="assistant",
+            content="answer",
+            process={"trace_id": "other-trace"},
+        )
+    )
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/traces/{trace_id}/bind-message",
+        json={"session_id": "session-1", "assistant_message_id": "assistant-1"},
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "assistant message process trace_id mismatch"
+
+
 def test_bind_trace_message_rejects_conflicting_existing_binding(client, db_session):
     trace_id = _seed_trace(db_session)
     db_session.add(ChatSession(id="session-1", title="Trace session"))
     db_session.add_all(
         [
-            ChatMessage(id="assistant-1", session_id="session-1", role="assistant", content="first"),
-            ChatMessage(id="assistant-2", session_id="session-1", role="assistant", content="second"),
+            ChatMessage(
+                id="assistant-1",
+                session_id="session-1",
+                role="assistant",
+                content="first",
+                process={"trace_id": trace_id},
+            ),
+            ChatMessage(
+                id="assistant-2",
+                session_id="session-1",
+                role="assistant",
+                content="second",
+                process={"trace_id": trace_id},
+            ),
         ]
     )
     trace = db_session.query(AgentTrace).filter_by(id=trace_id).one()
@@ -168,7 +234,15 @@ def test_bind_trace_message_rejects_conflicting_existing_binding(client, db_sess
 def test_bind_trace_message_is_idempotent_for_same_message(client, db_session):
     trace_id = _seed_trace(db_session)
     db_session.add(ChatSession(id="session-1", title="Trace session"))
-    db_session.add(ChatMessage(id="assistant-1", session_id="session-1", role="assistant", content="answer"))
+    db_session.add(
+        ChatMessage(
+            id="assistant-1",
+            session_id="session-1",
+            role="assistant",
+            content="answer",
+            process={"trace_id": trace_id},
+        )
+    )
     trace = db_session.query(AgentTrace).filter_by(id=trace_id).one()
     trace.assistant_message_id = "assistant-1"
     db_session.commit()

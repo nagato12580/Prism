@@ -29,6 +29,8 @@ def bind_trace_message(
         raise ValueError("assistant message session mismatch")
     if message.role != "assistant":
         raise ValueError("assistant message must have assistant role")
+    if not isinstance(message.process, dict) or message.process.get("trace_id") != trace_id:
+        raise ValueError("assistant message process trace_id mismatch")
 
     trace.session_id = session_id
     trace.assistant_message_id = assistant_message_id
