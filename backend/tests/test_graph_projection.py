@@ -228,6 +228,115 @@ def test_project_ckp_graph_projects_ckp_and_pku_related_to_relations():
         db.close()
 
 
+def test_project_ckp_graph_projects_subtopic_of_as_parent_has_child():
+    db = _db_session()
+    try:
+        parent = _ckp("ckp-parent", "Parent CKP")
+        child = _ckp("ckp-child", "Child CKP")
+        relation = CanonicalRelation(
+            user_id="default-user",
+            source_canonical_id=child.id,
+            target_canonical_id=parent.id,
+            relation_type="subtopic_of",
+            confidence=0.95,
+            reason="governance hierarchy",
+        )
+        db.add_all([parent, child, relation])
+        db.commit()
+
+        graph = FakeGraph()
+        project_ckp_graph(db, graph)
+
+        assert (
+            "CKP",
+            parent.id,
+            "HAS_CHILD",
+            "CKP",
+            child.id,
+            {
+                "relation_type": "subtopic_of",
+                "confidence": 0.95,
+                "reason": "governance hierarchy",
+            },
+        ) in graph.relations
+        assert not any(relation[2] == "RELATED_TO" for relation in graph.relations)
+    finally:
+        db.close()
+
+
+def test_project_ckp_graph_counts_and_upserts_each_source_once():
+    db = _db_session()
+    try:
+        item = KnowledgeItem(
+            id="item-1",
+            user_id="default-user",
+            title="OpenViewer",
+            content="paper text",
+        )
+        chunk = KnowledgeChunk(
+            id="chunk-1",
+            item_id=item.id,
+            chunk_text="OpenViewer chunk",
+        )
+        first_pku = _pku("pku-first", chunk.id)
+        second_pku = _pku("pku-second", chunk.id)
+        db.add_all([item, chunk, first_pku, second_pku])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_ckp_graph(db, graph)
+
+        assert result.pku_count == 2
+        assert result.source_count == 1
+        assert graph.sources == [
+            {
+                "id": "document_chunk:chunk-1",
+                "source_kind": "document_chunk",
+                "source_id": "chunk-1",
+                "item_id": "item-1",
+                "title": "OpenViewer",
+            }
+        ]
+        assert sum(1 for relation in graph.relations if relation[2] == "EVIDENCED_BY") == 2
+    finally:
+        db.close()
+
+
+def test_project_ckp_graph_does_not_use_wrong_user_item_title_for_source():
+    db = _db_session()
+    try:
+        wrong_user_item = KnowledgeItem(
+            id="item-wrong-user",
+            user_id="other-user",
+            title="Private Other User Title",
+            content="paper text",
+        )
+        chunk = KnowledgeChunk(
+            id="chunk-1",
+            item_id=wrong_user_item.id,
+            chunk_text="OpenViewer chunk",
+        )
+        pku = _pku("pku-1", chunk.id)
+        db.add_all([wrong_user_item, chunk, pku])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_ckp_graph(db, graph, user_id="default-user")
+
+        assert result.source_count == 1
+        assert graph.sources == [
+            {
+                "id": "document_chunk:chunk-1",
+                "source_kind": "document_chunk",
+                "source_id": "chunk-1",
+                "item_id": "item-wrong-user",
+                "title": "chunk-1",
+            }
+        ]
+    finally:
+        db.close()
+
+
 def test_project_ckp_graph_skips_deprecated_nodes():
     db = _db_session()
     try:
@@ -273,7 +382,16 @@ def test_project_ckp_graph_skips_deprecated_nodes():
         assert result.pku_count == 1
         assert [node["id"] for node in graph.ckps] == ["ckp-active"]
         assert [node["id"] for node in graph.pkus] == ["pku-active"]
-        assert all("deprecated" not in relation for relation in graph.relations)
-        assert not any(relation[2] in {"SUPPORTED_BY", "RELATED_TO"} for relation in graph.relations)
+        relation_endpoint_ids = {
+            endpoint_id
+            for relation in graph.relations
+            for endpoint_id in (relation[1], relation[4])
+        }
+        assert "ckp-deprecated" not in relation_endpoint_ids
+        assert "pku-deprecated" not in relation_endpoint_ids
+        assert not any(
+            relation[2] in {"SUPPORTED_BY", "RELATED_TO"}
+            for relation in graph.relations
+        )
     finally:
         db.close()

@@ -19,7 +19,7 @@ class GraphProjectionResult:
     relation_count: int = 0
 
 
-PARENT_TARGET_RELATIONS = {"parent", "part_of"}
+PARENT_TARGET_RELATIONS = {"parent", "part_of", "subtopic_of"}
 PARENT_SOURCE_RELATIONS = {"child", "has_child", "includes", "hierarchy"}
 
 
@@ -57,6 +57,7 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
         .all()
     )
     active_pku_ids = {pku.id for pku in pkus}
+    seen_source_ids = set()
     for pku in pkus:
         graph.upsert_pku(
             {
@@ -70,9 +71,11 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
         )
         result.pku_count += 1
 
-        source_node = _source_node_for_pku(db, pku)
-        graph.upsert_source(source_node)
-        result.source_count += 1
+        source_node = _source_node_for_pku(db, pku, user_id)
+        if source_node["id"] not in seen_source_ids:
+            graph.upsert_source(source_node)
+            seen_source_ids.add(source_node["id"])
+            result.source_count += 1
         graph.relate(
             "PKU",
             pku.id,
@@ -162,7 +165,7 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
     return result
 
 
-def _source_node_for_pku(db, pku: PersonalKnowledgeUnit) -> dict:
+def _source_node_for_pku(db, pku: PersonalKnowledgeUnit, user_id: str) -> dict:
     item_id = pku.source_id
     title = pku.source_id
 
@@ -170,7 +173,14 @@ def _source_node_for_pku(db, pku: PersonalKnowledgeUnit) -> dict:
         chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == pku.source_id).first()
         if chunk:
             item_id = chunk.item_id
-            item = db.query(KnowledgeItem).filter(KnowledgeItem.id == chunk.item_id).first()
+            item = (
+                db.query(KnowledgeItem)
+                .filter(
+                    KnowledgeItem.id == chunk.item_id,
+                    KnowledgeItem.user_id == user_id,
+                )
+                .first()
+            )
             if item and item.title:
                 title = item.title
 
