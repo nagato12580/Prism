@@ -4,10 +4,11 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from ..agent.events import error_event
+from ..agent.events import error_event, trace_event
 from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult
 from ..agent.prompts import AGENT_SYSTEM_PROMPT
 from ..agent.runner import LangChainAgentRunner, create_chat_model
+from ..agent.trace import AgentTraceRecorder
 from ..agent.tools import ToolContext, build_enabled_tools
 from ..config import settings
 from ..llm.client import chat
@@ -239,6 +240,8 @@ def answer_stream(
     source_types: list[str] | None = None,
     deep_search_enabled: bool = False,
     deep_search_depth: str = "standard",
+    session_id: str | None = None,
+    user_message_id: str | None = None,
 ):
     history = history or []
     # P0-3: Count previous clarify rounds from history to limit depth.
@@ -266,7 +269,16 @@ def answer_stream(
             deep_search_depth=deep_search_depth,
         )
         logger.info("[chat] runner_ready")
-        yield from runner.stream(query, history)
+        trace_recorder = AgentTraceRecorder(
+            session_id=session_id,
+            user_message_id=user_message_id,
+            user_query=query,
+            model=settings.LLM_MODEL,
+        )
+        trace_id = trace_recorder.start()
+        if trace_id:
+            yield trace_event(trace_id)
+        yield from runner.stream(query, history, trace_recorder=trace_recorder)
         logger.info("[chat] stream_complete")
     except Exception as exc:
         logger.exception(

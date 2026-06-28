@@ -82,6 +82,50 @@ def _message_role_summary(messages: list[Any]) -> str:
     return " | ".join(summary)
 
 
+def _message_roles(messages: list[Any]) -> list[str]:
+    return [str(getattr(message, "type", None) or message.__class__.__name__) for message in messages]
+
+
+def _content_preview(content: str, limit: int = 500) -> str:
+    return content[:limit]
+
+
+def _tool_call_summaries(tool_calls: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": str(_call_value(call, "name", "")),
+            "id": str(_call_value(call, "id", "")),
+        }
+        for call in tool_calls
+    ]
+
+
+def _record_trace_step(trace_recorder: Any | None, **kwargs: Any) -> None:
+    if trace_recorder is None:
+        return
+    try:
+        trace_recorder.record_step(**kwargs)
+    except Exception as exc:
+        logger.warning(
+            "[agent] trace_record_step_failed step_type=%s error=%s",
+            kwargs.get("step_type"),
+            quoted(str(exc), limit=300),
+        )
+
+
+def _finish_trace(trace_recorder: Any | None, status: str) -> None:
+    if trace_recorder is None:
+        return
+    try:
+        trace_recorder.finish(status)
+    except Exception as exc:
+        logger.warning(
+            "[agent] trace_finish_failed status=%s error=%s",
+            status,
+            quoted(str(exc), limit=300),
+        )
+
+
 def _payload_clarify(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]] | None:
     clarify = payload if payload.get("status") == "clarify" else payload.get("clarify")
     if not isinstance(clarify, dict):
@@ -161,7 +205,12 @@ class LangChainAgentRunner:
         self._pending_clarify: tuple[str, list[dict[str, str]]] | None = None
         self.tool_map = {tool.name: tool for tool in tools}
 
-    def stream(self, query: str, history: list[dict[str, Any]] | None = None):
+    def stream(
+        self,
+        query: str,
+        history: list[dict[str, Any]] | None = None,
+        trace_recorder: Any | None = None,
+    ):
         history = history or []
         is_casual_chat = _is_casual_chat_query(query)
         is_first_exchange = not history or not any(
@@ -190,8 +239,28 @@ class LangChainAgentRunner:
                     iteration,
                     _message_role_summary(messages),
                 )
+                _record_trace_step(
+                    trace_recorder,
+                    step_type="model_invoke",
+                    input_json={
+                        "iteration": iteration,
+                        "message_count": len(messages),
+                        "message_roles": _message_roles(messages),
+                    },
+                )
                 response = model.invoke(messages)
                 tool_calls = getattr(response, "tool_calls", None) or []
+                text = _message_content(response)
+                _record_trace_step(
+                    trace_recorder,
+                    step_type="model_response",
+                    input_json={"iteration": iteration},
+                    output_json={
+                        "iteration": iteration,
+                        "tool_calls": _tool_call_summaries(tool_calls),
+                        "content_preview": _content_preview(text),
+                    },
+                )
                 logger.info(
                     "[agent] model_response iteration=%s response_type=%s tool_calls=%s",
                     iteration,
@@ -203,7 +272,6 @@ class LangChainAgentRunner:
                     or "none",
                 )
                 if not tool_calls:
-                    text = _message_content(response)
                     if text:
                         logger.info("[agent] output preview=%s", quoted(text))
                         yield agent_status_event("generating answer")
@@ -225,6 +293,18 @@ class LangChainAgentRunner:
                         except Exception as exc:
                             logger.warning("[agent] title_generation_failed: %s", quoted(str(exc), limit=200))
 
+                    final_output: dict[str, Any] = {"content": text}
+                    if pending is not None:
+                        final_output["clarify"] = {
+                            "question": question,
+                            "options": options,
+                        }
+                    _record_trace_step(
+                        trace_recorder,
+                        step_type="final_answer",
+                        output_json=final_output,
+                    )
+                    _finish_trace(trace_recorder, "success")
                     logger.info("[agent] done")
                     yield done_event()
                     return
@@ -242,6 +322,18 @@ class LangChainAgentRunner:
                         name,
                         tool_call_id,
                         quoted(query_arg),
+                    )
+                    _record_trace_step(
+                        trace_recorder,
+                        step_type="tool_call",
+                        input_json={
+                            "tool": name,
+                            "call_id": tool_call_id,
+                            "args": args,
+                            "query": query_arg,
+                        },
+                        tool_name=name,
+                        tool_call_id=tool_call_id,
                     )
                     yield tool_call_event(name, query_arg)
 
@@ -264,6 +356,9 @@ class LangChainAgentRunner:
                     trace_steps = payload.get("trace_steps")
                     if not trace_steps and isinstance(stats, dict):
                         trace_steps = stats.get("deep_trace_steps") or stats.get("trace_steps")
+                    evidence_items = payload.get("evidence_items")
+                    if not isinstance(evidence_items, list):
+                        evidence_items = None
 
                     yield tool_result_event(
                         tool=name,
@@ -273,6 +368,29 @@ class LangChainAgentRunner:
                         stats=stats,
                         latency_ms=latency_ms,
                         trace_steps=trace_steps,
+                        evidence_items=evidence_items,
+                    )
+                    _record_trace_step(
+                        trace_recorder,
+                        step_type="tool_result",
+                        input_json={
+                            "tool": name,
+                            "call_id": tool_call_id,
+                            "args": args,
+                            "query": query_arg,
+                        },
+                        output_json={
+                            "status": status,
+                            "summary": summary,
+                            "stats": stats,
+                            "trace_steps": trace_steps,
+                            "evidence_items": evidence_items,
+                        },
+                        status=status,
+                        tool_name=name,
+                        tool_call_id=tool_call_id,
+                        latency_ms=latency_ms,
+                        evidence_items=evidence_items,
                     )
 
                     sources = payload.get("sources") or []
@@ -316,6 +434,13 @@ class LangChainAgentRunner:
                             self._pending_clarify = clarify
 
             logger.warning("[agent] max_iterations_exceeded limit=%s", self.max_iterations)
+            _record_trace_step(
+                trace_recorder,
+                step_type="error",
+                output_json={"message": "Agent reached the maximum tool iteration limit."},
+                status="error",
+            )
+            _finish_trace(trace_recorder, "error")
             yield error_event("Agent reached the maximum tool iteration limit.")
             logger.info("[agent] done")
             yield done_event()
@@ -324,6 +449,13 @@ class LangChainAgentRunner:
                 "[agent] error message=%s",
                 quoted(str(exc), limit=300),
             )
+            _record_trace_step(
+                trace_recorder,
+                step_type="error",
+                output_json={"message": str(exc)},
+                status="error",
+            )
+            _finish_trace(trace_recorder, "error")
             yield error_event(str(exc))
             logger.info("[agent] done")
             yield done_event()
