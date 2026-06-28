@@ -72,24 +72,20 @@ class GraphClient:
         )
 
     def upsert_alias(self, data: dict[str, Any]) -> None:
-        query = """
-        MERGE (n:Alias {key: $key})
-        SET n += {surface_text: $surface_text}
-        """
-        self._execute_write(query, data)
+        alias_data = dict(data)
+        entity_id = alias_data.get("entity_id")
+        if "id" not in alias_data and entity_id and alias_data.get("key"):
+            alias_data["id"] = f"{entity_id}:{alias_data['key']}"
+        alias_data.setdefault("entity_id", None)
 
-        entity_id = data.get("entity_id")
+        query = """
+        MERGE (n:Alias {id: $id})
+        SET n += {key: $key, surface_text: $surface_text, entity_id: $entity_id}
+        """
+        self._execute_write(query, alias_data)
+
         if entity_id:
-            rel_query = """
-            MATCH (a:Alias {key: $key})
-            MATCH (b:Entity {id: $entity_id})
-            MERGE (a)-[r:ALIAS_OF]->(b)
-            SET r += $props
-            """
-            self._execute_write(
-                rel_query,
-                {"key": data["key"], "entity_id": entity_id, "props": {}},
-            )
+            self.relate("Alias", alias_data["id"], "ALIAS_OF", "Entity", entity_id)
 
     def relate(
         self,

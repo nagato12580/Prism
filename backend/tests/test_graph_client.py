@@ -103,7 +103,7 @@ def test_relate_emits_match_merge_and_props():
     }
 
 
-def test_upsert_alias_relates_alias_key_to_entity_id():
+def test_upsert_alias_derives_id_and_relates_alias_id_to_entity_id():
     driver = FakeDriver()
     client = GraphClient(driver=driver)
 
@@ -113,12 +113,38 @@ def test_upsert_alias_relates_alias_key_to_entity_id():
 
     alias_query, alias_params = driver.session_obj.tx.queries[0]
     rel_query, rel_params = driver.session_obj.tx.queries[1]
-    assert "MERGE (n:Alias {key: $key})" in alias_query
+    assert "MERGE (n:Alias {id: $id})" in alias_query
+    assert "key: $key" in alias_query
     assert alias_params["surface_text"] == "Ada"
-    assert "MATCH (a:Alias {key: $key})" in rel_query
-    assert "MATCH (b:Entity {id: $entity_id})" in rel_query
+    assert alias_params["id"] == "entity1:ada"
+    assert alias_params["key"] == "ada"
+    assert alias_params["entity_id"] == "entity1"
+    assert "MATCH (a:Alias {id: $start_id})" in rel_query
+    assert "MATCH (b:Entity {id: $end_id})" in rel_query
     assert "MERGE (a)-[r:ALIAS_OF]->(b)" in rel_query
-    assert rel_params == {"key": "ada", "entity_id": "entity1", "props": {}}
+    assert rel_params == {
+        "start_id": "entity1:ada",
+        "end_id": "entity1",
+        "props": {},
+    }
+
+
+def test_upsert_alias_same_key_for_different_entities_uses_distinct_ids():
+    driver = FakeDriver()
+    client = GraphClient(driver=driver)
+
+    client.upsert_alias(
+        {"key": "ada", "surface_text": "Ada", "entity_id": "entity1"}
+    )
+    client.upsert_alias(
+        {"key": "ada", "surface_text": "Ada", "entity_id": "entity2"}
+    )
+
+    first_alias_params = driver.session_obj.tx.queries[0][1]
+    second_alias_params = driver.session_obj.tx.queries[2][1]
+    assert first_alias_params["id"] == "entity1:ada"
+    assert second_alias_params["id"] == "entity2:ada"
+    assert first_alias_params["id"] != second_alias_params["id"]
 
 
 @pytest.mark.parametrize(
