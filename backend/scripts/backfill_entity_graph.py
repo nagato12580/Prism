@@ -64,8 +64,11 @@ def main(argv: list[str] | None = None) -> int:
             f"ckp_count={ckp_result.ckp_count} "
             f"pku_count={ckp_result.pku_count} "
             f"entity_count={entity_result.entity_count} "
-            f"source_count={ckp_result.source_count + entity_result.source_count} "
-            f"relation_count={ckp_result.relation_count + entity_result.relation_count}"
+            f"ckp_source_count={ckp_result.source_count} "
+            f"entity_source_count={entity_result.source_count} "
+            f"ckp_relation_count={ckp_result.relation_count} "
+            f"entity_relation_count={entity_result.relation_count} "
+            f"total_relation_count={ckp_result.relation_count + entity_result.relation_count}"
         )
         return 0
     finally:

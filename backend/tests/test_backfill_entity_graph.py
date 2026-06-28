@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
+
 from backend.scripts import backfill_entity_graph
 
 
@@ -43,10 +45,12 @@ class FakeDB:
         self.rollback_called = False
         self.close_called = False
         self.queries = []
+        self.last_query = None
 
     def query(self, model):
         self.queries.append(model)
-        return FakeQuery(self.chunks)
+        self.last_query = FakeQuery(self.chunks)
+        return self.last_query
 
     def commit(self):
         self.commit_called = True
@@ -76,18 +80,18 @@ def install_fake_session(monkeypatch, db):
     return created_engines
 
 
+def install_fake_chunk_columns(monkeypatch):
+    monkeypatch.setattr(backfill_entity_graph.KnowledgeChunk, "created_at", FakeColumn())
+    monkeypatch.setattr(backfill_entity_graph.KnowledgeChunk, "id", FakeColumn())
+
+
 def test_backfill_entity_graph_dry_run_extracts_chunks_and_skips_graph(monkeypatch, capsys):
     chunk = FakeChunk(id="chunk-1", item_id="item-1", chunk_text="Ada Lovelace wrote notes.")
     db = FakeDB([chunk])
     created_engines = install_fake_session(monkeypatch, db)
     calls = []
 
-    monkeypatch.setattr(
-        backfill_entity_graph.KnowledgeChunk,
-        "created_at",
-        FakeColumn(),
-    )
-    monkeypatch.setattr(backfill_entity_graph.KnowledgeChunk, "id", FakeColumn())
+    install_fake_chunk_columns(monkeypatch)
     monkeypatch.setattr(
         backfill_entity_graph,
         "extract_and_settle_entities",
@@ -117,6 +121,8 @@ def test_backfill_entity_graph_dry_run_extracts_chunks_and_skips_graph(monkeypat
     assert db.rollback_called is True
     assert db.commit_called is False
     assert db.close_called is True
+    assert db.last_query.limit_value == 1
+    assert db.last_query.order_by_args is not None
     assert capsys.readouterr().out == "dry-run extracted entities from 1 chunks\n"
 
 
@@ -130,8 +136,7 @@ def test_backfill_entity_graph_commits_and_projects_graph(monkeypatch, capsys):
     extraction_calls = []
     projection_calls = []
 
-    monkeypatch.setattr(backfill_entity_graph.KnowledgeChunk, "created_at", FakeColumn())
-    monkeypatch.setattr(backfill_entity_graph.KnowledgeChunk, "id", FakeColumn())
+    install_fake_chunk_columns(monkeypatch)
     monkeypatch.setattr(
         backfill_entity_graph,
         "extract_and_settle_entities",
@@ -175,11 +180,58 @@ def test_backfill_entity_graph_commits_and_projects_graph(monkeypatch, capsys):
     assert db.commit_called is True
     assert db.rollback_called is False
     assert db.close_called is True
+    assert db.last_query.limit_value == 2
+    assert db.last_query.order_by_args is not None
     assert FakeGraphClient.closed is True
     assert len(extraction_calls) == 2
     assert extraction_calls[1][1]["text"] == ""
     assert [call[0] for call in projection_calls] == ["ckp", "entity"]
-    assert "ckp_count=3" in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "backfilled entity graph "
+        "chunks=2 "
+        "ckp_count=3 "
+        "pku_count=5 "
+        "entity_count=13 "
+        "ckp_source_count=7 "
+        "entity_source_count=17 "
+        "ckp_relation_count=11 "
+        "entity_relation_count=19 "
+        "total_relation_count=30\n"
+    )
+
+
+def test_backfill_entity_graph_closes_resources_when_projection_raises(monkeypatch):
+    chunks = [
+        FakeChunk(id="chunk-1", item_id="item-1", chunk_text="Ada Lovelace wrote notes."),
+    ]
+    db = FakeDB(chunks)
+    install_fake_session(monkeypatch, db)
+    install_fake_chunk_columns(monkeypatch)
+    monkeypatch.setattr(
+        backfill_entity_graph,
+        "extract_and_settle_entities",
+        lambda *args, **kwargs: None,
+    )
+
+    class FakeGraphClient:
+        closed = False
+
+        def close(self):
+            type(self).closed = True
+
+    monkeypatch.setattr(backfill_entity_graph, "GraphClient", FakeGraphClient)
+
+    def fail_project_ckp_graph(project_db, graph):
+        raise RuntimeError("projection failed")
+
+    monkeypatch.setattr(backfill_entity_graph, "project_ckp_graph", fail_project_ckp_graph)
+
+    with pytest.raises(RuntimeError, match="projection failed"):
+        backfill_entity_graph.main(["--limit", "1"])
+
+    assert db.commit_called is True
+    assert FakeGraphClient.closed is True
+    assert db.close_called is True
 
 
 def test_parse_args_supports_limit_and_dry_run():
