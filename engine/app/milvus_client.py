@@ -36,13 +36,38 @@ def ensure_collection():
 
 def insert_vectors(chunk_id: str, item_id: str, embedding: list[float]):
     """插入一条向量。"""
-    coll = ensure_collection()
-    coll.insert([
-        [chunk_id],     # id (VARCHAR)
-        [embedding],    # embedding (FLOAT_VECTOR)
-        [chunk_id],     # chunk_id (VARCHAR)
-        [item_id],      # item_id (VARCHAR)
+    insert_vectors_batch([
+        {"chunk_id": chunk_id, "item_id": item_id, "embedding": embedding},
     ])
+
+
+def insert_vectors_batch(rows: list[dict]):
+    """Batch insert vectors."""
+    if not rows:
+        return
+
+    coll = ensure_collection()
+    chunk_ids = [row["chunk_id"] for row in rows]
+    embeddings = [row["embedding"] for row in rows]
+    item_ids = [row["item_id"] for row in rows]
+
+    coll.insert([
+        chunk_ids,      # id (VARCHAR)
+        embeddings,     # embedding (FLOAT_VECTOR)
+        chunk_ids,      # chunk_id (VARCHAR)
+        item_ids,       # item_id (VARCHAR)
+    ])
+
+
+def delete_vectors_by_item(item_id: str):
+    """Delete all vectors for one knowledge item."""
+    if not item_id:
+        return
+
+    coll = ensure_collection()
+    escaped_item_id = item_id.replace("\\", "\\\\").replace('"', '\\"')
+    coll.delete(expr=f'item_id == "{escaped_item_id}"')
+    coll.flush()
 
 
 def search_vectors(query_embedding: list[float], top_k: int = 10) -> list[dict]:

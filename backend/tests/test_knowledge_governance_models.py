@@ -396,6 +396,78 @@ def test_document_pku_type_uses_local_fallback_when_llm_empty(db_session, monkey
     assert pku.llm_model == ""
 
 
+def test_document_settlement_commits_chunk_writes_before_next_llm_extraction(db_session, monkeypatch):
+    from backend.app.services import knowledge_governance as kg
+
+    item = KnowledgeItem(
+        title="Chunk settlement locks",
+        content="First chunk. Second chunk.",
+        source_type="manual",
+        category="RAG",
+        tags=["locks"],
+        user_id="default-user",
+    )
+    db_session.add(item)
+    db_session.flush()
+    chunks = [
+        KnowledgeChunk(
+            item_id=item.id,
+            chunk_text="First chunk creates a PKU.",
+            chunk_index=0,
+            chunk_type="parent",
+        ),
+        KnowledgeChunk(
+            item_id=item.id,
+            chunk_text="Second chunk should not wait behind first chunk writes.",
+            chunk_index=1,
+            chunk_type="parent",
+        ),
+    ]
+    db_session.add_all(chunks)
+    db_session.commit()
+    events = []
+    original_commit = db_session.commit
+
+    def commit_spy():
+        events.append("commit")
+        return original_commit()
+
+    monkeypatch.setattr(db_session, "commit", commit_spy)
+    monkeypatch.setattr(kg, "_refresh_pku_vector", lambda pku: None)
+    monkeypatch.setattr(kg, "_settle_local_pku_topics", lambda *args, **kwargs: (0, 0))
+
+    def fake_extract(item, anchor_chunk, previous_chunk=None, next_chunk=None, *, anchor_index=None):
+        if anchor_index == 1 and "commit" not in events:
+            raise AssertionError("previous chunk writes were not committed before next LLM extraction")
+        events.append(f"extract:{anchor_index}")
+        return kg.AssetUnitPKUExtraction(
+            [
+                kg.ExtractedPKU(
+                    statement=f"Chunk {anchor_index} should commit promptly.",
+                    unit_type="claim",
+                    evidence_span=anchor_chunk.chunk_text,
+                    keywords=["chunk", "commit"],
+                    concepts=["governance"],
+                    entities=[],
+                    domains=["RAG"],
+                    group="",
+                    confidence=0.9,
+                    reason="test",
+                    local_id=f"pku_{anchor_index}",
+                )
+            ],
+            [],
+            llm_model="test-model",
+        )
+
+    monkeypatch.setattr(kg, "_extract_document_chunk_pkus_with_llm", fake_extract)
+
+    result = settle_document_item_to_governance(db_session, item.id)
+
+    assert result.pku_count == 2
+    assert events[:3] == ["extract:0", "commit", "extract:1"]
+
+
 def test_personal_asset_unit_pku_type_uses_summary_fallback_without_ollama(db_session, monkeypatch):
     from backend.app.services import knowledge_governance as kg
     from backend.app.services.knowledge_governance import AssetUnitPKUExtraction

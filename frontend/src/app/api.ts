@@ -70,6 +70,20 @@ export interface KnowledgeResource {
   created_at: string
   updated_at: string
   error_message?: string | null
+  governance_status: string
+  governance_progress_current: number
+  governance_progress_total: number
+  governance_error_message?: string | null
+  governance_started_at?: string | null
+  governance_finished_at?: string | null
+}
+
+export interface TopicIngestResult {
+  queued: number
+  skipped: number
+  failed: number
+  job_ids: string[]
+  messages: string[]
 }
 
 export interface MemoryEntry {
@@ -290,6 +304,10 @@ export const knowledgeApi = {
     request<{ detail: string }>(`/knowledge/resources/${id}`, { method: 'DELETE' }),
   ingestResource: (id: string) =>
     request<KnowledgeResource>(`/knowledge/resources/${id}/ingest`, { method: 'POST' }),
+  retryGovernance: (id: string) =>
+    request<KnowledgeResource>(`/knowledge/resources/${id}/governance/retry`, { method: 'POST' }),
+  ingestTopicResources: (topicId: string) =>
+    request<TopicIngestResult>(`/knowledge/topics/${topicId}/ingest`, { method: 'POST' }),
   uploadFile: async (file: File, category?: string): Promise<KnowledgeItem> => {
     const form = new FormData()
     form.append('file', file)

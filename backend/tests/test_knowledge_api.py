@@ -1,9 +1,20 @@
 # prism/backend/tests/test_knowledge_api.py
+import json
 from pathlib import Path
 
+import pytest
+
 from backend.app.utils.media_type import infer_media_type, supported_accept_extensions
-from backend.app.models import KnowledgeFile
+from backend.app.models import KnowledgeFile, KnowledgeJob
 from sqlalchemy.exc import IntegrityError
+
+
+class FakeRedis:
+    def __init__(self):
+        self.messages = []
+
+    def lpush(self, queue_name, payload):
+        self.messages.append((queue_name, payload))
 
 
 def test_create_and_get_item(client):
@@ -245,6 +256,39 @@ def test_upload_document_resource_creates_item(client, monkeypatch):
     assert called == []
 
 
+def test_upload_document_marks_abnormal_text_invalid(db_session, monkeypatch):
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.api.knowledge import router as knowledge_router
+    from backend.app.database import get_db
+
+    app = FastAPI()
+    api_prefix = APIRouter(prefix="/api/v1")
+    api_prefix.include_router(knowledge_router)
+    app.include_router(api_prefix)
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+    topic = _create_topic(client)
+    monkeypatch.setattr("backend.app.api.knowledge.extract_text", lambda path: "x" * 300001)
+    monkeypatch.setattr("backend.app.api.knowledge.count_pages", lambda path: 10)
+
+    response = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("huge.txt", b"placeholder", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    resource = response.json()
+    assert resource["processing_status"] == "text_invalid"
+    assert "too large" in resource["error_message"]
+    assert resource["item_id"] is None
+
+
 def test_duplicate_resource_in_same_topic_is_conflict(client):
     topic = _create_topic(client)
     files = {"file": ("same.txt", b"same", "text/plain")}
@@ -299,159 +343,264 @@ def test_upload_image_audio_video_as_metadata_only(client):
         assert resource["item_id"] is None
 
 
-def test_ingest_resource_returns_processing_and_triggers_background(client, monkeypatch):
+def test_ingest_resource_enqueues_job_instead_of_calling_engine(client, db_session, monkeypatch):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
         files={"file": ("notes.txt", b"hello document", "text/plain")},
     )
     resource = upload.json()
-    triggered = []
+    fake_redis = FakeRedis()
 
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
     monkeypatch.setattr(
         "backend.app.api.knowledge._trigger_resource_ingestion",
-        lambda resource_id, item_id: triggered.append((resource_id, item_id)),
+        lambda resource_id, item_id: (_ for _ in ()).throw(AssertionError("Engine thread must not be used")),
     )
 
     response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
 
     assert response.status_code == 200
     ingested = response.json()
-    assert ingested["processing_status"] == "processing"
+    assert ingested["processing_status"] == "queued"
     assert ingested["error_message"] is None
-    assert triggered == [(resource["id"], resource["item_id"])]
+    job = db_session.query(KnowledgeJob).filter_by(resource_id=resource["id"], job_type="ingest").one()
+    assert job.status == "queued"
+    assert job.stage == "enqueued"
+    assert job.item_id == resource["item_id"]
+    assert fake_redis.messages == [("prism:queue:ingest", json.dumps({"job_id": job.id}))]
 
 
-def test_ingest_resource_does_not_retrigger_while_processing(client, db_session, monkeypatch):
+def test_ingest_resource_reuses_active_job_without_duplicate_redis_message(client, db_session, monkeypatch):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
         files={"file": ("notes.txt", b"hello document", "text/plain")},
     )
     resource = upload.json()
-    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
-    saved.processing_status = "processing"
-    db_session.commit()
-    triggered = []
+    fake_redis = FakeRedis()
 
-    monkeypatch.setattr(
-        "backend.app.api.knowledge._trigger_resource_ingestion",
-        lambda resource_id, item_id: triggered.append((resource_id, item_id)),
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    first = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
+    second = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["processing_status"] == "queued"
+    assert db_session.query(KnowledgeJob).filter_by(resource_id=resource["id"], job_type="ingest").count() == 1
+    assert len(fake_redis.messages) == 1
+
+
+def test_ingest_resource_maps_enqueue_value_error_to_conflict(client, monkeypatch):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
     )
+    resource = upload.json()
+    fake_redis = FakeRedis()
+
+    def raise_not_ingestable(*args, **kwargs):
+        raise ValueError("resource_not_ingestable")
+
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+    monkeypatch.setattr("backend.app.api.knowledge.enqueue_ingest_job", raise_not_ingestable)
 
     response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
 
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "resource_not_ingestable",
+        "message": "resource_not_ingestable",
+    }
+    assert fake_redis.messages == []
+
+
+def test_ingest_resource_rejects_text_invalid(client, db_session, monkeypatch):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
+    saved.processing_status = "text_invalid"
+    saved.error_message = "Document text is too large"
+    db_session.commit()
+    fake_redis = FakeRedis()
+
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "text_invalid",
+        "message": "Document text is too large",
+    }
+    assert fake_redis.messages == []
+
+
+def test_ingest_resource_rejects_no_item(client, monkeypatch):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("photo.png", b"image", "image/png")},
+    )
+    resource = upload.json()
+    fake_redis = FakeRedis()
+
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "no_item"
+    assert fake_redis.messages == []
+
+
+def test_ingest_resource_missing_returns_404(client):
+    response = client.post("/api/v1/knowledge/resources/missing-resource/ingest")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "resource_not_found"
+
+
+def test_retry_governance_enqueues_governance_job(client, db_session, monkeypatch):
+    topic = _create_topic(client)
+    upload = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("notes.txt", b"hello document", "text/plain")},
+    )
+    resource = upload.json()
+    saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
+    saved.processing_status = "done"
+    saved.governance_status = "failed"
+    db_session.commit()
+    fake_redis = FakeRedis()
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/governance/retry")
+
     assert response.status_code == 200
-    assert response.json()["processing_status"] == "processing"
-    assert triggered == []
+    assert response.json()["governance_status"] == "queued"
+    assert fake_redis.messages
 
 
-def test_run_resource_ingestion_marks_resource_done(client, db_session, monkeypatch):
-    from backend.app.api import knowledge
-
+def test_retry_governance_rejects_resource_that_is_not_vectorized(client, db_session, monkeypatch):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
         files={"file": ("notes.txt", b"hello document", "text/plain")},
     )
     resource = upload.json()
-
-    class FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return {"chunks": 3}
-
-    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(knowledge.httpx, "post", lambda *args, **kwargs: FakeResponse())
-
-    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
-
     saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
-    assert saved.processing_status == "done"
-    assert saved.error_message is None
+    saved.processing_status = "completed"
+    saved.governance_status = "failed"
+    db_session.commit()
+    fake_redis = FakeRedis()
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/governance/retry")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "not_vectorized"
+    assert fake_redis.messages == []
 
 
-def test_run_resource_ingestion_waits_for_long_document_governance(client, db_session, monkeypatch):
-    from backend.app.api import knowledge
-
+@pytest.mark.parametrize("governance_status", ["done", "not_started"])
+def test_retry_governance_rejects_resource_when_governance_is_not_failed(
+    client,
+    db_session,
+    monkeypatch,
+    governance_status,
+):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
         files={"file": ("notes.txt", b"hello document", "text/plain")},
     )
     resource = upload.json()
-    observed = {}
-
-    class FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return {"chunks": 3}
-
-    def fake_post(*args, **kwargs):
-        observed.update(kwargs)
-        return FakeResponse()
-
-    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(knowledge.httpx, "post", fake_post)
-
-    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
-
-    assert observed["timeout"] >= 1800
-
-
-def test_run_resource_ingestion_records_engine_error_body(client, db_session, monkeypatch):
-    from backend.app.api import knowledge
-
-    topic = _create_topic(client)
-    upload = client.post(
-        f"/api/v1/knowledge/topics/{topic['id']}/resources",
-        files={"file": ("notes.txt", b"hello document", "text/plain")},
-    )
-    resource = upload.json()
-
-    class FakeResponse:
-        status_code = 500
-        text = '{"detail":"Lock wait timeout exceeded; try restarting transaction"}'
-
-        def json(self):
-            return {"detail": "Lock wait timeout exceeded; try restarting transaction"}
-
-    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(knowledge.httpx, "post", lambda *args, **kwargs: FakeResponse())
-
-    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
-
     saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
-    assert saved.processing_status == "failed"
-    assert saved.error_message == "Engine returned 500: Lock wait timeout exceeded; try restarting transaction"
+    saved.processing_status = "done"
+    saved.governance_status = governance_status
+    db_session.commit()
+    fake_redis = FakeRedis()
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/governance/retry")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "governance_not_failed"
+    assert fake_redis.messages == []
 
 
-def test_run_resource_ingestion_marks_resource_failed_on_zero_chunks(client, db_session, monkeypatch):
-    from backend.app.api import knowledge
-
+def test_retry_governance_maps_enqueue_value_error_to_conflict(client, db_session, monkeypatch):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
         files={"file": ("notes.txt", b"hello document", "text/plain")},
     )
     resource = upload.json()
-
-    class FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return {"chunks": 0}
-
-    monkeypatch.setattr(knowledge, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(knowledge.httpx, "post", lambda *args, **kwargs: FakeResponse())
-
-    knowledge._run_resource_ingestion(resource["id"], resource["item_id"])
-
     saved = db_session.query(KnowledgeFile).filter_by(id=resource["id"]).one()
-    assert saved.processing_status == "failed"
-    assert saved.error_message == "Ingestion returned 0 chunks (content may be empty)"
+    saved.processing_status = "done"
+    saved.governance_status = "failed"
+    db_session.commit()
+    fake_redis = FakeRedis()
+
+    def raise_not_ingestable(*args, **kwargs):
+        raise ValueError("resource_not_ingestable")
+
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+    monkeypatch.setattr("backend.app.api.knowledge.enqueue_governance_job", raise_not_ingestable)
+
+    response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/governance/retry")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "resource_not_ingestable",
+        "message": "resource_not_ingestable",
+    }
+    assert fake_redis.messages == []
+
+
+def test_topic_ingest_enqueues_all_eligible_documents(client, db_session, monkeypatch):
+    topic = _create_topic(client)
+    first = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("first.txt", b"first document", "text/plain")},
+    ).json()
+    second = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("second.txt", b"second document", "text/plain")},
+    ).json()
+    skipped_image = client.post(
+        f"/api/v1/knowledge/topics/{topic['id']}/resources",
+        files={"file": ("photo.png", b"image", "image/png")},
+    ).json()
+    saved_second = db_session.query(KnowledgeFile).filter_by(id=second["id"]).one()
+    saved_second.processing_status = "failed"
+    db_session.commit()
+    fake_redis = FakeRedis()
+
+    monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
+
+    response = client.post(f"/api/v1/knowledge/topics/{topic['id']}/ingest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["queued"] == 2
+    assert payload["skipped"] == 0
+    assert payload["failed"] == 0
+    assert payload["messages"] == []
+    assert len(payload["job_ids"]) == 2
+    jobs = db_session.query(KnowledgeJob).filter(KnowledgeJob.resource_id.in_([first["id"], second["id"]])).all()
+    assert {job.id for job in jobs} == set(payload["job_ids"])
+    assert {job.stage for job in jobs} == {"enqueued"}
+    assert {json.loads(message)["job_id"] for _queue, message in fake_redis.messages} == set(payload["job_ids"])
+    assert [queue for queue, _message in fake_redis.messages] == ["prism:queue:ingest", "prism:queue:ingest"]
+    assert db_session.query(KnowledgeJob).filter_by(resource_id=skipped_image["id"]).count() == 0
 
 
 def test_update_resource_title_updates_linked_item(client, monkeypatch):

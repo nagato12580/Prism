@@ -97,6 +97,12 @@ class KnowledgeFile(Base):
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
     error_message = Column(Text, comment="Processing error")
+    governance_status = Column(String(20), nullable=False, default="not_started")
+    governance_progress_current = Column(Integer, nullable=False, default=0)
+    governance_progress_total = Column(Integer, nullable=False, default=0)
+    governance_error_message = Column(Text, comment="Governance error")
+    governance_started_at = Column(DateTime, nullable=True)
+    governance_finished_at = Column(DateTime, nullable=True)
 
     topic = relationship("KnowledgeTopic", back_populates="resources")
     item = relationship("KnowledgeItem")

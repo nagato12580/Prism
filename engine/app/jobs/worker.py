@@ -1,0 +1,471 @@
+import logging
+import socket
+import threading
+import time
+import uuid
+from datetime import timedelta
+
+from sqlalchemy import create_engine
+from sqlalchemy import and_
+from sqlalchemy import or_
+from sqlalchemy.orm import sessionmaker
+
+from backend.app.models import KnowledgeFile, KnowledgeJob
+from backend.app.services.document_text_quality import assess_document_text
+from backend.app.services.knowledge_governance import settle_document_item_to_governance
+from backend.app.utils.time import local_now
+from engine.app.config import settings
+from engine.app.ingestion.pipeline import ingest_item
+
+from . import redis_queue
+
+
+_engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
+_Session = sessionmaker(bind=_engine)
+logger = logging.getLogger("uvicorn.error")
+
+ACTIVE_STATUSES = {"queued", "processing"}
+NEEDS_REPUBLISH_STAGES = {"created", "retry", "recovered"}
+
+
+class HardJobFailure(RuntimeError):
+    pass
+
+
+def _worker_id(prefix):
+    host = socket.gethostname()
+    return f"{prefix}-{host}-{uuid.uuid4().hex[:8]}"
+
+
+def _queue_name_for_job(job):
+    if job.job_type == "governance":
+        return settings.KNOWLEDGE_GOVERNANCE_QUEUE
+    return settings.KNOWLEDGE_INGEST_QUEUE
+
+
+def _publish_job(job):
+    client = redis_queue.redis_client()
+    redis_queue.push_job(client, _queue_name_for_job(job), job.id)
+
+
+def _publish_job_and_mark_enqueued(db, job):
+    _publish_job(job)
+    job.stage = "enqueued"
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def claim_job(db, job_id, worker_id):
+    now = local_now()
+    job = (
+        db.query(KnowledgeJob)
+        .filter(
+            KnowledgeJob.id == job_id,
+            KnowledgeJob.status == "queued",
+            or_(KnowledgeJob.available_at == None, KnowledgeJob.available_at <= now),
+        )
+        .with_for_update()
+        .first()
+    )
+    if job is None:
+        db.rollback()
+        return None
+
+    job.status = "processing"
+    job.stage = "claimed"
+    job.locked_by = worker_id
+    job.locked_at = now
+    job.started_at = job.started_at or now
+    job.attempts = (job.attempts or 0) + 1
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def update_job_progress(db, job, *, stage, current=0, total=0):
+    job.stage = stage
+    job.progress_current = int(current or 0)
+    job.progress_total = int(total or 0)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _record_governance_progress(job_id, resource_id, *, stage, current=0, total=0):
+    db = _Session()
+    try:
+        current = int(current or 0)
+        total = int(total or 0)
+        job = db.query(KnowledgeJob).filter(KnowledgeJob.id == job_id).first()
+        resource = db.query(KnowledgeFile).filter(KnowledgeFile.id == resource_id).first()
+        if job is not None:
+            job.stage = stage
+            job.progress_current = current
+            job.progress_total = total
+        if resource is not None:
+            resource.governance_progress_current = current
+            resource.governance_progress_total = total
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "[knowledge.worker] governance progress update failed job_id=%s resource_id=%s error=%s",
+            job_id,
+            resource_id,
+            exc,
+        )
+    finally:
+        db.close()
+
+
+def mark_done(db, job):
+    now = local_now()
+    job.status = "done"
+    job.stage = "done"
+    job.finished_at = now
+    job.locked_by = ""
+    job.locked_at = None
+    job.error_code = ""
+    job.error_message = None
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _resource_for_job(db, job):
+    return db.query(KnowledgeFile).filter(KnowledgeFile.id == job.resource_id).first()
+
+
+def _record_resource_failure(resource, job, message, final):
+    if resource is None:
+        return
+    if job.job_type == "governance":
+        resource.governance_error_message = message
+        resource.governance_status = "failed" if final else "queued"
+    else:
+        resource.error_message = message
+        if resource.processing_status != "text_invalid":
+            resource.processing_status = "failed" if final else "queued"
+
+
+def mark_retry_or_failed(db, job, exc, *, retryable):
+    message = str(exc) or exc.__class__.__name__
+    resource = _resource_for_job(db, job)
+    exhausted = not retryable or (job.attempts or 0) >= (job.max_attempts or 1)
+    job.error_code = "hard_failure" if not retryable else "retryable_failure"
+    job.error_message = message
+    job.locked_by = ""
+    job.locked_at = None
+
+    if exhausted:
+        job.status = "failed"
+        job.stage = "failed"
+        job.finished_at = local_now()
+        _record_resource_failure(resource, job, message, final=True)
+    else:
+        job.status = "queued"
+        job.stage = "retry"
+        job.available_at = local_now()
+        _record_resource_failure(resource, job, message, final=False)
+
+    db.commit()
+    db.refresh(job)
+    if not exhausted:
+        _publish_job_and_mark_enqueued(db, job)
+    return job
+
+
+def recover_stale_jobs(stale_seconds=None):
+    stale_seconds = stale_seconds or settings.KNOWLEDGE_JOB_STALE_SECONDS
+    cutoff = local_now() - timedelta(seconds=stale_seconds)
+    db = _Session()
+    try:
+        jobs = (
+            db.query(KnowledgeJob)
+            .filter(KnowledgeJob.status == "processing", KnowledgeJob.locked_at < cutoff)
+            .all()
+        )
+        now = local_now()
+        for job in jobs:
+            job.status = "queued"
+            job.stage = "recovered"
+            job.locked_by = ""
+            job.locked_at = None
+            job.available_at = now
+        db.commit()
+        for job in jobs:
+            _publish_job_and_mark_enqueued(db, job)
+        return len(jobs)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def republish_due_queued_jobs(stale_seconds=None):
+    now = local_now()
+    stale_seconds = stale_seconds or settings.KNOWLEDGE_JOB_STALE_SECONDS
+    stale_cutoff = now - timedelta(seconds=stale_seconds)
+    db = _Session()
+    try:
+        jobs = (
+            db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.status == "queued",
+                or_(
+                    KnowledgeJob.stage.in_(NEEDS_REPUBLISH_STAGES),
+                    and_(
+                        KnowledgeJob.stage == "enqueued",
+                        or_(
+                            KnowledgeJob.available_at <= stale_cutoff,
+                            KnowledgeJob.created_at <= stale_cutoff,
+                        ),
+                    ),
+                ),
+                or_(KnowledgeJob.available_at == None, KnowledgeJob.available_at <= now),
+            )
+            .order_by(KnowledgeJob.available_at.asc(), KnowledgeJob.created_at.asc(), KnowledgeJob.id.asc())
+            .all()
+        )
+        count = 0
+        for job in jobs:
+            _publish_job_and_mark_enqueued(db, job)
+            count += 1
+        return count
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _validate_ingest_resource(db, job):
+    resource = _resource_for_job(db, job)
+    if resource is None:
+        raise HardJobFailure("resource_not_found")
+    if not resource.item_id:
+        raise HardJobFailure("resource_not_ingestable")
+
+    quality = assess_document_text(
+        resource.content_text,
+        page_count=resource.page_count,
+        max_chars=settings.KNOWLEDGE_TEXT_MAX_CHARS,
+        max_chars_per_page=settings.KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE,
+    )
+    if not quality.ok:
+        resource.processing_status = "text_invalid"
+        resource.error_message = quality.message
+        db.commit()
+        raise HardJobFailure(quality.message)
+    return resource
+
+
+def enqueue_governance_job_from_worker(db, resource):
+    job = (
+        db.query(KnowledgeJob)
+        .filter(
+            KnowledgeJob.resource_id == resource.id,
+            KnowledgeJob.job_type == "governance",
+            KnowledgeJob.status.in_(ACTIVE_STATUSES),
+        )
+        .order_by(KnowledgeJob.created_at.desc(), KnowledgeJob.id.desc())
+        .with_for_update()
+        .first()
+    )
+    if job is None:
+        job = KnowledgeJob(
+            job_type="governance",
+            resource_id=resource.id,
+            item_id=resource.item_id,
+            topic_id=resource.topic_id,
+            status="queued",
+            stage="created",
+            max_attempts=3,
+            available_at=local_now(),
+        )
+        db.add(job)
+        db.flush()
+
+    resource.governance_status = "queued"
+    resource.governance_error_message = None
+    db.commit()
+    db.refresh(job)
+
+    if job.stage != "enqueued":
+        client = redis_queue.redis_client()
+        redis_queue.push_job(client, settings.KNOWLEDGE_GOVERNANCE_QUEUE, job.id)
+        job.stage = "enqueued"
+        db.commit()
+        db.refresh(job)
+    return job
+
+
+def run_ingest_job(job_id, *, worker_id):
+    db = _Session()
+    try:
+        job = claim_job(db, job_id, worker_id)
+        if job is None:
+            return None
+
+        try:
+            resource = _validate_ingest_resource(db, job)
+            resource.processing_status = "processing"
+            resource.error_message = None
+            db.commit()
+
+            def progress(**kwargs):
+                update_job_progress(db, job, **kwargs)
+
+            result = ingest_item(job.item_id, progress=progress)
+            db.refresh(resource)
+            resource.processing_status = "done"
+            resource.error_message = None
+            resource.governance_status = "queued"
+            resource.governance_error_message = None
+            mark_done(db, job)
+            try:
+                enqueue_governance_job_from_worker(db, resource)
+            except Exception as exc:
+                logger.exception(
+                    "[knowledge.worker] governance enqueue failed after ingest job_id=%s error=%s",
+                    job_id,
+                    exc,
+                )
+                db.rollback()
+                resource = _resource_for_job(db, job)
+                if resource is not None:
+                    resource.processing_status = "done"
+                    resource.governance_status = "failed"
+                    resource.governance_error_message = str(exc) or exc.__class__.__name__
+                    db.commit()
+            return result
+        except HardJobFailure as exc:
+            db.rollback()
+            mark_retry_or_failed(db, job, exc, retryable=False)
+            return None
+        except Exception as exc:
+            logger.exception("[knowledge.worker] ingest failed job_id=%s error=%s", job_id, exc)
+            db.rollback()
+            mark_retry_or_failed(db, job, exc, retryable=True)
+            return None
+    finally:
+        db.close()
+
+
+def run_governance_job(job_id, *, worker_id):
+    db = _Session()
+    try:
+        job = claim_job(db, job_id, worker_id)
+        if job is None:
+            return None
+
+        try:
+            resource = _resource_for_job(db, job)
+            if resource is None or not resource.item_id or not job.item_id:
+                raise HardJobFailure("resource_not_governable")
+
+            now = local_now()
+            resource.governance_status = "processing"
+            resource.governance_started_at = now
+            resource.governance_finished_at = None
+            resource.governance_error_message = None
+            db.commit()
+
+            def progress(**kwargs):
+                current = int(kwargs.get("current") or 0)
+                total = int(kwargs.get("total") or 0)
+                stage = kwargs.get("stage") or "governance"
+                try:
+                    _record_governance_progress(
+                        job.id,
+                        resource.id,
+                        stage=stage,
+                        current=current,
+                        total=total,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[knowledge.worker] governance progress callback failed job_id=%s resource_id=%s error=%s",
+                        job.id,
+                        resource.id,
+                        exc,
+                    )
+
+            result = settle_document_item_to_governance(db, job.item_id, progress=progress)
+            db.refresh(resource)
+            resource.processing_status = "done"
+            resource.governance_status = "done"
+            resource.governance_finished_at = local_now()
+            resource.governance_error_message = None
+            mark_done(db, job)
+            return result
+        except HardJobFailure as exc:
+            db.rollback()
+            mark_retry_or_failed(db, job, exc, retryable=False)
+            return None
+        except Exception as exc:
+            logger.exception("[knowledge.worker] governance failed job_id=%s error=%s", job_id, exc)
+            db.rollback()
+            mark_retry_or_failed(db, job, exc, retryable=True)
+            return None
+    finally:
+        db.close()
+
+
+class KnowledgeWorkerManager:
+    def __init__(self):
+        self._stop = threading.Event()
+        self._threads = []
+        self._client = None
+
+    def start(self):
+        if self._threads:
+            return
+        recover_stale_jobs()
+        republish_due_queued_jobs()
+        self._client = redis_queue.redis_client()
+        for index in range(max(1, settings.KNOWLEDGE_INGEST_WORKERS)):
+            worker_id = _worker_id(f"ingest-{index}")
+            thread = threading.Thread(
+                target=self._loop,
+                args=(settings.KNOWLEDGE_INGEST_QUEUE, run_ingest_job, worker_id),
+                daemon=True,
+                name=f"knowledge-ingest-worker-{index}",
+            )
+            self._threads.append(thread)
+            thread.start()
+        for index in range(max(1, settings.KNOWLEDGE_GOVERNANCE_WORKERS)):
+            worker_id = _worker_id(f"governance-{index}")
+            thread = threading.Thread(
+                target=self._loop,
+                args=(settings.KNOWLEDGE_GOVERNANCE_QUEUE, run_governance_job, worker_id),
+                daemon=True,
+                name=f"knowledge-governance-worker-{index}",
+            )
+            self._threads.append(thread)
+            thread.start()
+
+    def stop(self):
+        self._stop.set()
+        for thread in self._threads:
+            thread.join(timeout=5)
+        self._threads = []
+        self._client = None
+
+    def _loop(self, queue_name, runner, worker_id):
+        while not self._stop.is_set():
+            try:
+                job_id = redis_queue.pop_job(self._client, queue_name, timeout_seconds=2)
+                if not job_id:
+                    continue
+                runner(job_id, worker_id=worker_id)
+            except Exception as exc:
+                logger.exception(
+                    "[knowledge.worker] loop error queue=%s worker_id=%s error=%s",
+                    queue_name,
+                    worker_id,
+                    exc,
+                )
+                time.sleep(1)

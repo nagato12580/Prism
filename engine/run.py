@@ -5,21 +5,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from engine.app.config import settings
-from engine.app.milvus_client import connect, ensure_collection
-from engine.app.es_client import ensure_index
-from engine.app.api.ingest import router as ingest_router
+
 from engine.app.api.chat import router as chat_router
+from engine.app.api.ingest import router as ingest_router
 from engine.app.api.wiki import router as wiki_router
+from engine.app.config import settings
+from engine.app.es_client import ensure_index
+from engine.app.jobs.worker import KnowledgeWorkerManager
+from engine.app.milvus_client import connect, ensure_collection
+
+
+_worker_manager = None
 
 
 def create_app():
     app = FastAPI(title="Prism Engine")
     app.add_middleware(
-        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     prefixed = APIRouter(prefix="/api/v1")
@@ -34,17 +43,31 @@ def create_app():
 
     @app.on_event("startup")
     def startup():
+        global _worker_manager
         try:
             connect()
             ensure_collection()
-            print("[engine] Milvus 已连接")
+            print("[engine] Milvus connected")
         except Exception as e:
-            print(f"[engine] Milvus 连接失败（向量检索将不可用，召回降级为 LIKE 关键词）: {e}")
+            print(f"[engine] Milvus initialization failed: {e}")
         try:
             ensure_index()
-            print("[engine] ES 索引已就绪")
+            print("[engine] ES index ready")
         except Exception as e:
-            print(f"[engine] ES 初始化失败（检索将回退到 MySQL BM25）: {e}")
+            print(f"[engine] ES initialization failed: {e}")
+        try:
+            _worker_manager = KnowledgeWorkerManager()
+            _worker_manager.start()
+            print("[engine] Knowledge workers started")
+        except Exception as e:
+            print(f"[engine] Knowledge workers failed to start: {e}")
+
+    @app.on_event("shutdown")
+    def shutdown():
+        global _worker_manager
+        if _worker_manager is not None:
+            _worker_manager.stop()
+            _worker_manager = None
 
     return app
 

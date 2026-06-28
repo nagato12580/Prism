@@ -35,3 +35,32 @@ def test_chunk_long_sentence_hard_split():
     long = "字" * 1200
     chunks = chunk_text(long, chunk_size=500, overlap=100)
     assert len(chunks) == 3  # 500 + 500 + 200
+
+
+def test_chunk_parent_child_uses_configured_balanced_sizes(monkeypatch):
+    import engine.app.ingestion.chunker as chunker
+
+    text = "This sentence has enough tokens for a small regression test. " * 300
+
+    monkeypatch.setattr(chunker.settings, "CHILD_CHUNK_TOKENS", 40)
+    monkeypatch.setattr(chunker.settings, "PARENT_CHUNK_TOKENS", 80)
+    monkeypatch.setattr(chunker.settings, "CHILD_OVERLAP_RATIO", 0.1)
+    small_chunks = chunker.chunk_parent_child(text)
+
+    monkeypatch.setattr(chunker.settings, "CHILD_CHUNK_TOKENS", 384)
+    monkeypatch.setattr(chunker.settings, "PARENT_CHUNK_TOKENS", 1536)
+    large_chunks = chunker.chunk_parent_child(text)
+
+    assert small_chunks
+    assert all(
+        chunker.count_tokens(parent.content) <= 80 * 1.15 for parent in small_chunks
+    )
+    assert all(
+        chunker.count_tokens(child.content) <= 40 * 1.25
+        for parent in small_chunks
+        for child in parent.children
+    )
+    assert len(small_chunks) > len(large_chunks)
+    assert sum(len(parent.children) for parent in small_chunks) > sum(
+        len(parent.children) for parent in large_chunks
+    )

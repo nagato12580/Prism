@@ -11,6 +11,10 @@ class Settings:
     DATABASE_TIME_ZONE: str = os.getenv("DATABASE_TIME_ZONE", "+08:00")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    KNOWLEDGE_INGEST_QUEUE: str = os.getenv("KNOWLEDGE_INGEST_QUEUE", "prism:queue:ingest")
+    KNOWLEDGE_GOVERNANCE_QUEUE: str = os.getenv("KNOWLEDGE_GOVERNANCE_QUEUE", "prism:queue:governance")
+    KNOWLEDGE_TEXT_MAX_CHARS: int = int(os.getenv("KNOWLEDGE_TEXT_MAX_CHARS", "300000"))
+    KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE: int = int(os.getenv("KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE", "12000"))
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
 

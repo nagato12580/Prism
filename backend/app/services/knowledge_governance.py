@@ -1084,6 +1084,38 @@ def _find_existing_topic_ckp(
     return None
 
 
+def _find_existing_topic_ckp_for_member_pkus(
+    db: Session,
+    *,
+    user_id: str,
+    member_pkus: list[PersonalKnowledgeUnit],
+) -> CanonicalKnowledgePoint | None:
+    statement_hashes = [
+        pku.normalized_statement_hash
+        for pku in member_pkus
+        if pku.normalized_statement_hash
+    ]
+    if not statement_hashes:
+        return None
+
+    candidates = (
+        db.query(CanonicalKnowledgePoint)
+        .join(PKUCanonicalLink, PKUCanonicalLink.canonical_id == CanonicalKnowledgePoint.id)
+        .join(PersonalKnowledgeUnit, PersonalKnowledgeUnit.id == PKUCanonicalLink.pku_id)
+        .filter(
+            CanonicalKnowledgePoint.user_id == user_id,
+            CanonicalKnowledgePoint.status != "deprecated",
+            CanonicalKnowledgePoint.canonical_type == "topic",
+            PKUCanonicalLink.relation_type == "about",
+            PersonalKnowledgeUnit.user_id == user_id,
+            PersonalKnowledgeUnit.normalized_statement_hash.in_(statement_hashes),
+        )
+        .order_by(CanonicalKnowledgePoint.created_at.asc(), CanonicalKnowledgePoint.id.asc())
+        .all()
+    )
+    return next((ckp for ckp in candidates if _topic_level(ckp) != "parent"), None)
+
+
 def _refresh_ckp_vector(ckp: CanonicalKnowledgePoint) -> None:
     try:
         embedding_ref = upsert_ckp_vector(ckp)
@@ -1324,8 +1356,11 @@ def _create_or_get_topic_ckp(
     source_kind: str,
     source_id: str,
     source_title: str = "",
+    member_pkus: list[PersonalKnowledgeUnit] | None = None,
 ) -> CanonicalKnowledgePoint:
     existing = _find_existing_topic_ckp(db, user_id=user_id, topic=topic)
+    if existing is None and member_pkus:
+        existing = _find_existing_topic_ckp_for_member_pkus(db, user_id=user_id, member_pkus=member_pkus)
     if existing:
         if _topic_level(existing) == "parent":
             existing = None
@@ -1654,6 +1689,7 @@ def _settle_local_pku_topics(
             source_kind=source_kind,
             source_id=source_id,
             source_title=source_title,
+            member_pkus=[ref_to_pku[ref] for ref in member_refs],
         )
         ckp_ids.add(ckp.id)
         child_topics_by_ref[topic.local_id] = topic
@@ -1693,6 +1729,7 @@ def _settle_local_pku_topics(
             source_kind=source_kind,
             source_id=source_id,
             source_title=source_title,
+            member_pkus=[pku for _, pku in unlinked],
         )
         ckp_ids.add(ckp.id)
         child_ref = first_linked_topic_ref or first_linked_topic.local_id
@@ -2056,10 +2093,15 @@ def _fallback_document_chunk_pku(item: KnowledgeItem, chunk: KnowledgeChunk) -> 
     )
 
 
-def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceResult:
+def settle_document_item_to_governance(db: Session, item_id: str, progress=None) -> GovernanceResult:
     item = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
     if not item:
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
+    item_user_id = item.user_id or DEFAULT_USER_ID
+    item_title = item.title or ""
+    item_summary = item.summary or ""
+    item_category = item.category or ""
+    item_tags = list(item.tags or [])
 
     chunks = (
         db.query(KnowledgeChunk)
@@ -2075,11 +2117,16 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
             .all()
         )
 
+    total_chunks = len(chunks)
     pku_ids: set[str] = set()
     relation_ids: set[str] = set()
     local_pku_refs: list[tuple[str, PersonalKnowledgeUnit]] = []
 
     for index, chunk in enumerate(chunks):
+        pku_count_before_chunk = len(pku_ids)
+        relation_count_before_chunk = len(relation_ids)
+        if progress:
+            progress(current=index, total=total_chunks, stage="governance")
         previous_chunk = chunks[index - 1] if index > 0 else None
         next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
         extraction = _extract_document_chunk_pkus_with_llm(
@@ -2131,15 +2178,22 @@ def settle_document_item_to_governance(db: Session, item_id: str) -> GovernanceR
                 )
                 relation_ids.add(row.id)
 
+        if len(pku_ids) > pku_count_before_chunk or len(relation_ids) > relation_count_before_chunk:
+            db.commit()
+
+    if progress:
+        progress(current=total_chunks, total=total_chunks, stage="governance")
+
+    db.commit()
     topic_ckp_count, topic_link_count = _settle_local_pku_topics(
         db,
-        user_id=item.user_id or DEFAULT_USER_ID,
+        user_id=item_user_id,
         source_kind="document_chunk",
-        source_id=item.id,
-        source_title=item.title or "",
-        source_summary=item.summary or "",
-        source_category=item.category or "",
-        source_tags=item.tags or [],
+        source_id=item_id,
+        source_title=item_title,
+        source_summary=item_summary,
+        source_category=item_category,
+        source_tags=item_tags,
         pku_refs=local_pku_refs,
         role="topic_member",
         reason="Settlement from document-level topic grouping.",

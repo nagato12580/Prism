@@ -9,6 +9,25 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    KNOWLEDGE_INGEST_QUEUE: str = os.getenv(
+        "KNOWLEDGE_INGEST_QUEUE", "prism:queue:ingest"
+    )
+    KNOWLEDGE_GOVERNANCE_QUEUE: str = os.getenv(
+        "KNOWLEDGE_GOVERNANCE_QUEUE", "prism:queue:governance"
+    )
+    KNOWLEDGE_INGEST_WORKERS: int = int(os.getenv("KNOWLEDGE_INGEST_WORKERS", "2"))
+    KNOWLEDGE_GOVERNANCE_WORKERS: int = int(
+        os.getenv("KNOWLEDGE_GOVERNANCE_WORKERS", "1")
+    )
+    KNOWLEDGE_JOB_STALE_SECONDS: int = int(
+        os.getenv("KNOWLEDGE_JOB_STALE_SECONDS", "1800")
+    )
+    KNOWLEDGE_TEXT_MAX_CHARS: int = int(
+        os.getenv("KNOWLEDGE_TEXT_MAX_CHARS", "300000")
+    )
+    KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE: int = int(
+        os.getenv("KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE", "12000")
+    )
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
 
@@ -25,7 +44,10 @@ class Settings:
     EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024"))
     EMBEDDING_TIMEOUT_SECONDS: float = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
     EMBEDDING_MAX_RETRIES: int = int(os.getenv("EMBEDDING_MAX_RETRIES", "2"))
-    EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "16"))
+    EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
+    CHILD_CHUNK_TOKENS: int = int(os.getenv("CHILD_CHUNK_TOKENS", "384"))
+    PARENT_CHUNK_TOKENS: int = int(os.getenv("PARENT_CHUNK_TOKENS", "1536"))
+    CHILD_OVERLAP_RATIO: float = float(os.getenv("CHILD_OVERLAP_RATIO", "0.1"))
 
     ES_HOST: str = os.getenv("ES_HOST", "http://localhost:9200")
     ES_USERNAME: str = os.getenv("ES_USERNAME", "")
