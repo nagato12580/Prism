@@ -8,6 +8,7 @@ from .wiki import router as wiki_router
 from .assets import router as assets_router
 from .knowledge_graph import router as knowledge_graph_router
 from .memories import router as memories_router
+from .traces import router as traces_router
 
 
 def register_routers(app):
@@ -19,4 +20,5 @@ def register_routers(app):
     api_prefix.include_router(assets_router)
     api_prefix.include_router(knowledge_graph_router)
     api_prefix.include_router(memories_router)
+    api_prefix.include_router(traces_router)
     app.include_router(api_prefix)
