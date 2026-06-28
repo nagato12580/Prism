@@ -27,6 +27,7 @@ import {
 import {
   useChatStore,
   SOURCE_TYPE_OPTIONS,
+  normalizeEvidenceItems,
   type ClarifyOption,
   type ClarifyRequest,
   type Message,
@@ -36,7 +37,7 @@ import {
   type ThinkingStep,
 } from '@/app/chatStore'
 import type { ResourceMediaType } from '@/app/api'
-import { knowledgeApi, chatApi, type KnowledgeTopic } from '@/app/api'
+import { knowledgeApi, chatApi, traceApi, type KnowledgeTopic } from '@/app/api'
 import { cn, genId } from '@/lib/utils'
 
 const starterPrompts = [
@@ -178,6 +179,7 @@ function shouldAutoGenerateTitle(title?: string | null) {
 
 function buildAssistantProcess(message: Message) {
   return {
+    trace_id: message.traceId || null,
     agent_status: message.agentStatus || null,
     tool_runs: message.toolRuns || [],
     thinking_steps: message.thinkingSteps || [],
@@ -206,6 +208,7 @@ export function ChatPage() {
   const addLastToolRun = useChatStore((s) => s.addLastToolRun)
   const finishLastToolRun = useChatStore((s) => s.finishLastToolRun)
   const setLastClarify = useChatStore((s) => s.setLastClarify)
+  const setLastTraceId = useChatStore((s) => s.setLastTraceId)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
   const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
@@ -351,6 +354,7 @@ export function ChatPage() {
     const temporaryAssistantMessageId = genId()
     let assistantMessageId = temporaryAssistantMessageId
     let assistantPersistedId: string | null = null
+    let traceId: string | null = null
     addMessage({ id: userMessageId, role: 'user', content: query }, sessionId)
     addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
 
@@ -372,7 +376,13 @@ export function ChatPage() {
 
       try {
         const msg = JSON.parse(line)
-        if (msg.type === 'agent_status') {
+        if (msg.type === 'trace') {
+          traceId = safeString(msg.data?.trace_id)
+          if (traceId) {
+            setLastTraceId(traceId, sessionId, assistantMessageId)
+            if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          }
+        } else if (msg.type === 'agent_status') {
           setLastAgentStatus(safeString(msg.data?.label), sessionId, assistantMessageId)
           if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_call') {
@@ -389,6 +399,7 @@ export function ChatPage() {
             summary: safeString(msg.data?.summary),
             stats: msg.data?.stats,
             latencyMs: msg.data?.latency_ms,
+            evidenceItems: normalizeEvidenceItems(msg.data?.evidence_items),
             traceSteps: mergeThinkingSteps(
               msg.data?.trace_steps,
               msg.data?.stats?.deep_trace_steps,
@@ -431,6 +442,8 @@ export function ChatPage() {
         body: JSON.stringify({
           query,
           history,
+          session_id: sessionId,
+          user_message_id: userMessageId,
           topic_id: selectedTopicId || undefined,
           source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
           deep_search_enabled: deepSearchEnabled,
@@ -487,13 +500,24 @@ export function ChatPage() {
               clarify: aiMsg.clarify || undefined,
               process: buildAssistantProcess(aiMsg),
             })
-            else await chatApi.addMessage(sessionId, {
-              role: 'assistant',
-              content: aiMsg.content,
-              sources: aiMsg.sources || undefined,
-              clarify: aiMsg.clarify || undefined,
-              process: buildAssistantProcess(aiMsg),
-            })
+            else {
+              const persistedAssistant = await chatApi.addMessage(sessionId, {
+                role: 'assistant',
+                content: aiMsg.content,
+                sources: aiMsg.sources || undefined,
+                clarify: aiMsg.clarify || undefined,
+                process: buildAssistantProcess(aiMsg),
+              })
+              assistantPersistedId = persistedAssistant.id
+              replaceMessageId(sessionId, assistantMessageId, persistedAssistant.id)
+              assistantMessageId = persistedAssistant.id
+            }
+            if (traceId && assistantPersistedId) {
+              traceApi.bindMessage(traceId, {
+                session_id: sessionId,
+                assistant_message_id: assistantPersistedId,
+              }).catch(() => {})
+            }
           } catch { /* persistence is best-effort for the chat UI */ }
         }
         // 首轮问答后自动生成标题
