@@ -117,12 +117,116 @@ def test_raw_chunk_direct_lookup_payload_includes_evidence_items(monkeypatch):
 
     monkeypatch.setattr(knowledge_governance, "_new_db_session", lambda: FakeSession())
 
-    payload = knowledge_governance._raw_chunk_payload_from_query("chunk_id: abcdef12")
+    payload = knowledge_governance._raw_chunk_payload_from_query("chunk_id: abcdef12-3456-7890-abcd-ef1234567890")
 
     assert payload is not None
     assert payload["evidence_items"][0]["evidence_id"] == "document_chunk:abcdef12-3456-7890-abcd-ef1234567890"
     assert payload["evidence_items"][0]["excerpt"] == "direct chunk text"
     assert payload["sources"][0]["parent_chunk_id"] == "parent-1"
+
+
+def test_raw_chunk_direct_lookup_ignores_generic_source_labels(monkeypatch):
+    def fail_session():
+        raise AssertionError("generic source-like labels must not query the database")
+
+    monkeypatch.setattr(knowledge_governance, "_new_db_session", fail_session)
+
+    assert knowledge_governance._raw_chunk_payload_from_query("resource: abcdef12") is None
+    assert knowledge_governance._raw_chunk_payload_from_query("source: 20240101") is None
+    assert knowledge_governance._raw_chunk_payload_from_query("chunk: abcdef123456") is None
+    assert knowledge_governance._extract_chunk_id_token("please read abcdef12-3456-7890-abcd-ef1234567890") is None
+    assert (
+        knowledge_governance._raw_chunk_payload_from_query(
+            "please read abcdef12-3456-7890-abcd-ef1234567890"
+        )
+        is None
+    )
+
+
+def test_raw_chunk_direct_lookup_rejects_ambiguous_prefix(monkeypatch):
+    chunks = [
+        type(
+            "Chunk",
+            (),
+            {
+                "id": "abcdef123456-0000-0000-0000-000000000000",
+                "item_id": "item-1",
+                "chunk_text": "first text",
+                "chunk_index": 1,
+                "chunk_type": "child",
+                "parent_id": None,
+            },
+        )(),
+        type(
+            "Chunk",
+            (),
+            {
+                "id": "abcdef123456-1111-1111-1111-111111111111",
+                "item_id": "item-2",
+                "chunk_text": "second text",
+                "chunk_index": 2,
+                "chunk_type": "child",
+                "parent_id": None,
+            },
+        )(),
+    ]
+
+    class FakeQuery:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def limit(self, value):
+            return self
+
+        def all(self):
+            if self.model is knowledge_governance.KnowledgeChunk:
+                return chunks
+            return []
+
+        def first(self):
+            if self.model is knowledge_governance.KnowledgeChunk:
+                return chunks[0]
+            return None
+
+    class FakeSession:
+        def query(self, model):
+            return FakeQuery(model)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(knowledge_governance, "_new_db_session", lambda: FakeSession())
+
+    assert knowledge_governance._raw_chunk_payload_from_query("source_id: abcdef123456") is None
+
+
+def test_raw_document_search_falls_back_when_direct_lookup_db_fails(monkeypatch):
+    from engine.app.agent.tools.knowledge_governance import _build_raw_document_search
+
+    def fail_session():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(knowledge_governance, "_new_db_session", fail_session)
+    ctx = ToolContext(rag_runner=None)
+
+    payload = json.loads(
+        _build_raw_document_search(ctx).invoke(
+            {"query": "chunk_id: abcdef12-3456-7890-abcd-ef1234567890"}
+        )
+    )
+
+    assert payload["status"] == "insufficient"
+    assert payload["summary"] == "Raw document search is not configured."
+    assert payload["missing"] == ["No RAG runner is available."]
+    assert payload["sources"] == []
+    assert payload["evidence"] == []
+    assert payload["evidence_items"] == []
 
 
 def test_raw_document_search_uses_direct_chunk_lookup(monkeypatch):

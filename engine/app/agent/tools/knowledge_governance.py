@@ -20,7 +20,7 @@ from engine.app.config import settings
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 _Session = sessionmaker(bind=_engine)
 _UUID_PATTERN = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
-_SOURCE_ID_PREFIX_PATTERN = re.compile(r"(?:chunk_id|source_id|chunk|source)\s*[:=]\s*([0-9a-fA-F-]{8,36})\b")
+_SOURCE_ID_LABEL_PATTERN = re.compile(r"\b(?:chunk_id|source_id)\b\s*[:=]\s*([0-9a-fA-F-]{12,36})\b")
 
 
 class KnowledgeTopicSearchInput(BaseModel):
@@ -94,10 +94,7 @@ def _new_db_session():
 
 
 def _extract_chunk_id_token(query: str) -> str | None:
-    uuid_match = _UUID_PATTERN.search(query or "")
-    if uuid_match:
-        return uuid_match.group(0)
-    prefix_match = _SOURCE_ID_PREFIX_PATTERN.search(query or "")
+    prefix_match = _SOURCE_ID_LABEL_PATTERN.search(query or "")
     if prefix_match:
         return prefix_match.group(1)
     return None
@@ -305,17 +302,22 @@ def _raw_chunk_payload_from_query(query: str) -> dict[str, Any] | None:
     if not token:
         return None
 
-    db = _new_db_session()
+    db = None
     try:
+        db = _new_db_session()
         if _UUID_PATTERN.fullmatch(token):
             chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == token).first()
         else:
-            chunk = (
+            chunks = (
                 db.query(KnowledgeChunk)
                 .filter(KnowledgeChunk.id.like(f"{token}%"))
                 .order_by(KnowledgeChunk.id.asc())
-                .first()
+                .limit(2)
+                .all()
             )
+            if len(chunks) != 1:
+                return None
+            chunk = chunks[0]
         if chunk is None:
             return None
 
@@ -353,8 +355,11 @@ def _raw_chunk_payload_from_query(query: str) -> dict[str, Any] | None:
         }
         payload["evidence_items"] = normalize_evidence_items("raw_document_search", payload)
         return payload
+    except Exception:
+        return None
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
