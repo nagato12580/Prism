@@ -35,8 +35,46 @@ assert.match(chatPage, /traceApi/, 'ChatPage should import and use traceApi.')
 assert.match(chatPage, /normalizeEvidenceItems/, 'ChatPage should import and use normalizeEvidenceItems.')
 assert.match(chatPage, /trace_id:\s*message\.traceId \|\| null/, 'Assistant process snapshots should include trace_id.')
 assert.match(chatPage, /let traceId:\s*string \| null = null/, 'send should track the current stream trace id.')
-assert.match(chatPage, /if \(msg\.type === 'trace'\)\s*{[\s\S]*traceId = safeString\(msg\.data\?\.trace_id\)[\s\S]*setLastTraceId\(traceId,\s*sessionId,\s*assistantMessageId\)[\s\S]*persistAssistantProcessSnapshot\(sessionId,\s*assistantPersistedId\)/, 'Trace stream events should update state and process snapshots.')
+assert.match(chatPage, /processPersistenceQueuesRef/, 'Assistant process persistence should keep per-message ordering state.')
+assert.match(chatPage, /queueAssistantProcessSnapshot/, 'Stream process snapshots should be queued instead of fire-and-forget.')
+assert.match(chatPage, /flushAssistantProcessSnapshot/, 'Final assistant persistence should wait for or supersede queued snapshots.')
+assert.match(chatPage, /if \(msg\.type === 'trace'\)\s*{[\s\S]*traceId = safeString\(msg\.data\?\.trace_id\)[\s\S]*setLastTraceId\(traceId,\s*sessionId,\s*assistantMessageId\)[\s\S]*queueAssistantProcessSnapshot\(sessionId,\s*assistantPersistedId\)/, 'Trace stream events should update state and queue process snapshots.')
 assert.match(chatPage, /evidenceItems:\s*normalizeEvidenceItems\(msg\.data\?\.evidence_items\)/, 'Tool results should persist normalized evidence items.')
 assert.match(chatPage, /session_id:\s*sessionId/, 'Engine answer requests should include session_id.')
-assert.match(chatPage, /user_message_id:\s*userMessageId/, 'Engine answer requests should include user_message_id.')
-assert.match(chatPage, /traceApi\.bindMessage\(traceId,\s*{[\s\S]*session_id:\s*sessionId[\s\S]*assistant_message_id:\s*assistantPersistedId[\s\S]*}\)\.catch\(\(\) => {}\)/, 'Completed assistant messages should be bound to their trace.')
+assert.match(chatPage, /let engineUserMessageId = userMessageId/, 'Engine user id should start with the optimistic id as fallback.')
+assert.match(chatPage, /const persistedUserMessage = await userPersistPromise[\s\S]*replaceMessageId\(sessionId,\s*userMessageId,\s*persistedUserMessage\.id\)[\s\S]*engineUserMessageId = persistedUserMessage\.id/, 'User persistence should update local state and engine id before answering.')
+assert.match(chatPage, /user_message_id:\s*engineUserMessageId/, 'Engine answer requests should include the persisted user_message_id when available.')
+assert.match(chatPage, /await flushAssistantProcessSnapshot\(sessionId,\s*assistantPersistedId\)/, 'Final assistant persistence should wait for queued process snapshots before returning.')
+assert.match(chatPage, /await traceApi\.bindMessage\(traceId,\s*{[\s\S]*session_id:\s*sessionId[\s\S]*assistant_message_id:\s*assistantPersistedId[\s\S]*}\)/, 'Completed assistant messages should be bound to their trace after final persistence.')
+
+assert.match(chatStore, /const normalizedScore = typeof item\.score === 'number'\s*\? item\.score\s*:\s*typeof item\.score === 'string'\s*\? Number\(item\.score\)\s*:\s*NaN/, 'Evidence score strings should be coerced to numbers.')
+assert.match(chatStore, /metadata: isPlainRecord\(item\.metadata\)/, 'Evidence metadata should accept only plain object records.')
+
+async function runLatestProcessWinsSimulation() {
+  const writes = []
+  let latest = null
+  let running = null
+
+  const queue = (snapshot, delay) => {
+    latest = { snapshot, delay }
+    if (!running) {
+      running = (async () => {
+        while (latest) {
+          const pending = latest
+          latest = null
+          await new Promise((resolve) => setTimeout(resolve, pending.delay))
+          writes.push(pending.snapshot)
+        }
+        running = null
+      })()
+    }
+    return running
+  }
+
+  queue({ step: 'early' }, 20)
+  queue({ step: 'final', trace_id: 'trace-1', evidenceItems: [{ evidence_id: 'e1' }] }, 1)
+  await running
+  assert.deepEqual(writes.at(-1), { step: 'final', trace_id: 'trace-1', evidenceItems: [{ evidence_id: 'e1' }] })
+}
+
+await runLatestProcessWinsSimulation()

@@ -153,28 +153,39 @@ function normalizeToolRunStatus(value: unknown): ToolRunStatus {
   return value === 'running' || value === 'error' ? value : 'success'
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export function normalizeEvidenceItems(value: unknown): EvidenceItem[] | undefined {
   if (!Array.isArray(value)) return undefined
   const items = value
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => ({
-      evidence_id: typeof item.evidence_id === 'string' ? item.evidence_id : '',
-      source_kind: typeof item.source_kind === 'string' ? item.source_kind : undefined,
-      source_id: typeof item.source_id === 'string' ? item.source_id : undefined,
-      chunk_id: typeof item.chunk_id === 'string' ? item.chunk_id : undefined,
-      parent_chunk_id: typeof item.parent_chunk_id === 'string' ? item.parent_chunk_id : null,
-      item_id: typeof item.item_id === 'string' ? item.item_id : undefined,
-      display_title: typeof item.display_title === 'string' ? item.display_title : undefined,
-      excerpt: typeof item.excerpt === 'string' ? item.excerpt : undefined,
-      hit_reason: typeof item.hit_reason === 'string' ? item.hit_reason : undefined,
-      score: typeof item.score === 'number' ? item.score : null,
-      retrieval_path: Array.isArray(item.retrieval_path)
-        ? item.retrieval_path.filter((entry): entry is string => typeof entry === 'string')
-        : undefined,
-      metadata: typeof item.metadata === 'object' && item.metadata !== null
-        ? item.metadata as Record<string, unknown>
-        : undefined,
-    }))
+    .map((item) => {
+      const normalizedScore = typeof item.score === 'number'
+        ? item.score
+        : typeof item.score === 'string'
+          ? Number(item.score)
+          : NaN
+      return {
+        evidence_id: typeof item.evidence_id === 'string' ? item.evidence_id : '',
+        source_kind: typeof item.source_kind === 'string' ? item.source_kind : undefined,
+        source_id: typeof item.source_id === 'string' ? item.source_id : undefined,
+        chunk_id: typeof item.chunk_id === 'string' ? item.chunk_id : undefined,
+        parent_chunk_id: typeof item.parent_chunk_id === 'string' ? item.parent_chunk_id : null,
+        item_id: typeof item.item_id === 'string' ? item.item_id : undefined,
+        display_title: typeof item.display_title === 'string' ? item.display_title : undefined,
+        excerpt: typeof item.excerpt === 'string' ? item.excerpt : undefined,
+        hit_reason: typeof item.hit_reason === 'string' ? item.hit_reason : undefined,
+        score: Number.isFinite(normalizedScore) ? normalizedScore : null,
+        retrieval_path: Array.isArray(item.retrieval_path)
+          ? item.retrieval_path.filter((entry): entry is string => typeof entry === 'string')
+          : undefined,
+        metadata: isPlainRecord(item.metadata)
+          ? item.metadata
+          : undefined,
+      }
+    })
     .filter((item) => item.evidence_id)
   return items.length > 0 ? items : undefined
 }
