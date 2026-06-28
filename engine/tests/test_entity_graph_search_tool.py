@@ -142,8 +142,9 @@ def test_alias_keys_preserve_chinese_query():
 
 
 class FakeNeo4jSession:
-    def __init__(self):
+    def __init__(self, records=None):
         self.calls = []
+        self.records = records or []
 
     def __enter__(self):
         return self
@@ -153,13 +154,13 @@ class FakeNeo4jSession:
 
     def run(self, query, params):
         self.calls.append((query, params))
-        return []
+        return self.records
 
 
 class FakeNeo4jDriver:
-    def __init__(self):
+    def __init__(self, records=None):
         self.session_calls = []
-        self.session_obj = FakeNeo4jSession()
+        self.session_obj = FakeNeo4jSession(records=records)
 
     def session(self, **kwargs):
         self.session_calls.append(kwargs)
@@ -179,3 +180,64 @@ def test_neo4j_entity_query_client_passes_keys_and_limit_as_params():
     assert "$limit" in query
     assert params == {"keys": ["yanchaotan"], "limit": 5}
     assert payload == {"entities": [], "sources": [], "paths": []}
+
+
+def test_neo4j_entity_query_client_shapes_source_evidence_from_records():
+    records = [
+        {
+            "entities": [
+                {
+                    "id": "e1",
+                    "canonical_name": "Yanchao Tan",
+                    "entity_type": "person",
+                }
+            ],
+            "sources": [
+                {
+                    "source_kind": "document_chunk",
+                    "source_id": "chunk-1",
+                    "title": "OpenViewer Notes",
+                    "evidence_span": "Yanchao Tan authored OpenViewer.",
+                    "snippet": None,
+                    "confidence": 0.91,
+                    "extraction_method": "llm",
+                }
+            ],
+            "paths": [
+                {
+                    "from": "Yanchao Tan",
+                    "relation_type": "AUTHORED",
+                    "to": "OpenViewer",
+                }
+            ],
+        }
+    ]
+    driver = FakeNeo4jDriver(records=records)
+    client = Neo4jEntityQueryClient(driver=driver, database="neo4j")
+
+    payload = client.query_entity_context(["yanchaotan"], limit=5)
+
+    assert payload["entities"] == [
+        {
+            "id": "e1",
+            "canonical_name": "Yanchao Tan",
+            "entity_type": "person",
+        }
+    ]
+    assert payload["sources"] == [
+        {
+            "source_kind": "document_chunk",
+            "source_id": "chunk-1",
+            "title": "OpenViewer Notes",
+            "evidence_span": "Yanchao Tan authored OpenViewer.",
+            "snippet": "Yanchao Tan authored OpenViewer.",
+            "confidence": 0.91,
+            "extraction_method": "llm",
+        }
+    ]
+    assert payload["paths"] == [
+        {
+            "path": ["Yanchao Tan", "AUTHORED", "OpenViewer"],
+            "relation_type": "AUTHORED",
+        }
+    ]

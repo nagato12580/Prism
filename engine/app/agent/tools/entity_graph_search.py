@@ -58,6 +58,13 @@ def _plain_dict(value: Any) -> dict[str, Any]:
         return {}
 
 
+def _source_dict(value: Any) -> dict[str, Any]:
+    data = _plain_dict(value)
+    if data and not data.get("snippet") and data.get("evidence_span"):
+        data["snippet"] = data["evidence_span"]
+    return data
+
+
 class Neo4jEntityQueryClient:
     def __init__(self, driver: Any | None = None, database: str | None = None):
         if driver is None:
@@ -82,11 +89,19 @@ class Neo4jEntityQueryClient:
         UNWIND all_entities AS entity
         WITH DISTINCT entity
         WHERE entity IS NOT NULL
-        OPTIONAL MATCH (entity)-[:MENTIONED_IN]->(source)
+        OPTIONAL MATCH (entity)-[mention:MENTIONED_IN]->(source)
         OPTIONAL MATCH (entity)-[rel]-(neighbor:Entity)
         WITH
             collect(DISTINCT entity)[..$limit] AS entities,
-            collect(DISTINCT source)[..$limit] AS sources,
+            collect(DISTINCT source {
+                .*,
+                evidence_span: mention.evidence_span,
+                snippet: coalesce(source.snippet, mention.evidence_span),
+                confidence: mention.confidence,
+                extraction_method: mention.extraction_method,
+                source_kind: coalesce(source.source_kind, mention.source_kind),
+                source_id: coalesce(source.source_id, mention.source_id)
+            })[..$limit] AS sources,
             collect(DISTINCT {
                 from: coalesce(entity.canonical_name, entity.name),
                 relation_type: type(rel),
@@ -107,7 +122,7 @@ class Neo4jEntityQueryClient:
                 if data:
                     entities.append(data)
             for source in record.get("sources", []) or []:
-                data = _plain_dict(source)
+                data = _source_dict(source)
                 if data:
                     sources.append(data)
             for path in record.get("paths", []) or []:
