@@ -26,6 +26,18 @@ assert.match(
 )
 
 assert.match(
+  chatStore,
+  /repairAssistantUserRaceOrder\(persistedMsgs\)/,
+  'Loading persisted messages should repair assistant-before-user races before rendering a switched session.',
+)
+
+assert.match(
+  chatStore,
+  /previous\?\.role !== 'user'/,
+  'Race repair should only swap assistant/user pairs when the assistant is not already preceded by a user turn.',
+)
+
+assert.match(
   chatPage,
   /const temporaryAssistantMessageId = genId\(\)/,
   'ChatPage should assign a stable assistant message id for stream updates.',
@@ -39,14 +51,26 @@ assert.match(
 
 assert.match(
   chatPage,
+  /const userPersistPromise = persistUserMessage\(sessionId, query\)\s+await userPersistPromise\s+const assistantPersistPromise = persistAssistantPlaceholder\(sessionId\)/,
+  'ChatPage should persist the user message before the assistant placeholder so refresh restores messages in conversational order.',
+)
+
+assert.match(
+  chatPage,
   /chatApi\.updateMessage\(sessionId,\s*assistantPersistedId/,
   'ChatPage should update the persisted assistant placeholder with the completed answer.',
 )
 
 assert.match(
   chatPage,
-  /appendToLast\(msg\.data,\s*sessionId,\s*assistantMessageId\)/,
-  'Stream tokens should update the assistant message in the originating session.',
+  /else if \(msg\.type === 'token'\) enqueueTypewriterText\(safeString\(msg\.data\)\)/,
+  'Stream tokens should enter the typewriter queue before updating the assistant message.',
+)
+
+assert.match(
+  chatPage,
+  /appendToLast\(chunk,\s*sessionId,\s*assistantMessageId\)/,
+  'The typewriter queue should update the assistant message in the originating session.',
 )
 
 assert.match(

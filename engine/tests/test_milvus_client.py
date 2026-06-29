@@ -17,8 +17,8 @@ class FakeMilvusClient:
         self.calls.append(("create_collection", kwargs))
         self.collections.add(kwargs["collection_name"])
 
-    def load_collection(self, collection_name):
-        self.calls.append(("load_collection", collection_name))
+    def load_collection(self, collection_name, timeout=None):
+        self.calls.append(("load_collection", collection_name, timeout))
 
     def insert(self, **kwargs):
         self.calls.append(("insert", kwargs))
@@ -74,30 +74,32 @@ def test_insert_vectors_batch_inserts_rows_with_milvus_client_shape(monkeypatch)
     )
 
 
-def test_delete_vectors_by_item_loads_collection_before_delete(monkeypatch):
+def test_delete_vectors_by_ids_deletes_primary_keys_without_loading_collection(monkeypatch):
     fake = install_fake_client(monkeypatch)
     fake.collections.add(milvus_client.COLLECTION_NAME)
 
-    milvus_client.delete_vectors_by_item("item-1")
+    milvus_client.delete_vectors_by_ids(["chunk-1", "chunk-2"])
 
-    assert ("load_collection", milvus_client.COLLECTION_NAME) in fake.calls
+    assert not any(call[0] == "load_collection" for call in fake.calls)
     assert fake.calls[-1] == (
         "delete",
         {
             "collection_name": milvus_client.COLLECTION_NAME,
-            "filter": 'item_id == "item-1"',
+            "ids": ["chunk-1", "chunk-2"],
+            "timeout": milvus_client.MILVUS_OPERATION_TIMEOUT_SECONDS,
         },
     )
-    assert fake.calls.index(("load_collection", milvus_client.COLLECTION_NAME)) < len(fake.calls) - 1
 
 
-def test_search_vectors_loads_collection_before_search(monkeypatch):
+def test_search_vectors_loads_collection_with_timeout_before_search(monkeypatch):
     fake = install_fake_client(monkeypatch)
     fake.collections.add(milvus_client.COLLECTION_NAME)
 
     hits = milvus_client.search_vectors([0.1, 0.2], top_k=3)
 
-    assert ("load_collection", milvus_client.COLLECTION_NAME) in fake.calls
+    load_call = ("load_collection", milvus_client.COLLECTION_NAME, milvus_client.MILVUS_OPERATION_TIMEOUT_SECONDS)
+    assert load_call in fake.calls
     assert fake.calls[-1][0] == "search"
-    assert fake.calls.index(("load_collection", milvus_client.COLLECTION_NAME)) < len(fake.calls) - 1
+    assert fake.calls.index(load_call) < len(fake.calls) - 1
+    assert fake.calls[-1][1]["timeout"] == milvus_client.MILVUS_OPERATION_TIMEOUT_SECONDS
     assert hits == [{"chunk_id": "chunk-1", "item_id": "item-1", "score": 0.9}]

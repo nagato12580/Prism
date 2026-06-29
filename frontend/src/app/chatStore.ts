@@ -115,7 +115,7 @@ interface ChatState {
   finishLastToolRun: (tool: string, data: ToolRunPatch, sessionId?: string, messageId?: string) => void
   setLastClarify: (clarify: ClarifyRequest, sessionId?: string, messageId?: string) => void
   setLastTraceId: (traceId: string, sessionId?: string, messageId?: string) => void
-  finishLast: (sessionId?: string, messageId?: string) => void
+  finishLast: (sessionId?: string, messageId?: string, remainingToolStatus?: ToolRunStatus) => void
   replaceMessageId: (sessionId: string, fromId: string, toId: string) => void
   clear: () => void
   getSessionMessages: (sessionId: string) => Message[]
@@ -252,8 +252,24 @@ function toMessages(msgs: ChatMessageOut[]): Message[] {
   })
 }
 
+function repairAssistantUserRaceOrder(msgs: ChatMessageOut[]) {
+  const repaired: ChatMessageOut[] = []
+  for (let index = 0; index < msgs.length; index += 1) {
+    const current = msgs[index]
+    const next = msgs[index + 1]
+    const previous = repaired[repaired.length - 1]
+    if (current?.role === 'assistant' && next?.role === 'user' && previous?.role !== 'user') {
+      repaired.push(next, current)
+      index += 1
+    } else {
+      repaired.push(current)
+    }
+  }
+  return repaired
+}
+
 function mergePersistedWithCachedMessages(persistedMsgs: ChatMessageOut[], cached: Message[]) {
-  const persisted = toMessages(persistedMsgs)
+  const persisted = toMessages(repairAssistantUserRaceOrder(persistedMsgs))
   const merged = [...persisted]
   const persistedIds = new Set(persisted.map((msg) => msg.id))
 
@@ -449,7 +465,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         replaceMessage(messages, messageId, (last) => ({ ...last, traceId })),
       ),
     ),
-  finishLast: (sessionId, messageId) =>
+  finishLast: (sessionId, messageId, remainingToolStatus = 'success') =>
     set((s) =>
       updateMessagesForSession(s, sessionId, (messages) =>
         replaceMessage(messages, messageId, (last) => {
@@ -457,6 +473,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return {
             ...last,
             streaming: false,
+            toolRuns: last.toolRuns?.map((run) =>
+              run.status === 'running' ? { ...run, status: remainingToolStatus } : run,
+            ),
             thinkingSteps: (last.thinkingSteps ?? []).map((step) => finishRunningStep(step, now)),
           }
         }),

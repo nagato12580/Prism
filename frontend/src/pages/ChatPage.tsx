@@ -46,6 +46,15 @@ const starterPrompts = [
   '哪些资料可以回答这个问题？',
 ]
 
+const chatStreamTimeoutEnv = (
+  import.meta as unknown as { env?: { VITE_CHAT_STREAM_TIMEOUT_SECONDS?: string } }
+).env?.VITE_CHAT_STREAM_TIMEOUT_SECONDS
+const CHAT_STREAM_TIMEOUT_SECONDS = Number(chatStreamTimeoutEnv || 300)
+const CHAT_STREAM_TIMEOUT_MS = Number.isFinite(CHAT_STREAM_TIMEOUT_SECONDS)
+  ? CHAT_STREAM_TIMEOUT_SECONDS * 1000
+  : 300_000
+const CHAT_TYPEWRITER_INTERVAL_MS = 18
+
 const sourceTypeIcon = (type: ResourceMediaType) => {
   const icons: Record<ResourceMediaType, ReturnType<typeof FileText>> = {
     document: <FileText size={14} />,
@@ -364,6 +373,7 @@ export function ChatPage() {
     addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
 
     const userPersistPromise = persistUserMessage(sessionId, query)
+    await userPersistPromise
     const assistantPersistPromise = persistAssistantPlaceholder(sessionId)
     try {
       const persistedUserMessage = await userPersistPromise
@@ -382,9 +392,68 @@ export function ChatPage() {
     } catch { /* placeholder persistence is best-effort */ }
 
     let titleReceived = false
+    const streamAbortController = new AbortController()
+    let streamTimedOut = false
+    let streamTimeoutId: number | undefined
+    const refreshStreamTimeout = () => {
+      if (streamTimeoutId !== undefined) window.clearTimeout(streamTimeoutId)
+      streamTimeoutId = window.setTimeout(() => {
+        streamTimedOut = true
+        streamAbortController.abort()
+      }, CHAT_STREAM_TIMEOUT_MS)
+    }
+    const clearStreamTimeout = () => {
+      if (streamTimeoutId !== undefined) {
+        window.clearTimeout(streamTimeoutId)
+        streamTimeoutId = undefined
+      }
+    }
+    let typewriterBuffer = ''
+    let typewriterTimerId: number | undefined
+    let typewriterFlushResolvers: Array<() => void> = []
+    const clearTypewriterTimer = () => {
+      if (typewriterTimerId !== undefined) {
+        window.clearTimeout(typewriterTimerId)
+        typewriterTimerId = undefined
+      }
+      typewriterBuffer = ''
+      resolveTypewriterFlushes()
+    }
+    const resolveTypewriterFlushes = () => {
+      if (typewriterBuffer.length > 0 || typewriterTimerId !== undefined) return
+      const resolvers = typewriterFlushResolvers
+      typewriterFlushResolvers = []
+      resolvers.forEach((resolve) => resolve())
+    }
+    const pumpTypewriterText = () => {
+      if (!typewriterBuffer) {
+        clearTypewriterTimer()
+        resolveTypewriterFlushes()
+        return
+      }
+      const chunkSize = typewriterBuffer.length > 80 ? 3 : 1
+      const chunk = typewriterBuffer.slice(0, chunkSize)
+      typewriterBuffer = typewriterBuffer.slice(chunkSize)
+      appendToLast(chunk, sessionId, assistantMessageId)
+      typewriterTimerId = window.setTimeout(pumpTypewriterText, CHAT_TYPEWRITER_INTERVAL_MS)
+    }
+    const enqueueTypewriterText = (text: string) => {
+      if (!text) return
+      typewriterBuffer += text
+      if (typewriterTimerId === undefined) {
+        typewriterTimerId = window.setTimeout(pumpTypewriterText, CHAT_TYPEWRITER_INTERVAL_MS)
+      }
+    }
+    const flushTypewriterText = () => {
+      if (typewriterBuffer.length === 0 && typewriterTimerId === undefined) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        typewriterFlushResolvers.push(resolve)
+      })
+    }
 
-    const handleStreamLine = (line: string) => {
+    const handleStreamLine = async (line: string) => {
       if (!line.trim()) return
+      refreshStreamTimeout()
 
       try {
         const msg = JSON.parse(line)
@@ -425,9 +494,11 @@ export function ChatPage() {
             options: normalizeClarifyOptions(msg.data?.options),
           }, sessionId, assistantMessageId)
         } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data), sessionId, assistantMessageId)
-        else if (msg.type === 'token') appendToLast(msg.data, sessionId, assistantMessageId)
+        else if (msg.type === 'token') enqueueTypewriterText(safeString(msg.data))
         else if (msg.type === 'done') {
-          finishLast(sessionId, assistantMessageId)
+          clearStreamTimeout()
+          await flushTypewriterText()
+          finishLast(sessionId, assistantMessageId, 'success')
           if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         }
         else if (msg.type === 'title') {
@@ -439,10 +510,12 @@ export function ChatPage() {
           }
         }
         else if (msg.type === 'error') {
+          await flushTypewriterText()
           appendToLast(`\n\n请求失败：${msg.data}`, sessionId, assistantMessageId)
-          finishLast(sessionId, assistantMessageId)
+          finishLast(sessionId, assistantMessageId, 'error')
         }
       } catch {
+        await flushTypewriterText()
         appendToLast('收到了一段无法解析的流式响应。', sessionId, assistantMessageId)
       }
     }
@@ -451,6 +524,7 @@ export function ChatPage() {
       const resp = await fetch('/api/v1/chat/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: streamAbortController.signal,
         body: JSON.stringify({
           query,
           history,
@@ -474,26 +548,37 @@ export function ChatPage() {
 
       const decoder = new TextDecoder()
       let buffer = ''
+      refreshStreamTimeout()
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
+        refreshStreamTimeout()
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
-          handleStreamLine(line)
+          await handleStreamLine(line)
         }
       }
 
       buffer += decoder.decode()
-      handleStreamLine(buffer)
-      finishLast(sessionId, assistantMessageId)
+      await handleStreamLine(buffer)
+      clearStreamTimeout()
+      await flushTypewriterText()
+      finishLast(sessionId, assistantMessageId, 'success')
     } catch (e) {
-      appendToLast('请求失败：' + (e as Error).message, sessionId, assistantMessageId)
-      finishLast(sessionId, assistantMessageId)
+      clearStreamTimeout()
+      await flushTypewriterText()
+      const message = streamTimedOut
+        ? '知识库检索时间过长，已停止本次请求。可以换个更具体的问题再试。'
+        : (e as Error).message
+      appendToLast('请求失败：' + message, sessionId, assistantMessageId)
+      finishLast(sessionId, assistantMessageId, 'error')
     } finally {
+      clearStreamTimeout()
+      clearTypewriterTimer()
       setSending(false)
       // 持久化 AI 回复 + 标题生成
       if (sessionId) {

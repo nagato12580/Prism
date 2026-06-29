@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -23,8 +24,12 @@ from .events import (
 )
 from .prompts import AGENT_SYSTEM_PROMPT
 from .active_recall import recall_memory_context
+from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
+
+
+_TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="agent-tool")
 
 
 def create_chat_model(settings):
@@ -196,12 +201,19 @@ class LangChainAgentRunner:
         system_prompt: str = AGENT_SYSTEM_PROMPT,
         max_iterations: int = 5,
         clarify_depth: int = 0,
+        tool_timeout_seconds: float | None = None,
     ) -> None:
         self.model = model
         self.tools = tools
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
         self.clarify_depth = clarify_depth
+        self.tool_timeout_seconds = (
+            settings.AGENT_TOOL_TIMEOUT_SECONDS
+            if tool_timeout_seconds is None
+            else tool_timeout_seconds
+        )
+        self._timed_out_tools: set[str] = set()
         self._pending_clarify: tuple[str, list[dict[str, str]]] | None = None
         self.tool_map = {tool.name: tool for tool in tools}
 
@@ -486,7 +498,16 @@ class LangChainAgentRunner:
         status = "success"
         tool = self.tool_map.get(name)
 
-        if tool is None:
+        if name in self._timed_out_tools:
+            status = "error"
+            result_text = json.dumps(
+                {
+                    "status": "error",
+                    "summary": f"Tool {name} is disabled after a previous timeout in this answer.",
+                },
+                ensure_ascii=False,
+            )
+        elif tool is None:
             status = "error"
             result_text = json.dumps(
                 {"status": "error", "summary": f"Unknown tool: {name}"},
@@ -494,7 +515,20 @@ class LangChainAgentRunner:
             )
         else:
             try:
-                result_text = tool.invoke(args)
+                future = _TOOL_EXECUTOR.submit(tool.invoke, args)
+                result_text = future.result(timeout=self.tool_timeout_seconds)
+            except TimeoutError:
+                future.cancel()
+                status = "error"
+                self._timed_out_tools.add(name)
+                timeout_seconds = int(self.tool_timeout_seconds)
+                result_text = json.dumps(
+                    {
+                        "status": "error",
+                        "summary": f"Tool {name} timed out after {timeout_seconds}s.",
+                    },
+                    ensure_ascii=False,
+                )
             except Exception as exc:
                 status = "error"
                 result_text = json.dumps(

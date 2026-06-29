@@ -5,6 +5,7 @@ from pymilvus import MilvusClient, DataType
 from .config import settings
 
 COLLECTION_NAME = "prism_knowledge"
+MILVUS_OPERATION_TIMEOUT_SECONDS = settings.MILVUS_OPERATION_TIMEOUT_SECONDS
 
 _client: MilvusClient | None = None
 
@@ -53,7 +54,10 @@ def ensure_collection():
 
 def _load_collection():
     ensure_collection()
-    _get_client().load_collection(collection_name=COLLECTION_NAME)
+    _get_client().load_collection(
+        collection_name=COLLECTION_NAME,
+        timeout=MILVUS_OPERATION_TIMEOUT_SECONDS,
+    )
 
 
 def insert_vectors(chunk_id: str, item_id: str, embedding: list[float]):
@@ -89,11 +93,27 @@ def delete_vectors_by_item(item_id: str):
         return
 
     client = _get_client()
-    _load_collection()
+    ensure_collection()
     escaped_item_id = item_id.replace("\\", "\\\\").replace('"', '\\"')
     client.delete(
         collection_name=COLLECTION_NAME,
         filter=f'item_id == "{escaped_item_id}"',
+        timeout=MILVUS_OPERATION_TIMEOUT_SECONDS,
+    )
+
+
+def delete_vectors_by_ids(chunk_ids: list[str]):
+    """Delete vectors by their Milvus primary keys."""
+    ids = [chunk_id for chunk_id in chunk_ids if chunk_id]
+    if not ids:
+        return
+
+    client = _get_client()
+    ensure_collection()
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        ids=ids,
+        timeout=MILVUS_OPERATION_TIMEOUT_SECONDS,
     )
 
 
@@ -109,6 +129,7 @@ def search_vectors(query_embedding: list[float], top_k: int = 10) -> list[dict]:
         search_params={"metric_type": "COSINE", "params": {"nprobe": 32}},
         limit=top_k,
         output_fields=["chunk_id", "item_id"],
+        timeout=MILVUS_OPERATION_TIMEOUT_SECONDS,
     )
 
     hits = []

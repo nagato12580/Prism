@@ -85,7 +85,7 @@ def test_ingest_item_skips_document_governance_and_uses_batch_vectors(monkeypatc
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1], [0.2]])
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: batch_calls.append(rows), raising=False)
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: vector_cleanup_calls.append(item_id), raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: vector_cleanup_calls.append(chunk_ids), raising=False)
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 2)
     monkeypatch.setattr(pipeline, "_delete_es_chunks_by_item", lambda item_id: None)
 
@@ -112,7 +112,7 @@ def test_ingest_item_skips_document_governance_and_uses_batch_vectors(monkeypatc
         assert [row["chunk_id"] for row in batch_calls[0]]
         assert {row["chunk_id"] for row in batch_calls[0]} == child_ids
         assert [row["embedding"] for row in batch_calls[0]] == [[0.1], [0.2]]
-        assert vector_cleanup_calls == [item_id]
+        assert vector_cleanup_calls == [[]]
         assert session.query(PersonalKnowledgeUnit).count() == 0
         assert session.query(PKUCanonicalLink).count() == 0
         assert session.query(CanonicalKnowledgePoint).count() == 0
@@ -130,7 +130,7 @@ def test_ingest_item_embeds_before_mysql_governance_cleanup(monkeypatch):
 
     monkeypatch.setattr(pipeline, "_Session", Session)
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: None)
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 1)
     monkeypatch.setattr(pipeline, "_delete_es_chunks_by_item", lambda item_id: None)
@@ -162,7 +162,7 @@ def test_ingest_item_ignores_progress_callback_failures(monkeypatch):
     monkeypatch.setattr(pipeline, "_Session", Session)
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1]])
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: None)
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 1)
     monkeypatch.setattr(pipeline, "_delete_es_chunks_by_item", lambda item_id: None)
@@ -182,7 +182,7 @@ def test_ingest_item_raises_when_es_bulk_index_fails(monkeypatch):
     monkeypatch.setattr(pipeline, "_Session", Session)
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1]])
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: None)
     monkeypatch.setattr(pipeline, "get_es", lambda: _FakeES())
     monkeypatch.setattr(elasticsearch.helpers, "bulk", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("es bulk down")))
@@ -207,7 +207,7 @@ def test_ingest_item_raises_when_es_cleanup_fails(monkeypatch):
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1]])
     monkeypatch.setattr(pipeline, "get_es", lambda: _FailingDeleteES(exc=RuntimeError("delete down")))
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: None)
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 1)
 
@@ -232,7 +232,7 @@ def test_ingest_item_raises_when_es_cleanup_response_has_failures(monkeypatch, r
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1]])
     monkeypatch.setattr(pipeline, "get_es", lambda: _FailingDeleteES(response=response))
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: None)
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 1)
 
@@ -248,7 +248,7 @@ def test_ingest_item_raises_on_embedding_count_mismatch_before_storing_chunks(mo
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: [parent])
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1]])
     monkeypatch.setattr(pipeline, "_delete_es_chunks_by_item", lambda item_id: None)
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: None)
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 1)
 
@@ -263,8 +263,17 @@ def test_ingest_item_raises_on_embedding_count_mismatch_before_storing_chunks(mo
         session.close()
 
 
-def test_ingest_item_deletes_existing_milvus_vectors_before_batch_insert(monkeypatch):
+def test_ingest_item_deletes_existing_milvus_vectors_by_old_child_chunk_ids_before_batch_insert(monkeypatch):
     Session, item_id = _create_memory_item()
+    session = Session()
+    try:
+        old_child = KnowledgeChunk(item_id=item_id, chunk_text="old child", chunk_type="child")
+        session.add(old_child)
+        session.commit()
+        old_child_id = old_child.id
+    finally:
+        session.close()
+
     parent = _parent_with_children("child one", "child two")
     calls = []
 
@@ -273,12 +282,12 @@ def test_ingest_item_deletes_existing_milvus_vectors_before_batch_insert(monkeyp
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[0.1], [0.2]])
     monkeypatch.setattr(pipeline, "_bulk_index_chunks_es", lambda **kwargs: 2)
     monkeypatch.setattr(pipeline, "_delete_es_chunks_by_item", lambda item_id: None)
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: calls.append(("delete", item_id)), raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: calls.append(("delete", chunk_ids)), raising=False)
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: calls.append(("insert", [row["chunk_id"] for row in rows])))
 
     assert pipeline.ingest_item(item_id) == 2
     assert [call[0] for call in calls] == ["delete", "insert"]
-    assert calls[0] == ("delete", item_id)
+    assert calls[0] == ("delete", [old_child_id])
 
 
 def test_ingest_item_uses_positional_chunk_ids_for_duplicate_text(monkeypatch):
@@ -314,7 +323,7 @@ def test_ingest_item_uses_positional_chunk_ids_for_duplicate_text(monkeypatch):
     monkeypatch.setattr(pipeline, "chunk_parent_child", lambda content: parents)
     monkeypatch.setattr(pipeline, "embed_texts", lambda texts: [[float(i)] for i, _ in enumerate(texts)])
     monkeypatch.setattr(pipeline, "insert_vectors_batch", lambda rows: batch_calls.append(rows), raising=False)
-    monkeypatch.setattr(pipeline, "delete_vectors_by_item", lambda item_id: None, raising=False)
+    monkeypatch.setattr(pipeline, "delete_vectors_by_ids", lambda chunk_ids: None, raising=False)
     monkeypatch.setattr(pipeline, "get_es", lambda: _FakeES())
 
     def capture_bulk_index(**kwargs):

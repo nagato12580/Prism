@@ -1,12 +1,14 @@
 import json
 import logging
 import os
+import time
 
 from langchain_core.messages import ToolMessage
 
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///./_agent_runner_test.db"
 
+from engine.app.agent import runner as runner_mod
 from engine.app.agent.prompts import AGENT_SYSTEM_PROMPT
 from engine.app.agent.runner import LangChainAgentRunner
 
@@ -28,6 +30,62 @@ class FakeTool:
                 "sources": [{"chunk_id": "c1", "item_id": "i1", "score": 0.9}],
             }
         )
+
+
+class FakeSlowTool:
+    name = "raw_document_search"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        time.sleep(0.2)
+        return json.dumps({"status": "sufficient", "summary": "Too late."})
+
+
+class FakeSlowToolModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_slow",
+                        "name": "raw_document_search",
+                        "args": {"query": "missing gbraid"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="I could not finish the document search.")
+
+
+class FakeRepeatingSlowToolModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls <= 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_slow_{self.calls}",
+                        "name": "raw_document_search",
+                        "args": {"query": "same slow query"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="I stopped retrying the slow search.")
 
 
 class FakeTraceTool:
@@ -327,6 +385,56 @@ def test_runner_emits_tool_sources_tokens_and_done():
         "done",
     ]
     assert json.loads(lines[-2])["data"] == "Final answer"
+
+
+def test_runner_times_out_slow_tool_and_emits_error_result():
+    runner = LangChainAgentRunner(
+        model=FakeSlowToolModel(),
+        tools=[FakeSlowTool()],
+        tool_timeout_seconds=0.01,
+    )
+
+    lines = list(runner.stream("What is gbraid?", [{"role": "user", "content": "previous"}]))
+
+    assert event_types(lines) == [
+        "agent_status",
+        "tool_call",
+        "tool_result",
+        "agent_status",
+        "token",
+        "done",
+    ]
+    tool_result = next(json.loads(line) for line in lines if json.loads(line)["type"] == "tool_result")
+    assert tool_result["data"]["tool"] == "raw_document_search"
+    assert tool_result["data"]["status"] == "error"
+    assert "timed out" in tool_result["data"]["summary"]
+    assert json.loads(lines[-2])["data"] == "I could not finish the document search."
+
+
+def test_runner_blocks_repeated_calls_after_tool_timeout():
+    slow_tool = FakeSlowTool()
+    runner = LangChainAgentRunner(
+        model=FakeRepeatingSlowToolModel(),
+        tools=[slow_tool],
+        tool_timeout_seconds=0.01,
+    )
+
+    lines = list(runner.stream("What is gbraid?", [{"role": "user", "content": "previous"}]))
+    tool_results = [json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "tool_result"]
+
+    assert len(tool_results) == 2
+    assert tool_results[0]["status"] == "error"
+    assert "timed out" in tool_results[0]["summary"]
+    assert tool_results[1]["status"] == "error"
+    assert "disabled after a previous timeout" in tool_results[1]["summary"]
+    assert slow_tool.calls == 1
+    assert json.loads(lines[-2])["data"] == "I stopped retrying the slow search."
+
+
+def test_runner_default_tool_timeout_comes_from_settings():
+    runner = LangChainAgentRunner(model=FakeModel(), tools=[FakeTool()])
+
+    assert runner.tool_timeout_seconds == runner_mod.settings.AGENT_TOOL_TIMEOUT_SECONDS
 
 
 def test_runner_includes_tool_trace_steps_in_tool_result_event():

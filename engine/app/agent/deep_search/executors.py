@@ -4,13 +4,15 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from sqlalchemy import or_
+
 from backend.app.models.knowledge_governance import (
     CanonicalKnowledgePoint,
     PKUCanonicalLink,
     PKURelation,
     PersonalKnowledgeUnit,
 )
-from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile
+from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile, KnowledgeItem
 
 from .schemas import EvidenceRecord, ScopeResult
 
@@ -26,6 +28,44 @@ def _terms(query: str) -> list[str]:
     ]
 
 
+def _compact_ascii(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _matching_terms(text: str, terms: list[str]) -> list[str]:
+    lowered = (text or "").lower()
+    compact = _compact_ascii(text)
+    matched: list[str] = []
+    for term in terms:
+        if term in lowered or (_compact_ascii(term) and _compact_ascii(term) in compact):
+            matched.append(term)
+    return matched
+
+
+def _sql_prefilter_terms(terms: list[str]) -> list[str]:
+    result: list[str] = []
+    for term in terms:
+        compact = _compact_ascii(term)
+        candidates = [term]
+        if len(compact) >= 8:
+            candidates.extend(_likely_compact_name_parts(compact))
+        for candidate in candidates:
+            candidate = candidate.strip().lower()
+            if len(candidate) >= 2 and candidate not in result:
+                result.append(candidate)
+    return result
+
+
+def _likely_compact_name_parts(compact: str) -> list[str]:
+    parts: list[str] = []
+    for suffix_len in range(4, min(6, len(compact) - 1) + 1):
+        prefix = compact[:-suffix_len]
+        suffix = compact[-suffix_len:]
+        if len(prefix) >= 3:
+            parts.extend([prefix, suffix])
+    return parts
+
+
 def _json_text(value: Any) -> str:
     if value is None:
         return ""
@@ -39,9 +79,43 @@ def _json_text(value: Any) -> str:
 def _contains_score(text: str, terms: list[str]) -> float:
     if not terms:
         return 0.0
+    return len(_matching_terms(text, terms)) / len(terms)
+
+
+def _chunk_snippet(text: str, matched_terms: list[str], limit: int = 500) -> str:
+    text = _normalize_display_text(text)
+    if len(text) <= limit:
+        return text
     lowered = text.lower()
-    hits = sum(1 for term in terms if term in lowered)
-    return hits / len(terms)
+    compact_to_raw_index: list[int] = []
+    compact_chars: list[str] = []
+    for index, char in enumerate(text):
+        if char.lower().isalnum():
+            compact_chars.append(char.lower())
+            compact_to_raw_index.append(index)
+    compact = "".join(compact_chars)
+
+    first_index = -1
+    for term in matched_terms:
+        direct = lowered.find(term.lower())
+        if direct >= 0:
+            first_index = direct
+            break
+        compact_term = _compact_ascii(term)
+        compact_index = compact.find(compact_term) if compact_term else -1
+        if compact_index >= 0 and compact_index < len(compact_to_raw_index):
+            first_index = compact_to_raw_index[compact_index]
+            break
+
+    if first_index < 0:
+        return text[:limit]
+    start = max(0, first_index - limit // 3)
+    end = min(len(text), start + limit)
+    return text[start:end]
+
+
+def _normalize_display_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
 
 
 def _source_quality(source_kind: str) -> float:
@@ -237,6 +311,116 @@ class PkuRequeryExecutor:
             ]
         finally:
             db.close()
+
+
+class ScopedChunkSearchExecutor:
+    def __init__(self, session_factory: SessionFactory) -> None:
+        self._session_factory = session_factory
+
+    def run(self, query: str, scope: ScopeResult, limit: int = 12) -> list[EvidenceRecord]:
+        return _search_raw_chunks(
+            self._session_factory,
+            query=query,
+            limit=limit,
+            candidate_item_ids=scope.candidate_item_ids,
+            strategy="scoped_chunk_search",
+        )
+
+
+class GlobalFallbackExecutor:
+    def __init__(self, session_factory: SessionFactory) -> None:
+        self._session_factory = session_factory
+
+    def run(self, query: str, limit: int = 12) -> list[EvidenceRecord]:
+        return _search_raw_chunks(
+            self._session_factory,
+            query=query,
+            limit=limit,
+            candidate_item_ids=[],
+            strategy="global_fallback",
+        )
+
+
+def _search_raw_chunks(
+    session_factory: SessionFactory,
+    *,
+    query: str,
+    limit: int,
+    candidate_item_ids: list[str],
+    strategy: str,
+) -> list[EvidenceRecord]:
+    terms = _terms(query)
+    if not terms:
+        return []
+    db = session_factory()
+    try:
+        chunk_query = db.query(KnowledgeChunk, KnowledgeItem).join(
+            KnowledgeItem, KnowledgeItem.id == KnowledgeChunk.item_id
+        )
+        if candidate_item_ids:
+            chunk_query = chunk_query.filter(KnowledgeChunk.item_id.in_(candidate_item_ids))
+        prefilter_terms = _sql_prefilter_terms(terms)
+        if prefilter_terms:
+            filters = []
+            for term in prefilter_terms:
+                like = f"%{term}%"
+                filters.extend(
+                    [
+                        KnowledgeChunk.chunk_text.ilike(like),
+                        KnowledgeItem.title.ilike(like),
+                        KnowledgeItem.summary.ilike(like),
+                        KnowledgeItem.content.ilike(like),
+                    ]
+                )
+            chunk_query = chunk_query.filter(or_(*filters))
+        rows = chunk_query.limit(max(limit * 40, 240)).all()
+
+        scored: list[tuple[KnowledgeChunk, KnowledgeItem, list[str], float]] = []
+        for chunk, item in rows:
+            searchable_text = " ".join(
+                [
+                    item.title or "",
+                    item.summary or "",
+                    item.category or "",
+                    _json_text(item.tags),
+                    chunk.chunk_text or "",
+                ]
+            )
+            matched = _matching_terms(searchable_text, terms)
+            if not matched:
+                continue
+            score = len(matched) / len(terms)
+            if chunk.chunk_type == "parent":
+                score += 0.05
+            scored.append((chunk, item, matched, score))
+
+        scored.sort(key=lambda row: (row[3], row[0].chunk_type == "parent", row[0].chunk_index or 0), reverse=True)
+        records: list[EvidenceRecord] = []
+        for chunk, item, matched, score in scored[:limit]:
+            snippet = _chunk_snippet(chunk.chunk_text or "", matched)
+            records.append(
+                EvidenceRecord(
+                    evidence_id=f"{strategy}:{chunk.id}",
+                    strategy=strategy,
+                    source_kind="document_chunk",
+                    source_id=str(chunk.id),
+                    item_id=str(item.id),
+                    title=item.title or "",
+                    statement=snippet,
+                    snippet=snippet,
+                    retrieval_score=float(score),
+                    source_quality=1.0,
+                    coverage_bonus=0.05,
+                    metadata={
+                        "matched_terms": matched,
+                        "chunk_type": chunk.chunk_type or "",
+                        "parent_id": str(chunk.parent_id or ""),
+                    },
+                )
+            )
+        return records
+    finally:
+        db.close()
 
 
 def _candidate_source_ids(db: Any, pku_ids: list[str]) -> tuple[list[str], list[str]]:

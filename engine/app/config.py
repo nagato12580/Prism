@@ -30,6 +30,7 @@ class Settings:
     )
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
+    MILVUS_OPERATION_TIMEOUT_SECONDS: float = float(os.getenv("MILVUS_OPERATION_TIMEOUT_SECONDS", "5"))
 
     ENGINE_HOST: str = os.getenv("ENGINE_HOST", "0.0.0.0")
     ENGINE_PORT: int = int(os.getenv("ENGINE_PORT", "5180"))
@@ -37,6 +38,7 @@ class Settings:
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen-plus")
+    AGENT_TOOL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "12"))
     DEEP_SEARCH_JUDGE_API_BASE: str = os.getenv("DEEP_SEARCH_JUDGE_API_BASE", "")
     DEEP_SEARCH_JUDGE_API_KEY: str = os.getenv("DEEP_SEARCH_JUDGE_API_KEY", "")
     DEEP_SEARCH_JUDGE_MODEL: str = os.getenv("DEEP_SEARCH_JUDGE_MODEL", "")

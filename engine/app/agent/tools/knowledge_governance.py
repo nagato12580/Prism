@@ -25,6 +25,12 @@ _HEX_ALPHA_PATTERN = re.compile(r"[a-fA-F]")
 _UUID_HYPHEN_POSITIONS = {8, 13, 18, 23}
 
 
+_UUID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_SOURCE_ID_PREFIX_PATTERN = re.compile(r"\b[0-9a-fA-F]{8,36}\b")
+
+
 class KnowledgeTopicSearchInput(BaseModel):
     query: str = Field(..., description="Topic, concept, or theme to search in CKP topic hubs.")
     limit: int = Field(8, ge=1, le=20, description="Maximum number of CKP topics to return.")
@@ -380,6 +386,73 @@ def _raw_chunk_payload_from_query(query: str) -> dict[str, Any] | None:
     finally:
         if db is not None:
             db.close()
+
+
+def _new_db_session():
+    from engine.app.chat.answer import _Session
+
+    return _Session()
+
+
+def _extract_chunk_id_token(query: str) -> str | None:
+    text = query or ""
+    full_match = _UUID_PATTERN.search(text)
+    if full_match:
+        return full_match.group(0)
+    prefix_match = _SOURCE_ID_PREFIX_PATTERN.search(text)
+    return prefix_match.group(0) if prefix_match else None
+
+
+def _raw_chunk_payload_from_query(query: str) -> dict[str, Any] | None:
+    chunk_id_token = _extract_chunk_id_token(query)
+    if not chunk_id_token:
+        return None
+
+    from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile, KnowledgeItem
+
+    db = _new_db_session()
+    try:
+        chunk_query = db.query(KnowledgeChunk)
+        if _UUID_PATTERN.fullmatch(chunk_id_token):
+            chunk = chunk_query.filter(KnowledgeChunk.id == chunk_id_token).first()
+        else:
+            chunk = chunk_query.filter(KnowledgeChunk.id.like(f"{chunk_id_token}%")).first()
+        if chunk is None:
+            return None
+
+        item = db.query(KnowledgeItem).filter(KnowledgeItem.id == chunk.item_id).first()
+        file = db.query(KnowledgeFile).filter(KnowledgeFile.item_id == chunk.item_id).first()
+        title = (
+            getattr(file, "title", None)
+            or getattr(file, "original_filename", None)
+            or getattr(item, "title", None)
+            or chunk.item_id
+        )
+        source = {
+            "chunk_id": str(chunk.id),
+            "item_id": str(chunk.item_id),
+            "source_kind": "document_chunk",
+            "source_id": str(chunk.id),
+            "display_type": "knowledge_item",
+            "display_id": str(chunk.item_id),
+            "display_title": str(title or ""),
+            "display_label": "知识文档",
+            "snippet": chunk.chunk_text,
+            "text": chunk.chunk_text,
+            "chunk_index": getattr(chunk, "chunk_index", 0),
+            "chunk_type": getattr(chunk, "chunk_type", ""),
+            "parent_id": getattr(chunk, "parent_id", None),
+            "score": 1.0,
+        }
+        return {
+            "status": "sufficient",
+            "summary": "Found the requested raw document chunk by source_id.",
+            "sources": [source],
+            "evidence": [{**source}],
+            "missing": [],
+        }
+    finally:
+        db.close()
 
 
 def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
