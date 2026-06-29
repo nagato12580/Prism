@@ -34,6 +34,7 @@ class FakeSession:
     def __init__(self, records_by_query=None):
         self.calls = []
         self._records_by_query = records_by_query or []
+        self._call_index = 0
 
     def __enter__(self):
         return self
@@ -43,9 +44,11 @@ class FakeSession:
 
     def run(self, query, params=None):
         self.calls.append((query, params or {}))
-        if isinstance(self._records_by_query, list):
-            return FakeResult(self._records_by_query)
-        return FakeResult([])
+        record = self._records_by_query[self._call_index] if self._call_index < len(self._records_by_query) else None
+        self._call_index += 1
+        if record is None:
+            return FakeResult([])
+        return FakeResult([record] if not isinstance(record, list) else record)
 
 
 class FakeDriver:
@@ -68,10 +71,12 @@ def test_explore_subgraph_returns_nodes_and_links():
                 {"id": "ckp:1", "title": "DPO", "_labels": ["CKP"]},
                 {"id": "pku:1", "statement": "DPO optimizes pairs", "_labels": ["PKU"]},
             ],
+            "node_count": 2,
+        }),
+        FakeRecord({
             "links": [
                 {"source": "ckp:1", "target": "pku:1", "type": "SUPPORTED_BY"},
             ],
-            "node_count": 2,
             "link_count": 1,
         }),
     ]
@@ -91,7 +96,11 @@ def test_explore_subgraph_returns_nodes_and_links():
 
 
 def test_explore_subgraph_passes_node_types_and_limit_as_params():
-    driver = FakeDriver(records=[])
+    records = [
+        FakeRecord({"nodes": [], "node_count": 0}),
+        FakeRecord({"links": [], "link_count": 0}),
+    ]
+    driver = FakeDriver(records=records)
     explore_subgraph(driver, database="neo4j", node_types=["CKP", "Entity"], limit=5, user_id="default-user")
 
     query, params = driver.session_obj.calls[0]
@@ -104,7 +113,11 @@ def test_explore_subgraph_passes_node_types_and_limit_as_params():
 
 
 def test_explore_subgraph_empty_result():
-    driver = FakeDriver(records=[FakeRecord({"nodes": [], "links": [], "node_count": 0, "link_count": 0})])
+    records = [
+        FakeRecord({"nodes": [], "node_count": 0}),
+        FakeRecord({"links": [], "link_count": 0}),
+    ]
+    driver = FakeDriver(records=records)
     result = explore_subgraph(driver, database="neo4j", node_types=["CKP"], limit=10, user_id="default-user")
 
     assert result["nodes"] == []
@@ -116,7 +129,7 @@ def test_explore_subgraph_empty_result():
 def test_get_node_detail_returns_properties_and_neighbors():
     records = [
         FakeRecord({
-            "n": {"id": "ckp:1", "title": "DPO", "_labels": ["CKP"], "status": "stable"},
+            "node_data": {"id": "ckp:1", "title": "DPO", "_labels": ["CKP"], "status": "stable"},
             "neighbors": [
                 {"id": "pku:1", "statement": "DPO optimizes", "_labels": ["PKU"]},
             ],

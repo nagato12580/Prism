@@ -66,6 +66,110 @@ def _extract_subgraph_from_record(record: Any) -> dict[str, Any]:
     }
 
 
+def _node_props_map(node: Any) -> dict[str, Any]:
+    raw = dict(node) if not isinstance(node, dict) else node
+    return raw
+
+
+def _serialize_node_dict(node: dict[str, Any]) -> dict[str, Any]:
+    label = _label_from_node(node)
+    properties = {k: v for k, v in node.items() if k not in {"_labels", "_label"}}
+    return {
+        "id": node.get("id", ""),
+        "label": _node_label_text(node, label),
+        "type": label,
+        "properties": properties,
+    }
+
+
+def _serialize_link_dict(link: dict[str, Any]) -> dict[str, Any]:
+    props = {k: v for k, v in link.items() if k not in {"source", "target", "type"}}
+    return {
+        "source": link.get("source", ""),
+        "target": link.get("target", ""),
+        "type": link.get("type", "RELATED_TO"),
+        "properties": props,
+    }
+
+
+_NODE_PROPS_CYPHER_NODE = """
+    id: node.id,
+    title: node.title,
+    canonical_name: node.canonical_name,
+    statement: node.statement,
+    normalized_statement: node.normalized_statement,
+    name: node.name,
+    surface_text: node.surface_text,
+    user_id: node.user_id,
+    status: node.status,
+    confidence: node.confidence,
+    entity_type: node.entity_type,
+    normalized_key: node.normalized_key,
+    ckp_type: node.ckp_type,
+    unit_type: node.unit_type,
+    topic_level: node.topic_level,
+    group_type: node.group_type,
+    source_kind: node.source_kind,
+    source_id: node.source_id,
+    _labels: labels(node)
+"""
+
+_NODE_PROPS_CYPHER_M = """
+    id: m.id,
+    title: m.title,
+    canonical_name: m.canonical_name,
+    statement: m.statement,
+    normalized_statement: m.normalized_statement,
+    name: m.name,
+    surface_text: m.surface_text,
+    user_id: m.user_id,
+    status: m.status,
+    confidence: m.confidence,
+    entity_type: m.entity_type,
+    normalized_key: m.normalized_key,
+    ckp_type: m.ckp_type,
+    unit_type: m.unit_type,
+    topic_level: m.topic_level,
+    group_type: m.group_type,
+    source_kind: m.source_kind,
+    source_id: m.source_id,
+    _labels: labels(m)
+"""
+
+_NODE_PROPS_CYPHER_N = """
+    id: n.id,
+    title: n.title,
+    canonical_name: n.canonical_name,
+    statement: n.statement,
+    normalized_statement: n.normalized_statement,
+    name: n.name,
+    surface_text: n.surface_text,
+    user_id: n.user_id,
+    status: n.status,
+    confidence: n.confidence,
+    entity_type: n.entity_type,
+    normalized_key: n.normalized_key,
+    ckp_type: n.ckp_type,
+    unit_type: n.unit_type,
+    topic_level: n.topic_level,
+    group_type: n.group_type,
+    source_kind: n.source_kind,
+    source_id: n.source_id,
+    _labels: labels(n)
+"""
+
+_REL_PROPS_CYPHER = """
+    source: startNode(r).id,
+    target: endNode(r).id,
+    type: type(r),
+    confidence: r.confidence,
+    reason: r.reason,
+    rank: r.rank,
+    source_kind: r.source_kind,
+    source_id: r.source_id
+"""
+
+
 def explore_subgraph(
     driver: Any,
     database: str,
@@ -74,95 +178,59 @@ def explore_subgraph(
     limit: int,
     user_id: str,
 ) -> dict[str, Any]:
-    query = """
+    nodes_query = f"""
+    MATCH (n)
+    WHERE any(label IN labels(n) WHERE label IN $types)
+      AND n.user_id = $user_id
+    WITH collect(DISTINCT n)[..$limit] AS seed_nodes
+    UNWIND seed_nodes AS node
+    WITH collect(DISTINCT {{ {_NODE_PROPS_CYPHER_NODE} }}) AS nodes
+    RETURN nodes, size(nodes) AS node_count
+    """
+    links_query = f"""
     MATCH (n)
     WHERE any(label IN labels(n) WHERE label IN $types)
       AND n.user_id = $user_id
     WITH collect(DISTINCT n)[..$limit] AS seed_nodes
     UNWIND seed_nodes AS n
     MATCH (n)-[r]-(m)
-    WHERE m IN seed_nodes
-    WITH seed_nodes, collect(DISTINCT {
-        source: startNode(r).id,
-        target: endNode(r).id,
-        type: type(r),
-        confidence: r.confidence,
-        reason: r.reason,
-        rank: r.rank,
-        source_kind: r.source_kind,
-        source_id: r.source_id
-    }) AS links
-    WITH seed_nodes, links
-    UNWIND seed_nodes AS node
-    WITH collect(DISTINCT {
-        id: node.id,
-        title: node.title,
-        canonical_name: node.canonical_name,
-        statement: node.statement,
-        normalized_statement: node.normalized_statement,
-        name: node.name,
-        surface_text: node.surface_text,
-        user_id: node.user_id,
-        status: node.status,
-        confidence: node.confidence,
-        entity_type: node.entity_type,
-        normalized_key: node.normalized_key,
-        ckp_type: node.ckp_type,
-        unit_type: node.unit_type,
-        topic_level: node.topic_level,
-        group_type: node.group_type,
-        source_kind: node.source_kind,
-        source_id: node.source_id,
-        _labels: labels(node)
-    }) AS nodes, links
-    RETURN nodes, links, size(nodes) AS node_count, size(links) AS link_count
+    WITH collect(DISTINCT {{ {_REL_PROPS_CYPHER} }}) AS links
+    RETURN links, size(links) AS link_count
     """
     params = {"types": node_types, "limit": limit, "user_id": user_id}
     with driver.session(database=database) as session:
-        result = session.run(query, params)
-        record = result.single()
-    if record is None:
-        return {"nodes": [], "links": [], "node_count": 0, "link_count": 0}
-    return _extract_subgraph_from_record(record)
+        nodes_record = session.run(nodes_query, params).single()
+        links_record = session.run(links_query, params).single()
+
+    nodes_raw = nodes_record.get("nodes", []) if nodes_record else []
+    links_raw = links_record.get("links", []) if links_record else []
+    nodes = [_serialize_node_dict(n) for n in nodes_raw]
+    links = [_serialize_link_dict(l) for l in links_raw]
+    node_ids = {n["id"] for n in nodes}
+    links = [l for l in links if l["source"] in node_ids and l["target"] in node_ids]
+    return {
+        "nodes": nodes,
+        "links": links,
+        "node_count": len(nodes),
+        "link_count": len(links),
+    }
 
 
 def get_node_detail(driver: Any, database: str, node_id: str) -> dict[str, Any]:
-    query = """
-    MATCH (n {id: $node_id})
+    query = f"""
+    MATCH (n {{id: $node_id}})
     OPTIONAL MATCH (n)-[r]-(m)
     WITH n,
-         collect(DISTINCT {
-            id: m.id,
-            title: m.title,
-            canonical_name: m.canonical_name,
-            statement: m.statement,
-            normalized_statement: m.normalized_statement,
-            name: m.name,
-            surface_text: m.surface_text,
-            user_id: m.user_id,
-            status: m.status,
-            confidence: m.confidence,
-            entity_type: m.entity_type,
-            normalized_key: m.normalized_key,
-            ckp_type: m.ckp_type,
-            unit_type: m.unit_type,
-            topic_level: m.topic_level,
-            group_type: m.group_type,
-            source_kind: m.source_kind,
-            source_id: m.source_id,
-            _labels: labels(m)
-         }) AS neighbors,
-         collect(DISTINCT {
-            source: startNode(r).id,
-            target: endNode(r).id,
-            type: type(r),
-            confidence: r.confidence,
-            reason: r.reason,
-            rank: r.rank,
-            source_kind: r.source_kind,
-            source_id: r.source_id
-         }) AS links
-    RETURN n, neighbors, links
+         collect(DISTINCT {{
+            {_NODE_PROPS_CYPHER_M}
+         }}) AS neighbors,
+         collect(DISTINCT {{
+            {_REL_PROPS_CYPHER}
+         }}) AS links,
+         {{
+            {_NODE_PROPS_CYPHER_N}
+         }} AS node_data
+    RETURN node_data, neighbors, links
     """
     params = {"node_id": node_id}
     with driver.session(database=database) as session:
@@ -170,12 +238,12 @@ def get_node_detail(driver: Any, database: str, node_id: str) -> dict[str, Any]:
         record = result.single()
     if record is None:
         return {"node": None, "neighbors": [], "links": []}
-    node_raw = record.get("n")
-    node = _node_to_dict(dict(node_raw)) if node_raw else None
+    node_raw = record.get("node_data")
+    node = _serialize_node_dict(node_raw) if node_raw else None
     neighbors_raw = record.get("neighbors", []) or []
-    neighbors = [_node_to_dict(n) for n in neighbors_raw]
+    neighbors = [_serialize_node_dict(n) for n in neighbors_raw]
     links_raw = record.get("links", []) or []
-    links = [_link_to_dict(l) for l in links_raw]
+    links = [_serialize_link_dict(l) for l in links_raw]
     return {"node": node, "neighbors": neighbors, "links": links}
 
 
