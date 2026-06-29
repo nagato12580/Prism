@@ -12,6 +12,8 @@ Automatically generate TopicGroup drafts -> user reviews and edits -> confirmed 
 
 CKP remains an atomic knowledge point. TopicGroup becomes the reviewable grouping, clustering, and browsing layer.
 
+This design also keeps entity disambiguation in the Entity/Alias layer. TopicGroup clustering groups knowledge points; it does not decide whether two names refer to the same real-world entity.
+
 ## Current Problem
 
 The current CKP governance flow creates two kinds of CKP records:
@@ -57,6 +59,9 @@ Source
 
 Entity
   -> concrete named object such as person, paper, organization, email, project
+
+EntityResolutionCandidate
+  -> reviewable suggestion that an alias or mention should resolve to an existing Entity
 ```
 
 Target graph shape:
@@ -72,6 +77,18 @@ Target graph shape:
 
 (:Entity)-[:MENTIONED_IN]->(:Source)
 (:CKP)-[:RELATED_TO]->(:CKP)
+```
+
+Entity disambiguation graph shape:
+
+```text
+(:Alias {surface_text: "谭彦超", key: "谭彦超"})
+  -[:ALIAS_OF {confidence, evidence_summary}]->
+(:Entity {canonical_name: "Yanchao Tan", entity_type: "person"})
+
+(:Alias {surface_text: "yanchaotan", key: "yanchaotan"})
+  -[:ALIAS_OF]->
+(:Entity {canonical_name: "Yanchao Tan", entity_type: "person"})
 ```
 
 ## Data Model
@@ -163,6 +180,39 @@ Fields:
 Uniqueness:
 
 - one active membership per `(group_id, ckp_id)`.
+
+### `entity_resolution_candidate`
+
+Stores candidate alias/entity merges before user confirmation. This is the layer that can resolve cases such as `yanchaotan`, `Yanchao Tan`, and `谭彦超` to one canonical Entity.
+
+Fields:
+
+- `id`
+- `user_id`
+- `alias_surface`
+- `alias_normalized_key`
+- `candidate_entity_id`
+- `candidate_entity_name`
+- `entity_type`
+- `confidence`
+- `status`: `pending_review`, `confirmed`, `rejected`, `superseded`
+- `evidence_summary`
+- `evidence`
+- `resolution_method`: `rule`, `llm`, `graph_evidence`, `user_confirmed`
+- `created_at`
+- `updated_at`
+
+Evidence should be JSON and may include:
+
+- shared source ids
+- shared paper title
+- shared email
+- shared affiliation
+- shared coauthor list
+- co-mentioned entities
+- LLM explanation
+
+Confirmation creates or updates `EntityAlias` so the alias points to the canonical `KnowledgeEntity`.
 
 ## Clustering Flow
 
@@ -282,6 +332,100 @@ Confirmed groups project to Neo4j:
 
 Drafts are not projected by default. A debug option may project drafts with label `TopicGroupDraft`, but that should not be used in the main graph view.
 
+## Entity Disambiguation Flow
+
+TopicGroup semantic clustering and entity disambiguation are adjacent but separate workflows.
+
+TopicGroup answers:
+
+```text
+Which CKP belong together as a semantic group?
+```
+
+Entity disambiguation answers:
+
+```text
+Do these aliases or mentions refer to the same real-world entity?
+```
+
+### 1. Extract Mentions
+
+Entity extraction creates `KnowledgeEntity`, `EntityMention`, and `EntityAlias` rows from source text.
+
+Examples:
+
+```text
+Yanchao Tan
+yanchaotan
+Tan Yanchao
+谭彦超
+yctan@fzu.edu.cn
+Fuzhou University
+OpenViewer
+```
+
+### 2. Generate Alias Candidates
+
+Rules can safely generate deterministic aliases for the same script:
+
+- lowercased compact Latin names
+- given-family and family-given Latin order
+- email local-part hints
+
+Rules should not automatically merge cross-language names such as `谭彦超 -> Yanchao Tan` unless there is strong supporting evidence.
+
+### 3. Score Cross-Language Resolution Candidates
+
+For cases such as `谭彦超` and `Yanchao Tan`, create `EntityResolutionCandidate` rows instead of directly merging.
+
+Signals:
+
+- same source or same document chunk
+- same paper title
+- same email address or email local-part hint
+- same affiliation
+- overlapping coauthor names
+- graph proximity in Neo4j
+- LLM judgment with cited evidence
+
+High confidence candidates may be auto-confirmed only when deterministic evidence is strong, such as the same email or an explicitly bilingual name line. Otherwise they remain pending review.
+
+### 4. Review and Confirm
+
+The user can:
+
+- confirm alias merge
+- reject alias merge
+- choose a different canonical Entity
+- create a new Entity
+
+Confirming `谭彦超 -> Yanchao Tan` creates:
+
+```text
+EntityAlias(alias="谭彦超", normalized_key="谭彦超", entity_id=<Yanchao Tan entity id>)
+```
+
+Neo4j projection then emits:
+
+```text
+(:Alias {surface_text: "谭彦超"})
+  -[:ALIAS_OF]->
+(:Entity {canonical_name: "Yanchao Tan"})
+```
+
+### 5. Query Behavior
+
+`entity_graph_search` should resolve through aliases before declaring a named entity missing.
+
+Search order:
+
+1. exact alias key
+2. normalized Latin alias variants
+3. confirmed cross-language aliases
+4. pending candidates surfaced as "possible matches" if no confirmed match exists
+
+For `yanchaotan` or `谭彦超`, the desired result is the same canonical Entity once the alias is confirmed.
+
 ## Product Behavior
 
 Default graph browsing should prioritize:
@@ -300,6 +444,17 @@ For a group such as "强化学习算法", the user should see CKP members like:
 - preference optimization
 
 Selecting a CKP then shows supporting PKU, source evidence, and related entities.
+
+Entity review should be a separate review surface from TopicGroup review:
+
+```text
+Possible alias: 谭彦超
+Candidate entity: Yanchao Tan
+Evidence: same paper "OpenViewer", same affiliation "Fuzhou University", coauthor overlap
+Action: confirm / reject / create new entity
+```
+
+Confirmed entity aliases immediately improve graph search and entity-centric retrieval.
 
 ## CKP Parent Node Policy
 
@@ -331,6 +486,9 @@ Clustering should be best-effort.
 - If LLM labeling fails for a cluster, create a draft with a deterministic fallback name such as the highest ranked CKP title plus "相关主题".
 - If confirmation races with regeneration, keep confirmed groups and mark conflicting drafts as `superseded`.
 - If projection to Neo4j fails, leave MySQL confirmed groups intact and retry projection later.
+- If entity resolution confidence is ambiguous, create a pending candidate instead of merging.
+- If a user rejects a candidate, future generation should not recreate the same candidate unless new stronger evidence appears.
+- If two confirmed entities are later found to be the same person, merge through an explicit user-confirmed operation that preserves old aliases and mentions.
 
 ## Testing Strategy
 
@@ -343,11 +501,16 @@ Unit tests:
 - Draft deduplication avoids duplicate pending drafts for the same member set.
 - Confirming a draft creates one TopicGroup and expected members.
 - Neo4j projection emits `TopicGroup` nodes and `CONTAINS` relationships.
+- Entity resolution candidate generation creates a pending candidate for cross-language aliases with shared evidence.
+- Confirming an entity resolution candidate creates an `EntityAlias` pointing to the canonical entity.
+- `entity_graph_search` resolves a confirmed alias such as `谭彦超` to the same entity as `Yanchao Tan`.
 
 Integration tests:
 
 - Seed CKP for DPO, PPO, GRPO, and unrelated "Python import rules"; verify the first three produce one draft group and the unrelated CKP does not join it.
 - Confirm the draft and project it into FakeGraph.
+- Seed mentions for `Yanchao Tan`, `谭彦超`, `OpenViewer`, and `Fuzhou University`; verify the resolver creates a candidate rather than direct auto-merge when evidence is suggestive but not deterministic.
+- Confirm the candidate and verify Neo4j has one Entity with both aliases.
 
 Manual smoke:
 
@@ -372,3 +535,10 @@ The initial implementation should choose conservative defaults:
 - drafts are not projected to Neo4j by default
 
 Future iterations can add manual groups, entity-centric groups, source-based groups, and graph community detection.
+
+Entity disambiguation defaults:
+
+- deterministic same-script aliases can auto-link
+- cross-language aliases start as pending candidates unless email or explicit bilingual evidence is present
+- rejected candidates are remembered
+- confirmed aliases are projected to Neo4j and used by `entity_graph_search`
