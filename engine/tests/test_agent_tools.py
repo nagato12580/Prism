@@ -412,3 +412,19 @@ def test_memory_search_prefers_vector_recall_and_propagates_score(monkeypatch):
         {"chunk_id": "c1", "item_id": "i1", "score": 0.9}
     ]
     assert ctx.citations == [{"chunk_id": "c1", "item_id": "i1", "score": 0.9}]
+
+
+# --- Task 13: agent prompt must require entity graph lookup for named entities ---
+
+
+def test_agent_prompt_requires_entity_graph_before_named_entity_not_found():
+    from engine.app.agent.prompts import AGENT_SYSTEM_PROMPT
+
+    prompt = AGENT_SYSTEM_PROMPT
+    # The tool must be documented in the prompt's knowledge-tool boundary.
+    assert "entity_graph_search" in prompt
+    lowered = prompt.lower()
+    # Named-entity (person/org/paper/alias) lookup rule must be present, in Chinese.
+    assert "命名实体" in prompt or "人名" in prompt or "人、机构" in prompt
+    # The rule must instruct calling entity_graph_search before declaring absence.
+    assert "未找到" in prompt or "不存在" in prompt or "查无此人" in lowered or "缺失" in prompt
