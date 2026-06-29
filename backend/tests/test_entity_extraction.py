@@ -343,3 +343,28 @@ def test_document_governance_extracts_entities_from_chunks(monkeypatch):
     )
     assert paper is not None
     assert any(rel.object_entity_id == paper.id for rel in authored)
+
+
+# --- Task 14: yanchaotan / 谭谚超 badcase regression (extraction layer) ---
+
+
+def test_yanchaotan_badcase_extracts_person_paper_affiliation_and_email():
+    """Locks the original 'yanchaotan 查无此人' failure: the OpenViewer front
+    matter must extract Yanchao Tan (person), the paper, the org, the email,
+    and the authored + affiliated_with relations."""
+    candidates = extract_entity_candidates_from_text(OPENVIEWER_FRONT_MATTER, source_kind="document_chunk")
+    entities = {(c.entity_type, c.surface_text) for c in candidates if c.kind == "entity"}
+    relations = {
+        (c.subject_surface, c.predicate, c.object_surface)
+        for c in candidates
+        if c.kind == "relation"
+    }
+
+    assert ("person", "Yanchao Tan") in entities
+    assert ("person", "Shiping Wang") in entities
+    assert ("paper", "OpenViewer: Openness-Aware Multi-View Learning") in entities
+    assert ("organization", "Fuzhou University") in entities
+    assert ("email", "yctan@fzu.edu.cn") in entities
+
+    assert ("Yanchao Tan", "authored", "OpenViewer: Openness-Aware Multi-View Learning") in relations
+    assert ("Yanchao Tan", "affiliated_with", "Fuzhou University") in relations

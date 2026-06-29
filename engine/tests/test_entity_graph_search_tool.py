@@ -241,3 +241,58 @@ def test_neo4j_entity_query_client_shapes_source_evidence_from_records():
             "relation_type": "AUTHORED",
         }
     ]
+
+
+# --- Task 14: yanchaotan / 谭谚超 badcase regression (query layer) ---
+
+
+def test_yanchaotan_query_resolves_to_yanchao_tan_entity_with_source():
+    """Locks the original 'yanchaotan 查无此人' failure at the query layer:
+    a compact alias key must normalize to yanchaotan/tanyanchao and resolve to
+    the Yanchao Tan entity with a source-backed snippet."""
+
+    class BadcaseClient:
+        def __init__(self):
+            self.calls = []
+
+        def query_entity_context(self, normalized_keys, limit):
+            self.calls.append((normalized_keys, limit))
+            assert "yanchaotan" in normalized_keys
+            return {
+                "entities": [
+                    {"id": "e1", "canonical_name": "Yanchao Tan", "entity_type": "person"}
+                ],
+                "sources": [
+                    {
+                        "source_kind": "document_chunk",
+                        "source_id": "chunk-1",
+                        "snippet": "Yanchao Tan authored OpenViewer.",
+                        "evidence_span": "Yanchao Tan authored OpenViewer.",
+                    }
+                ],
+                "paths": [
+                    {"path": ["Yanchao Tan", "AUTHORED", "OpenViewer"], "relation_type": "AUTHORED"}
+                ],
+            }
+
+    client = BadcaseClient()
+    service = EntityGraphSearchService(client=client)
+
+    payload = service.search_entity_context("yanchaotan", limit=5)
+
+    assert payload["status"] == "success"
+    assert payload["normalized_keys"] == ["yanchaotan"]
+    assert payload["entities"][0]["canonical_name"] == "Yanchao Tan"
+    assert payload["sources"][0]["source_id"] == "chunk-1"
+    assert payload["sources"][0]["snippet"] == "Yanchao Tan authored OpenViewer."
+    # NOTE: the yanchaotan<->tanyanchao two-word swap is exercised by
+    # test_entity_graph_search_service_normalizes_query_before_lookup, which
+    # queries the surface "Yanchao Tan" rather than the compact key.
+    assert client.calls == [(payload["normalized_keys"], 5)]
+
+
+def test_chinese_alias_yanchaotan_query_passes_through_normalizer():
+    """Chinese surface 谭谚超 must pass through normalization unchanged and reach
+    the query client (cross-script alias resolution is a known future gap, but
+    the normalizer must not mangle it)."""
+    assert _alias_keys("谭谚超") == ["谭谚超"]
