@@ -12,6 +12,7 @@ import {
   Search,
   Sun,
   Waypoints,
+  Share2,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -98,7 +99,15 @@ function NavList({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: 
           to="/graph"
           label="图谱"
           icon={Network}
-          active={location.pathname === '/graph' || location.pathname.startsWith('/graph/')}
+          active={location.pathname === '/graph' || (location.pathname.startsWith('/graph/') && !location.pathname.startsWith('/graph/explore'))}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/graph/explore"
+          label="图谱探索"
+          icon={Share2}
+          active={location.pathname === '/graph/explore'}
           isDark={isDark}
           onNavigate={onNavigate}
         />

@@ -12,6 +12,7 @@ import { WikiPointDetail } from '@/pages/WikiPointDetail'
 import { UserProfilePage } from '@/pages/UserProfilePage'
 import { MemoryGraphPage } from '@/pages/MemoryGraphPage'
 import { MemoryInboxPage } from '@/pages/MemoryInboxPage'
+import { GraphExplorePage } from '@/pages/GraphExplorePage'
 
 export const router = createBrowserRouter([
   {
@@ -23,6 +24,7 @@ export const router = createBrowserRouter([
       { path: 'inbox', element: <InboxPage /> },
       { path: 'assets', element: <AssetsPage /> },
       { path: 'graph', element: <KnowledgeGraphPage /> },
+      { path: 'graph/explore', element: <GraphExplorePage /> },
       { path: 'knowledge', element: <KnowledgePage /> },
       { path: 'wiki', element: <WikiPage /> },
       { path: 'memory/inbox', element: <MemoryInboxPage /> },
