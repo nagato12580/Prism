@@ -1897,6 +1897,16 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
     if unit.status != "confirmed":
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
 
+    extract_and_settle_entities(
+        db,
+        source_kind="personal_asset_unit",
+        source_id=unit.id,
+        item_id="",
+        chunk_id="",
+        text=" ".join(filter(None, [unit.title, unit.summary, unit.content])),
+        user_id=unit.user_id or DEFAULT_USER_ID,
+    )
+
     extraction = _extract_asset_unit_pkus_with_llm(unit)
     extracted_pkus = list(extraction.pkus)
     using_llm_extraction = bool(extracted_pkus)

@@ -423,3 +423,55 @@ def test_personal_asset_item_governance_extracts_entities(monkeypatch):
         .first()
     )
     assert mention is not None
+
+
+def test_personal_asset_unit_governance_extracts_entities(monkeypatch):
+    """Confirmed asset units should settle entity audit rows from unit text.
+
+    The rule extractor is intentionally stronger on front-matter-like text than
+    prose, so this test avoids expanding prose heuristics for asset units.
+    """
+    from backend.app.models import PersonalAssetUnit
+    from backend.app.services import knowledge_governance as kg
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+
+    monkeypatch.setattr(kg, "_extract_asset_unit_pkus_with_llm", lambda unit: kg.AssetUnitPKUExtraction([], []))
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+    monkeypatch.setattr(kg, "_extract_ckp_parent_topics_with_llm", lambda **kwargs: kg.CKPParentTopicAssignment([]))
+
+    unit = PersonalAssetUnit(
+        user_id="default-user",
+        title="OpenViewer unit",
+        content=OPENVIEWER_FRONT_MATTER,
+        summary="Yanchao Tan appears in the OpenViewer front matter.",
+        category="paper",
+        tags=["openviewer"],
+        confidence={"overall": 0.9},
+        status="confirmed",
+    )
+    db.add(unit)
+    db.commit()
+
+    kg.settle_personal_asset_unit_to_governance(db, unit)
+
+    entity = (
+        db.query(KnowledgeEntity)
+        .filter_by(user_id="default-user", entity_type="person", normalized_key="yanchaotan")
+        .first()
+    )
+    assert entity is not None
+    mention = (
+        db.query(EntityMention)
+        .filter_by(entity_id=entity.id, source_kind="personal_asset_unit", source_id=unit.id)
+        .first()
+    )
+    assert mention is not None
