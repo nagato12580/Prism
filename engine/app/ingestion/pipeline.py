@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from ..config import settings
 from ..es_client import CHUNKS_INDEX, get_es
-from ..milvus_client import delete_vectors_by_item, insert_vectors_batch
+from ..milvus_client import delete_vectors_by_ids, insert_vectors_batch
 from .chunker import chunk_parent_child
 from .vectorizer import embed_texts
 
@@ -205,6 +205,14 @@ def ingest_item(item_id: str, progress=None) -> int:
 
         _log_stage(item_id, "cleanup")
         clear_document_item_governance(db, item_id)
+        old_child_chunk_ids = [
+            chunk_id
+            for (chunk_id,) in (
+                db.query(KnowledgeChunk.id)
+                .filter(KnowledgeChunk.item_id == item_id, KnowledgeChunk.chunk_type == "child")
+                .all()
+            )
+        ]
         db.query(KnowledgeChunk).filter(KnowledgeChunk.item_id == item_id).delete()
 
         _log_stage(item_id, "store_mysql_chunks", parents=len(parents), children=len(child_texts))
@@ -257,7 +265,7 @@ def ingest_item(item_id: str, progress=None) -> int:
                 emb = embeddings[child_embedding_index]
                 vector_rows.append({"chunk_id": cid, "item_id": item_id, "embedding": emb})
                 child_embedding_index += 1
-        delete_vectors_by_item(item_id)
+        delete_vectors_by_ids(old_child_chunk_ids)
         insert_vectors_batch(vector_rows)
         _report(progress, "store_milvus", len(vector_rows), len(embeddings))
 

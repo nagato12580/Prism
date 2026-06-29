@@ -25,6 +25,7 @@ def tool_result_event(
     stats: dict[str, Any] | None = None,
     latency_ms: int | None = None,
     trace_steps: list[dict[str, Any]] | None = None,
+    evidence_items: list[dict[str, Any]] | None = None,
 ) -> str:
     data: dict[str, Any] = {
         "tool": tool,
@@ -38,7 +39,13 @@ def tool_result_event(
         data["latency_ms"] = latency_ms
     if trace_steps:
         data["trace_steps"] = trace_steps
+    if evidence_items:
+        data["evidence_items"] = evidence_items
     return ndjson_event("tool_result", data)
+
+
+def trace_event(trace_id: str) -> str:
+    return ndjson_event("trace", {"trace_id": trace_id})
 
 
 def clarify_event(question: str, options: list[dict[str, str]]) -> str:

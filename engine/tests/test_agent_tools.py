@@ -7,6 +7,7 @@ import engine.app.agent.tools.governed_knowledge  # noqa: F401
 import engine.app.agent.tools.knowledge  # noqa: F401
 import engine.app.agent.tools.page_index  # noqa: F401
 import engine.app.agent.tools.memory as memory_tools
+import engine.app.agent.tools.knowledge_governance as kg_tools
 import engine.app.agent.tools.clarify  # noqa: F401
 import engine.app.agent.tools.datetime  # noqa: F401
 import engine.app.agent.tools.web_search  # noqa: F401
@@ -104,6 +105,66 @@ def test_knowledge_search_records_sources_and_stats():
     assert ctx.stats_holder["knowledge_search"]["iterations"] == 1
 
 
+class ExplodingRagRunner:
+    def run(self, query: str):
+        raise AssertionError("raw source_id lookup should not call rag_runner")
+
+
+def test_raw_document_search_returns_chunk_by_source_id_without_rag(monkeypatch):
+    class FakeChunk:
+        id = "272d7490-8999-482e-b138-be62f420ed6a"
+        item_id = "item-1"
+        chunk_text = "degree from the College of Computer Science, Zhejiang University"
+        chunk_index = 3
+        chunk_type = "parent"
+        parent_id = None
+
+    class FakeItem:
+        title = "Zihan Fang biography"
+
+    class FakeFile:
+        title = "ORLNet paper"
+        original_filename = "orlnet.pdf"
+
+    class FakeQuery:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return self.rows[0] if self.rows else None
+
+    class FakeSession:
+        def query(self, *args):
+            model = args[0]
+            if model.__name__ == "KnowledgeChunk":
+                return FakeQuery([FakeChunk()])
+            if model.__name__ == "KnowledgeItem":
+                return FakeQuery([FakeItem()])
+            if model.__name__ == "KnowledgeFile":
+                return FakeQuery([FakeFile()])
+            return FakeQuery([])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(kg_tools, "_new_db_session", lambda: FakeSession())
+    ctx = ToolContext(rag_runner=ExplodingRagRunner(), citations=[], stats_holder={})
+    tool = BUILTIN_REGISTRY["raw_document_search"].builder(ctx)
+
+    payload = json.loads(
+        tool.invoke({"query": "degree from College source_id: 272d7490"})
+    )
+
+    assert payload["status"] == "sufficient"
+    assert payload["sources"][0]["chunk_id"] == "272d7490-8999-482e-b138-be62f420ed6a"
+    assert "Zhejiang University" in payload["sources"][0]["text"]
+    assert payload["sources"][0]["display_title"] == "ORLNet paper"
+    assert ctx.stats_holder["raw_document_search"]["hit_count"] == 1
+
+
 def test_asset_search_tool_returns_confirmed_assets(monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -177,6 +238,10 @@ def test_memory_search_tool_returns_confirmed_memories(monkeypatch):
 
     assert payload["status"] == "success"
     assert payload["memories"][0]["title"] == "偏好轻量方案"
+    assert payload["evidence_items"][0]["evidence_id"].startswith("memory:")
+    assert payload["evidence_items"][0]["source_kind"] == "memory"
+    assert payload["evidence_items"][0]["source_id"] == payload["memories"][0]["ref_id"]
+    assert payload["evidence_items"][0]["excerpt"] == payload["memories"][0]["content"]
     assert ctx.stats_holder["memory_search"]["hit_count"] == 1
 
 

@@ -4,9 +4,11 @@ from collections.abc import Callable
 from typing import Any
 
 from .executors import (
+    GlobalFallbackExecutor,
     PkuGraphExpansionExecutor,
     PkuRequeryExecutor,
     ScopeFinderExecutor,
+    ScopedChunkSearchExecutor,
     SourceBacktrackExecutor,
 )
 from .schemas import EvidenceRecord, ScopeResult, SearchDirective
@@ -18,6 +20,8 @@ class SearcherAgent:
         self.source_backtrack = SourceBacktrackExecutor(session_factory)
         self.pku_graph_expansion = PkuGraphExpansionExecutor(session_factory)
         self.pku_requery = PkuRequeryExecutor(session_factory)
+        self.scoped_chunk_search = ScopedChunkSearchExecutor(session_factory)
+        self.global_fallback = GlobalFallbackExecutor(session_factory)
 
     def find_scope(self, query: str, limit: int) -> ScopeResult:
         return self.scope_finder.run(query, limit=limit)
@@ -38,5 +42,8 @@ class SearcherAgent:
             scope.seed_pku_ids[:] = list(dict.fromkeys([*scope.seed_pku_ids, *refreshed.seed_pku_ids]))
             scope.candidate_item_ids[:] = list(dict.fromkeys([*scope.candidate_item_ids, *refreshed.candidate_item_ids]))
             return self.source_backtrack.run(scope, limit=limit)
+        if directive.strategy == "scoped_chunk_search":
+            return self.scoped_chunk_search.run(directive.query or scope.query, scope, limit=limit)
+        if directive.strategy == "global_fallback":
+            return self.global_fallback.run(directive.query or scope.query, limit=limit)
         return []
-

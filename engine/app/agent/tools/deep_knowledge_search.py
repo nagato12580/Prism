@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from engine.app.agent.deep_search.orchestrator import DeepSearchOrchestrator, config_for_depth
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.evidence import normalize_evidence_items
 from engine.app.agent.tools.governed_knowledge import _append_unique_citations
 from engine.app.config import settings
 
@@ -45,6 +46,7 @@ def _build_deep_knowledge_search(ctx: ToolContext) -> StructuredTool:
             "depth": config.depth,
         }
         payload["stats"] = ctx.stats_holder[KEY]
+        payload["evidence_items"] = normalize_evidence_items(KEY, payload)
         return json.dumps(payload, ensure_ascii=False)
 
     return StructuredTool.from_function(

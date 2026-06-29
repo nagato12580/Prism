@@ -27,6 +27,7 @@ import {
 import {
   useChatStore,
   SOURCE_TYPE_OPTIONS,
+  normalizeEvidenceItems,
   type ClarifyOption,
   type ClarifyRequest,
   type Message,
@@ -36,7 +37,7 @@ import {
   type ThinkingStep,
 } from '@/app/chatStore'
 import type { ResourceMediaType } from '@/app/api'
-import { knowledgeApi, chatApi, type KnowledgeTopic } from '@/app/api'
+import { knowledgeApi, chatApi, traceApi, type KnowledgeTopic } from '@/app/api'
 import { cn, genId } from '@/lib/utils'
 
 const starterPrompts = [
@@ -44,6 +45,15 @@ const starterPrompts = [
   '基于知识库帮我列一个行动清单',
   '哪些资料可以回答这个问题？',
 ]
+
+const chatStreamTimeoutEnv = (
+  import.meta as unknown as { env?: { VITE_CHAT_STREAM_TIMEOUT_SECONDS?: string } }
+).env?.VITE_CHAT_STREAM_TIMEOUT_SECONDS
+const CHAT_STREAM_TIMEOUT_SECONDS = Number(chatStreamTimeoutEnv || 300)
+const CHAT_STREAM_TIMEOUT_MS = Number.isFinite(CHAT_STREAM_TIMEOUT_SECONDS)
+  ? CHAT_STREAM_TIMEOUT_SECONDS * 1000
+  : 300_000
+const CHAT_TYPEWRITER_INTERVAL_MS = 18
 
 const sourceTypeIcon = (type: ResourceMediaType) => {
   const icons: Record<ResourceMediaType, ReturnType<typeof FileText>> = {
@@ -178,6 +188,7 @@ function shouldAutoGenerateTitle(title?: string | null) {
 
 function buildAssistantProcess(message: Message) {
   return {
+    trace_id: message.traceId || null,
     agent_status: message.agentStatus || null,
     tool_runs: message.toolRuns || [],
     thinking_steps: message.thinkingSteps || [],
@@ -206,6 +217,7 @@ export function ChatPage() {
   const addLastToolRun = useChatStore((s) => s.addLastToolRun)
   const finishLastToolRun = useChatStore((s) => s.finishLastToolRun)
   const setLastClarify = useChatStore((s) => s.setLastClarify)
+  const setLastTraceId = useChatStore((s) => s.setLastTraceId)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
   const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
@@ -231,6 +243,10 @@ export function ChatPage() {
   const pendingClarifyRef = useRef<string | null>(null)
   const topicPickerRef = useRef<HTMLDivElement>(null)
   const sourcePickerRef = useRef<HTMLDivElement>(null)
+  const processPersistenceQueuesRef = useRef<Record<string, {
+    running: Promise<void> | null
+    latest: { sessionId: string; messageId: string } | null
+  }>>({})
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -349,13 +365,23 @@ export function ChatPage() {
 
     const userMessageId = genId()
     const temporaryAssistantMessageId = genId()
+    let engineUserMessageId = userMessageId
     let assistantMessageId = temporaryAssistantMessageId
     let assistantPersistedId: string | null = null
+    let traceId: string | null = null
     addMessage({ id: userMessageId, role: 'user', content: query }, sessionId)
     addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
 
     const userPersistPromise = persistUserMessage(sessionId, query)
+    await userPersistPromise
     const assistantPersistPromise = persistAssistantPlaceholder(sessionId)
+    try {
+      const persistedUserMessage = await userPersistPromise
+      if (persistedUserMessage) {
+        replaceMessageId(sessionId, userMessageId, persistedUserMessage.id)
+        engineUserMessageId = persistedUserMessage.id
+      }
+    } catch { /* user persistence failure falls back to the optimistic id */ }
     try {
       const persisted = await assistantPersistPromise
       if (persisted) {
@@ -366,15 +392,80 @@ export function ChatPage() {
     } catch { /* placeholder persistence is best-effort */ }
 
     let titleReceived = false
+    const streamAbortController = new AbortController()
+    let streamTimedOut = false
+    let streamTimeoutId: number | undefined
+    const refreshStreamTimeout = () => {
+      if (streamTimeoutId !== undefined) window.clearTimeout(streamTimeoutId)
+      streamTimeoutId = window.setTimeout(() => {
+        streamTimedOut = true
+        streamAbortController.abort()
+      }, CHAT_STREAM_TIMEOUT_MS)
+    }
+    const clearStreamTimeout = () => {
+      if (streamTimeoutId !== undefined) {
+        window.clearTimeout(streamTimeoutId)
+        streamTimeoutId = undefined
+      }
+    }
+    let typewriterBuffer = ''
+    let typewriterTimerId: number | undefined
+    let typewriterFlushResolvers: Array<() => void> = []
+    const clearTypewriterTimer = () => {
+      if (typewriterTimerId !== undefined) {
+        window.clearTimeout(typewriterTimerId)
+        typewriterTimerId = undefined
+      }
+      typewriterBuffer = ''
+      resolveTypewriterFlushes()
+    }
+    const resolveTypewriterFlushes = () => {
+      if (typewriterBuffer.length > 0 || typewriterTimerId !== undefined) return
+      const resolvers = typewriterFlushResolvers
+      typewriterFlushResolvers = []
+      resolvers.forEach((resolve) => resolve())
+    }
+    const pumpTypewriterText = () => {
+      if (!typewriterBuffer) {
+        clearTypewriterTimer()
+        resolveTypewriterFlushes()
+        return
+      }
+      const chunkSize = typewriterBuffer.length > 80 ? 3 : 1
+      const chunk = typewriterBuffer.slice(0, chunkSize)
+      typewriterBuffer = typewriterBuffer.slice(chunkSize)
+      appendToLast(chunk, sessionId, assistantMessageId)
+      typewriterTimerId = window.setTimeout(pumpTypewriterText, CHAT_TYPEWRITER_INTERVAL_MS)
+    }
+    const enqueueTypewriterText = (text: string) => {
+      if (!text) return
+      typewriterBuffer += text
+      if (typewriterTimerId === undefined) {
+        typewriterTimerId = window.setTimeout(pumpTypewriterText, CHAT_TYPEWRITER_INTERVAL_MS)
+      }
+    }
+    const flushTypewriterText = () => {
+      if (typewriterBuffer.length === 0 && typewriterTimerId === undefined) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        typewriterFlushResolvers.push(resolve)
+      })
+    }
 
-    const handleStreamLine = (line: string) => {
+    const handleStreamLine = async (line: string) => {
       if (!line.trim()) return
+      refreshStreamTimeout()
 
       try {
         const msg = JSON.parse(line)
-        if (msg.type === 'agent_status') {
+        if (msg.type === 'trace') {
+          traceId = safeString(msg.data?.trace_id)
+          if (traceId) {
+            setLastTraceId(traceId, sessionId, assistantMessageId)
+            if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          }
+        } else if (msg.type === 'agent_status') {
           setLastAgentStatus(safeString(msg.data?.label), sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_call') {
           addLastToolRun({
             id: genId(),
@@ -382,30 +473,33 @@ export function ChatPage() {
             query: safeString(msg.data?.query),
             status: 'running',
           }, sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_result') {
           finishLastToolRun(safeString(msg.data?.tool, 'tool'), {
             status: safeString(msg.data?.status) === 'error' ? 'error' : 'success',
             summary: safeString(msg.data?.summary),
             stats: msg.data?.stats,
             latencyMs: msg.data?.latency_ms,
+            evidenceItems: normalizeEvidenceItems(msg.data?.evidence_items),
             traceSteps: mergeThinkingSteps(
               msg.data?.trace_steps,
               msg.data?.stats?.deep_trace_steps,
               msg.data?.stats?.trace_steps,
             ),
           }, sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'clarify') {
           setLastClarify({
             question: normalizeClarifyQuestion(msg.data?.question),
             options: normalizeClarifyOptions(msg.data?.options),
           }, sessionId, assistantMessageId)
         } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data), sessionId, assistantMessageId)
-        else if (msg.type === 'token') appendToLast(msg.data, sessionId, assistantMessageId)
+        else if (msg.type === 'token') enqueueTypewriterText(safeString(msg.data))
         else if (msg.type === 'done') {
-          finishLast(sessionId, assistantMessageId)
-          if (assistantPersistedId) persistAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          clearStreamTimeout()
+          await flushTypewriterText()
+          finishLast(sessionId, assistantMessageId, 'success')
+          if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         }
         else if (msg.type === 'title') {
           const title = safeString(msg.data)
@@ -416,10 +510,12 @@ export function ChatPage() {
           }
         }
         else if (msg.type === 'error') {
+          await flushTypewriterText()
           appendToLast(`\n\n请求失败：${msg.data}`, sessionId, assistantMessageId)
-          finishLast(sessionId, assistantMessageId)
+          finishLast(sessionId, assistantMessageId, 'error')
         }
       } catch {
+        await flushTypewriterText()
         appendToLast('收到了一段无法解析的流式响应。', sessionId, assistantMessageId)
       }
     }
@@ -428,9 +524,12 @@ export function ChatPage() {
       const resp = await fetch('/api/v1/chat/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: streamAbortController.signal,
         body: JSON.stringify({
           query,
           history,
+          session_id: sessionId,
+          user_message_id: engineUserMessageId,
           topic_id: selectedTopicId || undefined,
           source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
           deep_search_enabled: deepSearchEnabled,
@@ -449,26 +548,37 @@ export function ChatPage() {
 
       const decoder = new TextDecoder()
       let buffer = ''
+      refreshStreamTimeout()
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
+        refreshStreamTimeout()
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
-          handleStreamLine(line)
+          await handleStreamLine(line)
         }
       }
 
       buffer += decoder.decode()
-      handleStreamLine(buffer)
-      finishLast(sessionId, assistantMessageId)
+      await handleStreamLine(buffer)
+      clearStreamTimeout()
+      await flushTypewriterText()
+      finishLast(sessionId, assistantMessageId, 'success')
     } catch (e) {
-      appendToLast('请求失败：' + (e as Error).message, sessionId, assistantMessageId)
-      finishLast(sessionId, assistantMessageId)
+      clearStreamTimeout()
+      await flushTypewriterText()
+      const message = streamTimedOut
+        ? '知识库检索时间过长，已停止本次请求。可以换个更具体的问题再试。'
+        : (e as Error).message
+      appendToLast('请求失败：' + message, sessionId, assistantMessageId)
+      finishLast(sessionId, assistantMessageId, 'error')
     } finally {
+      clearStreamTimeout()
+      clearTypewriterTimer()
       setSending(false)
       // 持久化 AI 回复 + 标题生成
       if (sessionId) {
@@ -476,7 +586,6 @@ export function ChatPage() {
         const aiMsg = msgs.find((m) => m.id === assistantMessageId && m.role === 'assistant' && !m.streaming)
         if (aiMsg) {
           try {
-            await userPersistPromise
             if (!assistantPersistedId) {
               const persisted = await assistantPersistPromise
               assistantPersistedId = persisted?.id || null
@@ -487,13 +596,27 @@ export function ChatPage() {
               clarify: aiMsg.clarify || undefined,
               process: buildAssistantProcess(aiMsg),
             })
-            else await chatApi.addMessage(sessionId, {
-              role: 'assistant',
-              content: aiMsg.content,
-              sources: aiMsg.sources || undefined,
-              clarify: aiMsg.clarify || undefined,
-              process: buildAssistantProcess(aiMsg),
-            })
+            else {
+              const persistedAssistant = await chatApi.addMessage(sessionId, {
+                role: 'assistant',
+                content: aiMsg.content,
+                sources: aiMsg.sources || undefined,
+                clarify: aiMsg.clarify || undefined,
+                process: buildAssistantProcess(aiMsg),
+              })
+              assistantPersistedId = persistedAssistant.id
+              replaceMessageId(sessionId, assistantMessageId, persistedAssistant.id)
+              assistantMessageId = persistedAssistant.id
+            }
+            if (assistantPersistedId) {
+              await flushAssistantProcessSnapshot(sessionId, assistantPersistedId)
+            }
+            if (traceId && assistantPersistedId) {
+              await traceApi.bindMessage(traceId, {
+                session_id: sessionId,
+                assistant_message_id: assistantPersistedId,
+              })
+            }
           } catch { /* persistence is best-effort for the chat UI */ }
         }
         // 首轮问答后自动生成标题
@@ -517,10 +640,53 @@ export function ChatPage() {
     return chatApi.addMessage(sessionId, { role: 'assistant', content: '' }).catch(() => undefined)
   }
 
-  const persistAssistantProcessSnapshot = (sessionId: string, messageId: string) => {
+  const persistAssistantProcessSnapshot = async (sessionId: string, messageId: string) => {
     const msg = getSessionMessages(sessionId).find((message) => message.id === messageId)
     if (!msg) return
-    chatApi.updateMessage(sessionId, messageId, { process: buildAssistantProcess(msg) }).catch(() => {})
+    await chatApi.updateMessage(sessionId, messageId, { process: buildAssistantProcess(msg) })
+  }
+
+  const processPersistenceKey = (sessionId: string, messageId: string) => `${sessionId}:${messageId}`
+
+  const queueAssistantProcessSnapshot = (sessionId: string, messageId: string) => {
+    // Queues persistAssistantProcessSnapshot(sessionId, assistantPersistedId) calls during streaming.
+    const key = processPersistenceKey(sessionId, messageId)
+    const queue = processPersistenceQueuesRef.current[key] ?? {
+      running: null,
+      latest: null,
+    }
+    queue.latest = { sessionId, messageId }
+    processPersistenceQueuesRef.current[key] = queue
+
+    if (!queue.running) {
+      queue.running = runAssistantProcessSnapshotQueue(key)
+    }
+    return queue.running
+  }
+
+  const runAssistantProcessSnapshotQueue = async (key: string): Promise<void> => {
+    const queue = processPersistenceQueuesRef.current[key]
+    if (!queue) return
+
+    while (queue.latest) {
+      const snapshot = queue.latest
+      queue.latest = null
+      try {
+        await persistAssistantProcessSnapshot(snapshot.sessionId, snapshot.messageId)
+      } catch { /* process persistence is best-effort while streaming */ }
+    }
+
+    queue.running = null
+    if (queue.latest) {
+      queue.running = runAssistantProcessSnapshotQueue(key)
+      await queue.running
+    } else {
+      delete processPersistenceQueuesRef.current[key]
+    }
+  }
+
+  const flushAssistantProcessSnapshot = async (sessionId: string, messageId: string) => {
+    await queueAssistantProcessSnapshot(sessionId, messageId)
   }
 
   const sendClarifyFollowup = (value: string) => {

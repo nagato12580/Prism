@@ -1,6 +1,15 @@
 import json
 import logging
+import os
+import time
 
+from langchain_core.messages import ToolMessage
+
+if not os.environ.get("DATABASE_URL"):
+    os.environ["DATABASE_URL"] = "sqlite:///./_agent_runner_test.db"
+
+from engine.app.agent import runner as runner_mod
+from engine.app.agent.prompts import AGENT_SYSTEM_PROMPT
 from engine.app.agent.runner import LangChainAgentRunner
 
 
@@ -21,6 +30,62 @@ class FakeTool:
                 "sources": [{"chunk_id": "c1", "item_id": "i1", "score": 0.9}],
             }
         )
+
+
+class FakeSlowTool:
+    name = "raw_document_search"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        time.sleep(0.2)
+        return json.dumps({"status": "sufficient", "summary": "Too late."})
+
+
+class FakeSlowToolModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_slow",
+                        "name": "raw_document_search",
+                        "args": {"query": "missing gbraid"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="I could not finish the document search.")
+
+
+class FakeRepeatingSlowToolModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls <= 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_slow_{self.calls}",
+                        "name": "raw_document_search",
+                        "args": {"query": "same slow query"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="I stopped retrying the slow search.")
 
 
 class FakeTraceTool:
@@ -98,6 +163,212 @@ def event_types(lines):
     return [json.loads(line)["type"] for line in lines]
 
 
+class FakeTraceRecorder:
+    def __init__(self):
+        self.steps = []
+        self.finished_status = None
+
+    def record_step(self, **kwargs):
+        self.steps.append(kwargs)
+        return f"step-{len(self.steps)}"
+
+    def finish(self, status):
+        self.finished_status = status
+
+
+class FakeEvidenceTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "sufficient",
+                "summary": "Found evidence.",
+                "stats": {"result_count": 1},
+                "trace_steps": [{"label": "search", "detail": "found one"}],
+                "evidence_items": [
+                    {
+                        "evidence_id": "ev-1",
+                        "chunk_id": "c1",
+                        "source_id": "s1",
+                        "display_title": "Evidence title",
+                        "excerpt": "Useful evidence",
+                        "score": 0.9,
+                    }
+                ],
+            }
+        )
+
+
+class FakeEvidenceModel:
+    def __init__(self):
+        self.calls = 0
+        self.seen_tool_content = None
+        self.seen_tool_message = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "knowledge_search",
+                        "args": {"query": "phase 2"},
+                    }
+                ]
+            )
+        self.seen_tool_message = messages[-1]
+        self.seen_tool_content = messages[-1].content
+        return FakeToolCall(content="Final answer")
+
+
+def test_runner_records_tool_trace_and_streams_evidence_items():
+    model = FakeEvidenceModel()
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=model, tools=[FakeEvidenceTool()])
+
+    lines = list(
+        runner.stream(
+            "How?",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+    tool_result = next(
+        json.loads(line) for line in lines if json.loads(line)["type"] == "tool_result"
+    )
+
+    assert tool_result["data"]["evidence_items"] == [
+        {
+            "evidence_id": "ev-1",
+            "chunk_id": "c1",
+            "source_id": "s1",
+            "display_title": "Evidence title",
+            "excerpt": "Useful evidence",
+            "score": 0.9,
+        }
+    ]
+    assert isinstance(model.seen_tool_message, ToolMessage)
+    tool_message_json = json.loads(model.seen_tool_content)
+    assert tool_message_json["evidence_items"] == tool_result["data"]["evidence_items"]
+    assert tool_message_json["evidence_items"][0]["chunk_id"] == "c1"
+    assert [step["step_type"] for step in recorder.steps] == [
+        "model_invoke",
+        "model_response",
+        "tool_call",
+        "tool_result",
+        "model_invoke",
+        "model_response",
+        "final_answer",
+    ]
+    assert recorder.steps[3]["evidence_items"] == tool_result["data"]["evidence_items"]
+    assert recorder.finished_status == "success"
+
+
+def test_agent_system_prompt_constrains_evidence_identifier_usage():
+    policy_phrases = [
+        "只能使用本轮工具 JSON 的 `evidence_items` 中真实出现过的 id",
+        "本轮 `evidence_items` 未包含该 id",
+        "当前工具结果未返回该 id、无法验证",
+        "不得编造、补全或猜测 id",
+        "优先依据其中的 `excerpt`、`chunk_id` 和 `source_id`",
+        "而不是只根据 summary 做概括性猜测",
+    ]
+
+    for phrase in policy_phrases:
+        assert phrase in AGENT_SYSTEM_PROMPT
+
+
+class FakeNoToolModel:
+    def invoke(self, messages):
+        return FakeToolCall(content="Direct answer")
+
+
+def test_runner_records_no_tool_trace_success():
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=FakeNoToolModel(), tools=[])
+
+    list(
+        runner.stream(
+            "How?",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+
+    assert [step["step_type"] for step in recorder.steps] == [
+        "model_invoke",
+        "model_response",
+        "final_answer",
+    ]
+    assert recorder.steps[-1]["output_json"] == {"content": "Direct answer"}
+    assert recorder.finished_status == "success"
+
+
+class FakeLoopingToolModel:
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        return FakeToolCall(
+            tool_calls=[
+                {
+                    "id": "call_loop",
+                    "name": "knowledge_search",
+                    "args": {"query": "again"},
+                }
+            ]
+        )
+
+
+def test_runner_records_max_iterations_error_trace():
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(
+        model=FakeLoopingToolModel(),
+        tools=[FakeTool()],
+        max_iterations=1,
+    )
+
+    list(
+        runner.stream(
+            "How?",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+
+    assert recorder.steps[-1]["step_type"] == "error"
+    assert recorder.steps[-1]["status"] == "error"
+    assert recorder.finished_status == "error"
+
+
+class FakeExceptionModel:
+    def invoke(self, messages):
+        raise RuntimeError("model unavailable")
+
+
+def test_runner_records_exception_error_trace():
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=FakeExceptionModel(), tools=[])
+
+    list(
+        runner.stream(
+            "How?",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+
+    assert recorder.steps[-1]["step_type"] == "error"
+    assert recorder.steps[-1]["output_json"] == {"message": "model unavailable"}
+    assert recorder.steps[-1]["status"] == "error"
+    assert recorder.finished_status == "error"
+
+
 def test_runner_emits_tool_sources_tokens_and_done():
     runner = LangChainAgentRunner(model=FakeModel(), tools=[FakeTool()])
 
@@ -114,6 +385,56 @@ def test_runner_emits_tool_sources_tokens_and_done():
         "done",
     ]
     assert json.loads(lines[-2])["data"] == "Final answer"
+
+
+def test_runner_times_out_slow_tool_and_emits_error_result():
+    runner = LangChainAgentRunner(
+        model=FakeSlowToolModel(),
+        tools=[FakeSlowTool()],
+        tool_timeout_seconds=0.01,
+    )
+
+    lines = list(runner.stream("What is gbraid?", [{"role": "user", "content": "previous"}]))
+
+    assert event_types(lines) == [
+        "agent_status",
+        "tool_call",
+        "tool_result",
+        "agent_status",
+        "token",
+        "done",
+    ]
+    tool_result = next(json.loads(line) for line in lines if json.loads(line)["type"] == "tool_result")
+    assert tool_result["data"]["tool"] == "raw_document_search"
+    assert tool_result["data"]["status"] == "error"
+    assert "timed out" in tool_result["data"]["summary"]
+    assert json.loads(lines[-2])["data"] == "I could not finish the document search."
+
+
+def test_runner_blocks_repeated_calls_after_tool_timeout():
+    slow_tool = FakeSlowTool()
+    runner = LangChainAgentRunner(
+        model=FakeRepeatingSlowToolModel(),
+        tools=[slow_tool],
+        tool_timeout_seconds=0.01,
+    )
+
+    lines = list(runner.stream("What is gbraid?", [{"role": "user", "content": "previous"}]))
+    tool_results = [json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "tool_result"]
+
+    assert len(tool_results) == 2
+    assert tool_results[0]["status"] == "error"
+    assert "timed out" in tool_results[0]["summary"]
+    assert tool_results[1]["status"] == "error"
+    assert "disabled after a previous timeout" in tool_results[1]["summary"]
+    assert slow_tool.calls == 1
+    assert json.loads(lines[-2])["data"] == "I stopped retrying the slow search."
+
+
+def test_runner_default_tool_timeout_comes_from_settings():
+    runner = LangChainAgentRunner(model=FakeModel(), tools=[FakeTool()])
+
+    assert runner.tool_timeout_seconds == runner_mod.settings.AGENT_TOOL_TIMEOUT_SECONDS
 
 
 def test_runner_includes_tool_trace_steps_in_tool_result_event():
