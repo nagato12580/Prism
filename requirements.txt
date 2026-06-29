@@ -1,5 +1,8 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
+# pymilvus 2.4 仍依赖 pkg_resources，setuptools>=81 已移除该模块，需 pin <81
+setuptools<81
+apscheduler==3.10.4
 sqlalchemy==2.0.30
 pymysql==1.1.0
 redis==5.0.0
