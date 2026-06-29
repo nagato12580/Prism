@@ -1841,6 +1841,28 @@ def settle_personal_asset_item_to_governance(db: Session, asset: PersonalAssetIt
     if asset.status != "confirmed":
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
 
+    extract_and_settle_entities(
+        db,
+        source_kind="personal_asset_item",
+        source_id=asset.id,
+        item_id="",
+        chunk_id="",
+        text=" ".join(
+            filter(
+                None,
+                [
+                    asset.title,
+                    asset.summary,
+                    asset.body,
+                    asset.rewritten_content,
+                    asset.raw_title,
+                    asset.raw_text,
+                ],
+            )
+        ),
+        user_id=asset.user_id or DEFAULT_USER_ID,
+    )
+
     pku_ids: set[str] = set()
     ckp_ids: set[str] = set()
     link_ids: set[str] = set()

@@ -368,3 +368,58 @@ def test_yanchaotan_badcase_extracts_person_paper_affiliation_and_email():
 
     assert ("Yanchao Tan", "authored", "OpenViewer: Openness-Aware Multi-View Learning") in relations
     assert ("Yanchao Tan", "affiliated_with", "Fuzhou University") in relations
+
+
+def test_personal_asset_item_governance_extracts_entities(monkeypatch):
+    """Confirmed asset items should settle entity audit rows from structured asset text.
+
+    Asset bodies are often prose; this fixture uses paper-front-matter shaped text so
+    the current rule extractor is exercised without broadening prose heuristics.
+    """
+    from backend.app.models import PersonalAssetItem
+    from backend.app.services import knowledge_governance as kg
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+
+    monkeypatch.setattr(kg, "search_ckp_vectors", lambda **kwargs: [])
+    monkeypatch.setattr(kg, "upsert_ckp_vector", lambda ckp: f"ckp:{ckp.id}")
+
+    asset = PersonalAssetItem(
+        user_id="default-user",
+        raw_text=OPENVIEWER_FRONT_MATTER,
+        raw_title="OpenViewer raw note",
+        title="OpenViewer note",
+        body=OPENVIEWER_FRONT_MATTER,
+        rewritten_content="",
+        summary="Yanchao Tan appears in the OpenViewer front matter.",
+        asset_kind="paper_note",
+        category="paper",
+        tags=["openviewer"],
+        extracts=[{"type": "claim", "content": "OpenViewer names Yanchao Tan as an author.", "confidence": 0.9}],
+        confidence={"overall": 0.9},
+        status="confirmed",
+    )
+    db.add(asset)
+    db.commit()
+
+    kg.settle_personal_asset_item_to_governance(db, asset)
+
+    entity = (
+        db.query(KnowledgeEntity)
+        .filter_by(user_id="default-user", entity_type="person", normalized_key="yanchaotan")
+        .first()
+    )
+    assert entity is not None
+    mention = (
+        db.query(EntityMention)
+        .filter_by(entity_id=entity.id, source_kind="personal_asset_item", source_id=asset.id)
+        .first()
+    )
+    assert mention is not None
