@@ -14,6 +14,7 @@ from backend.app.models import (
     KnowledgeItem,
     PKUCanonicalLink,
     PKURelation,
+    PersonalAssetUnit,
     PersonalKnowledgeUnit,
 )
 from backend.app.services.graph_client import ALLOWED_RELATIONSHIP_TYPES
@@ -748,5 +749,64 @@ def test_project_entity_graph_does_not_use_wrong_user_item_title_for_mention_sou
                 "title": "chunk-1",
             }
         ]
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_projects_personal_asset_unit_mention_source():
+    db = _db_session()
+    try:
+        unit = PersonalAssetUnit(
+            id="unit-1",
+            user_id="default-user",
+            title="OpenViewer synthesis",
+            content="OpenViewer: Openness-Aware Multi-View Learning\nYanchao Tan, Shiping Wang\n",
+            status="confirmed",
+        )
+        person = _entity("person-1", "Yanchao Tan")
+        mention = EntityMention(
+            id="mention-asset-unit",
+            entity_id=person.id,
+            source_kind="personal_asset_unit",
+            source_id=unit.id,
+            item_id=unit.id,
+            chunk_id="",
+            surface_text="Yanchao Tan",
+            normalized_key="yanchaotan",
+            evidence_span="Yanchao Tan, Shiping Wang",
+            confidence=0.9,
+            extraction_method="rule_author_list",
+        )
+        db.add_all([unit, person, mention])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph)
+
+        assert result.entity_count == 1
+        assert result.source_count == 1
+        assert graph.sources == [
+            {
+                "id": "personal_asset_unit:unit-1",
+                "source_kind": "personal_asset_unit",
+                "source_id": "unit-1",
+                "item_id": "unit-1",
+                "title": "OpenViewer synthesis",
+            }
+        ]
+        assert (
+            "Entity",
+            "person-1",
+            "MENTIONED_IN",
+            "Source",
+            "personal_asset_unit:unit-1",
+            {
+                "confidence": 0.9,
+                "evidence_span": "Yanchao Tan, Shiping Wang",
+                "extraction_method": "rule_author_list",
+                "source_kind": "personal_asset_unit",
+                "source_id": "unit-1",
+            },
+        ) in graph.relations
     finally:
         db.close()

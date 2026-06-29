@@ -11,6 +11,7 @@ from backend.app.models import (
     KnowledgeItem,
     PKUCanonicalLink,
     PKURelation,
+    PersonalAssetUnit,
     PersonalKnowledgeUnit,
 )
 
@@ -317,6 +318,19 @@ def _source_node_for_mention(db, mention: EntityMention, user_id: str) -> dict:
             )
             if item and item.title:
                 title = item.title
+    elif mention.source_kind == "personal_asset_unit":
+        unit = (
+            db.query(PersonalAssetUnit)
+            .filter(
+                PersonalAssetUnit.id == mention.source_id,
+                PersonalAssetUnit.user_id == user_id,
+            )
+            .first()
+        )
+        if unit:
+            item_id = unit.id
+            if unit.title:
+                title = unit.title
 
     return {
         "id": f"{mention.source_kind}:{mention.source_id}",
