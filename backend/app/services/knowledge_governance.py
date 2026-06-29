@@ -29,6 +29,7 @@ from backend.app.prompts.asset_parse import (
     build_document_chunk_pku_extraction_messages,
 )
 from backend.app.services.ckp_vectors import search_ckp_vectors, upsert_ckp_vector
+from backend.app.services.entity_extraction import extract_and_settle_entities
 from backend.app.services.pku_vectors import upsert_pku_vector
 
 
@@ -2129,6 +2130,18 @@ def settle_document_item_to_governance(db: Session, item_id: str, progress=None)
             progress(current=index, total=total_chunks, stage="governance")
         previous_chunk = chunks[index - 1] if index > 0 else None
         next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
+        # Extract bottom-layer entities from chunk text and persist audit rows.
+        # Decoupled from PKU extraction so named entities are captured even when
+        # LLM PKU extraction returns nothing; transaction control stays with the caller.
+        extract_and_settle_entities(
+            db,
+            source_kind="document_chunk",
+            source_id=chunk.id,
+            text=chunk.chunk_text or "",
+            item_id=item.id,
+            chunk_id=chunk.id,
+            user_id=item_user_id,
+        )
         extraction = _extract_document_chunk_pkus_with_llm(
             item,
             chunk,

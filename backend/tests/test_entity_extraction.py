@@ -268,3 +268,78 @@ def test_extract_and_settle_entities_reuses_preseeded_alias_mention_and_relation
         )
     finally:
         db.close()
+
+
+# --- Task 12: governance integration (entity extraction during document settlement) ---
+
+
+def test_document_governance_extracts_entities_from_chunks(monkeypatch):
+    """Fresh document governance must populate entity audit rows from chunk text."""
+    from backend.app.models import KnowledgeChunk, KnowledgeItem
+    from backend.app.services import knowledge_governance as kg
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+
+    item = KnowledgeItem(
+        user_id="default-user",
+        title="OpenViewer",
+        content="OpenViewer paper front matter.",
+        source_type="document",
+    )
+    db.add(item)
+    db.flush()
+    db.add(
+        KnowledgeChunk(
+            item_id=item.id,
+            chunk_text=(
+                "OpenViewer: Openness-Aware Multi-View Learning\n"
+                "Shide Du, Zihan Fang, Yanchao Tan, Changwei Wang, Shiping Wang\n"
+                "College of Computer and Data Science, Fuzhou University\n"
+                "yctan@fzu.edu.cn, shipingwangphd@163.com\n"
+            ),
+            chunk_type="parent",
+        )
+    )
+    db.commit()
+
+    # Avoid real LLM PKU extraction; governance should still extract entities.
+    monkeypatch.setattr(
+        kg,
+        "_extract_document_chunk_pkus_with_llm",
+        lambda *args, **kwargs: kg.AssetUnitPKUExtraction([], []),
+    )
+
+    kg.settle_document_item_to_governance(db, item.id)
+
+    entity = (
+        db.query(KnowledgeEntity)
+        .filter_by(user_id="default-user", entity_type="person", normalized_key="yanchaotan")
+        .first()
+    )
+    assert entity is not None
+    assert entity.canonical_name == "Yanchao Tan"
+    # An authored relation from this person to the paper should also be wired.
+    authored = (
+        db.query(EntityRelation)
+        .filter_by(
+            subject_entity_id=entity.id,
+            predicate="authored",
+            source_kind="document_chunk",
+        )
+        .all()
+    )
+    assert authored, "expected an authored relation from Yanchao Tan to the paper"
+    paper = (
+        db.query(KnowledgeEntity)
+        .filter_by(entity_type="paper", normalized_key="openvieweropennessawaremultiviewlearning")
+        .first()
+    )
+    assert paper is not None
+    assert any(rel.object_entity_id == paper.id for rel in authored)
