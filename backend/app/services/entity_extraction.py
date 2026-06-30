@@ -155,7 +155,9 @@ def _entity_candidate(
 def _extract_paper_title(lines: list[str]) -> str:
     for line in lines:
         if ":" in line and "@" not in line:
-            return line
+            title = line.strip()
+            if len(title) <= 300:
+                return title
     return ""
 
 
@@ -239,8 +241,8 @@ def _upsert_entity(db, candidate: EntityCandidate, user_id: str) -> KnowledgeEnt
     entity = KnowledgeEntity(
         user_id=user_id,
         entity_type=candidate.entity_type,
-        canonical_name=candidate.surface_text,
-        normalized_key=candidate.normalized_key,
+        canonical_name=candidate.surface_text[:500],
+        normalized_key=candidate.normalized_key[:500],
         aliases=list(candidate.aliases),
         confidence=candidate.confidence,
         status="active",
