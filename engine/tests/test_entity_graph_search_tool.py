@@ -138,7 +138,9 @@ def test_entity_graph_search_tool_dedupes_citations_across_invocations():
 
 
 def test_alias_keys_preserve_chinese_query():
-    assert _alias_keys(" 谭谚超 ") == ["谭谚超"]
+    keys = _alias_keys(" 谭谚超 ")
+    assert "谭谚超" in keys
+    assert "tanyanchao" in keys
 
 
 class FakeNeo4jSession:
@@ -293,6 +295,8 @@ def test_yanchaotan_query_resolves_to_yanchao_tan_entity_with_source():
 
 def test_chinese_alias_yanchaotan_query_passes_through_normalizer():
     """Chinese surface 谭谚超 must pass through normalization unchanged and reach
-    the query client (cross-script alias resolution is a known future gap, but
-    the normalizer must not mangle it)."""
-    assert _alias_keys("谭谚超") == ["谭谚超"]
+    the query client. Pinyin fallback keys are also generated for cross-script
+    alias resolution."""
+    keys = _alias_keys("谭谚超")
+    assert "谭谚超" in keys
+    assert "tanyanchao" in keys

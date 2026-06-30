@@ -10,10 +10,16 @@ from pydantic import BaseModel, Field
 from engine.app.config import settings
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 
+try:
+    from pypinyin import lazy_pinyin
+except ImportError:
+    lazy_pinyin = None
+
 
 KEY = "entity_graph_search"
 _ENTITY_KEY_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
 _TWO_LATIN_WORDS_RE = re.compile(r"^([A-Za-z]+)\s+([A-Za-z]+)$")
+_CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 class EntityGraphSearchInput(BaseModel):
@@ -23,6 +29,17 @@ class EntityGraphSearchInput(BaseModel):
 
 def _normalize_entity_key(text: str) -> str:
     return _ENTITY_KEY_RE.sub("", text.strip().lower())
+
+
+def _pinyin_keys(text: str) -> list[str]:
+    if lazy_pinyin is None or not _CHINESE_RE.search(text):
+        return []
+    parts = lazy_pinyin(text)
+    joined = "".join(parts).lower()
+    joined = re.sub(r"[^a-z0-9]+", "", joined)
+    if not joined:
+        return []
+    return [joined]
 
 
 def _alias_keys(query: str) -> list[str]:
@@ -37,6 +54,7 @@ def _alias_keys(query: str) -> list[str]:
                 _normalize_entity_key(f"{second}{first}"),
             ]
         )
+    keys.extend(_pinyin_keys(stripped))
 
     deduped: list[str] = []
     seen: set[str] = set()
