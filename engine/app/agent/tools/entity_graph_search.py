@@ -85,28 +85,30 @@ class Neo4jEntityQueryClient:
         WITH keys, collect(DISTINCT direct_entity) AS direct_entities
         OPTIONAL MATCH (matched_alias:Alias)-[:ALIAS_OF]->(aliased_entity:Entity)
         WHERE matched_alias.normalized_key IN keys OR matched_alias.key IN keys
-        WITH direct_entities + collect(DISTINCT aliased_entity) AS all_entities
+        WITH direct_entities, collect(DISTINCT aliased_entity) AS alias_entities
+        WITH direct_entities + alias_entities AS all_entities
         UNWIND all_entities AS entity
         WITH DISTINCT entity
         WHERE entity IS NOT NULL
-        OPTIONAL MATCH (entity)-[mention:MENTIONED_IN]->(source)
-        OPTIONAL MATCH (entity)-[rel]-(neighbor:Entity)
-        WITH
-            collect(DISTINCT entity)[..$limit] AS entities,
-            collect(DISTINCT source {
-                .*,
-                evidence_span: mention.evidence_span,
-                snippet: coalesce(source.snippet, mention.evidence_span),
-                confidence: mention.confidence,
-                extraction_method: mention.extraction_method,
-                source_kind: coalesce(source.source_kind, mention.source_kind),
-                source_id: coalesce(source.source_id, mention.source_id)
-            })[..$limit] AS sources,
-            collect(DISTINCT {
-                from: coalesce(entity.canonical_name, entity.name),
-                relation_type: type(rel),
-                to: coalesce(neighbor.canonical_name, neighbor.name)
-            })[..$limit] AS paths
+        WITH collect(DISTINCT entity)[..$limit] AS entities
+        UNWIND entities AS e
+        OPTIONAL MATCH (e)-[mention:MENTIONED_IN]->(source)
+        WITH entities, collect(DISTINCT source {
+            .*,
+            evidence_span: mention.evidence_span,
+            snippet: coalesce(source.snippet, mention.evidence_span),
+            confidence: mention.confidence,
+            extraction_method: mention.extraction_method,
+            source_kind: coalesce(source.source_kind, mention.source_kind),
+            source_id: coalesce(source.source_id, mention.source_id)
+        })[..$limit] AS sources
+        UNWIND entities AS e2
+        OPTIONAL MATCH (e2)-[rel]-(neighbor:Entity)
+        WITH entities, sources, collect(DISTINCT {
+            from: coalesce(e2.canonical_name, e2.name),
+            relation_type: type(rel),
+            to: coalesce(neighbor.canonical_name, neighbor.name)
+        })[..$limit] AS paths
         RETURN entities, sources, paths
         """
         params = {"keys": normalized_keys, "limit": limit}
