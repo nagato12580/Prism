@@ -49,6 +49,15 @@ class Settings:
     ENTITY_EXTRACT_ENABLED: bool = os.getenv("ENTITY_EXTRACT_ENABLED", "1") not in ("0", "false", "False")
     GRAPH_ANALYSIS_ENABLED: bool = os.getenv("GRAPH_ANALYSIS_ENABLED", "1") not in ("0", "false", "False")
 
+    # ---- P5 graph insights injection ----
+    GRAPH_INSIGHTS_ENABLED: bool = os.getenv("GRAPH_INSIGHTS_ENABLED", "1") not in ("0", "false", "False")
+    GRAPH_INSIGHTS_TIMEOUT_SECONDS: float = float(os.getenv("GRAPH_INSIGHTS_TIMEOUT_SECONDS", "3.0"))
+    GRAPH_INSIGHTS_SEED_ENTITIES: int = int(os.getenv("GRAPH_INSIGHTS_SEED_ENTITIES", "6"))
+    GRAPH_INSIGHTS_MAX_SURPRISING: int = int(os.getenv("GRAPH_INSIGHTS_MAX_SURPRISING", "2"))
+    GRAPH_INSIGHTS_MAX_GOD: int = int(os.getenv("GRAPH_INSIGHTS_MAX_GOD", "2"))
+    GRAPH_INSIGHTS_MAX_QUESTIONS: int = int(os.getenv("GRAPH_INSIGHTS_MAX_QUESTIONS", "2"))
+    COMMUNITY_LABEL_MODEL: str = os.getenv("COMMUNITY_LABEL_MODEL", "")
+
     # ---- P3 unified GraphRAG retrieval ----
     RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "1") not in ("0", "false", "False")
     RERANK_API_BASE: str = os.getenv("RERANK_API_BASE", "")
