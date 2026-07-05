@@ -12,7 +12,7 @@ import engine.app.agent.tools.datetime  # noqa: F401
 import engine.app.agent.tools.assets  # noqa: F401
 # import engine.app.agent.tools.governed_knowledge   # noqa: F401   # P3: demoted
 import engine.app.agent.tools.deep_knowledge_search  # noqa: F401
-import engine.app.agent.tools.knowledge_governance  # noqa: F401
+# import engine.app.agent.tools.knowledge_governance  # noqa: F401   # P3 unified retrieval + P5 insights supersede CKP-topic / PKU-evidence / material / raw-document tools
 import engine.app.agent.tools.knowledge  # noqa: F401
 import engine.app.agent.tools.page_index  # noqa: F401
 import engine.app.agent.tools.memory  # noqa: F401

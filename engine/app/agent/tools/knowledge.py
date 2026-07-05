@@ -94,6 +94,6 @@ register_tool(
         name=KEY,
         description="Search Prism's indexed knowledge and return grounded evidence.",
         builder=build,
-        default_enabled=False,
+        default_enabled=True,
     )
 )

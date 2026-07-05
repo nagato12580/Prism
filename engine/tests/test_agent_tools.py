@@ -7,7 +7,6 @@ import engine.app.agent.tools.assets as asset_tools
 import engine.app.agent.tools.knowledge  # noqa: F401
 import engine.app.agent.tools.page_index  # noqa: F401
 import engine.app.agent.tools.memory as memory_tools
-import engine.app.agent.tools.knowledge_governance as kg_tools
 import engine.app.agent.tools.clarify  # noqa: F401
 import engine.app.agent.tools.datetime  # noqa: F401
 import engine.app.agent.tools.web_search  # noqa: F401
@@ -26,10 +25,6 @@ class FakeRagRunner:
 
 def test_builtin_registry_contains_initial_tools():
     assert {
-        "knowledge_topic_search",
-        "knowledge_evidence_search",
-        "knowledge_material_search",
-        "raw_document_search",
         "page_index_get_document",
         "page_index_get_document_structure",
         "page_index_get_page_content",
@@ -55,43 +50,27 @@ def test_build_enabled_tools_skips_disabled_web_search():
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
     tools = build_enabled_tools(ctx)
     names = {tool.name for tool in tools}
-    assert "knowledge_topic_search" in names
-    assert "knowledge_evidence_search" in names
-    assert "knowledge_material_search" in names
-    assert "raw_document_search" in names
-    assert "page_index_get_document" not in names
-    assert "page_index_get_document_structure" not in names
-    assert "page_index_get_page_content" not in names
+    # default-on tools aligned with the unified graph-governance chain
+    assert "knowledge_search" in names
     assert "memory_search" in names
     assert "clarify_user" in names
     assert "datetime" in names
+    # demoted legacy tools (superseded by unified retrieval + P5 insights)
+    assert "knowledge_topic_search" not in names
+    assert "knowledge_evidence_search" not in names
+    assert "knowledge_material_search" not in names
+    assert "raw_document_search" not in names
     assert "governed_knowledge_search" not in names
-    assert "knowledge_search" not in names
+    assert "entity_graph_search" not in names
+    # opt-in / disabled tools not enabled by default
+    assert "deep_knowledge_search" not in names
+    assert "page_index_get_document" not in names
+    assert "page_index_get_document_structure" not in names
+    assert "page_index_get_page_content" not in names
     assert "asset_search" not in names
     assert "asset_overview" not in names
     assert "asset_related" not in names
     assert "web_search" not in names
-
-
-def test_model_facing_knowledge_tools_have_clear_task_schemas():
-    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
-    tools = {tool.name: tool for tool in build_enabled_tools(ctx)}
-
-    topic = tools["knowledge_topic_search"]
-    assert "topic" in topic.description.lower()
-    assert {"query", "limit"}.issubset(topic.args)
-
-    evidence = tools["knowledge_evidence_search"]
-    assert "pku" in evidence.description.lower()
-    assert {"query", "evidence_types", "source_kinds", "limit"}.issubset(evidence.args)
-
-    material = tools["knowledge_material_search"]
-    assert "materials" in material.description.lower()
-    assert {"query", "intent", "limit"}.issubset(material.args)
-
-    raw = tools["raw_document_search"]
-    assert "raw" in raw.description.lower()
-    assert {"query"}.issubset(raw.args)
 
 
 def test_knowledge_search_records_sources_and_stats():
@@ -111,61 +90,6 @@ def test_knowledge_search_records_sources_and_stats():
 class ExplodingRagRunner:
     def run(self, query: str):
         raise AssertionError("raw source_id lookup should not call rag_runner")
-
-
-def test_raw_document_search_returns_chunk_by_source_id_without_rag(monkeypatch):
-    class FakeChunk:
-        id = "272d7490-8999-482e-b138-be62f420ed6a"
-        item_id = "item-1"
-        chunk_text = "degree from the College of Computer Science, Zhejiang University"
-        chunk_index = 3
-        chunk_type = "parent"
-        parent_id = None
-
-    class FakeItem:
-        title = "Zihan Fang biography"
-
-    class FakeFile:
-        title = "ORLNet paper"
-        original_filename = "orlnet.pdf"
-
-    class FakeQuery:
-        def __init__(self, rows):
-            self.rows = rows
-
-        def filter(self, *args):
-            return self
-
-        def first(self):
-            return self.rows[0] if self.rows else None
-
-    class FakeSession:
-        def query(self, *args):
-            model = args[0]
-            if model.__name__ == "KnowledgeChunk":
-                return FakeQuery([FakeChunk()])
-            if model.__name__ == "KnowledgeItem":
-                return FakeQuery([FakeItem()])
-            if model.__name__ == "KnowledgeFile":
-                return FakeQuery([FakeFile()])
-            return FakeQuery([])
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(kg_tools, "_new_db_session", lambda: FakeSession())
-    ctx = ToolContext(rag_runner=ExplodingRagRunner(), citations=[], stats_holder={})
-    tool = BUILTIN_REGISTRY["raw_document_search"].builder(ctx)
-
-    payload = json.loads(
-        tool.invoke({"query": "degree from College source_id: 272d7490"})
-    )
-
-    assert payload["status"] == "sufficient"
-    assert payload["sources"][0]["chunk_id"] == "272d7490-8999-482e-b138-be62f420ed6a"
-    assert "Zhejiang University" in payload["sources"][0]["text"]
-    assert payload["sources"][0]["display_title"] == "ORLNet paper"
-    assert ctx.stats_holder["raw_document_search"]["hit_count"] == 1
 
 
 def test_asset_search_tool_returns_confirmed_assets(monkeypatch):
