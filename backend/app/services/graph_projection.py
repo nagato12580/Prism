@@ -354,6 +354,7 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
 
     entity_cache: dict[str, KnowledgeEntity] = {}
     source_cache: set[str] = set()
+    chunk_ids: set[str] = set()
     for mention in mentions:
         entity = entity_cache.get(mention.entity_id)
         if entity is None:
@@ -377,6 +378,7 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
         if source_node["id"] not in source_cache:
             graph.upsert_source(source_node)
             source_cache.add(source_node["id"])
+        chunk_ids.add(mention.source_id)
         graph.relate(
             "Entity",
             mention.entity_id,
@@ -389,4 +391,28 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
             ),
         )
         edges += 1
+
+    # Project this item's inter-entity relations as RELATED_TO edges.
+    if chunk_ids:
+        relations = (
+            db.query(EntityRelation)
+            .filter(EntityRelation.source_kind == "document_chunk", EntityRelation.source_id.in_(chunk_ids))
+            .all()
+        )
+        for relation in relations:
+            if not relation.object_entity_id:
+                continue
+            graph.relate(
+                "Entity",
+                relation.subject_entity_id,
+                "RELATED_TO",
+                "Entity",
+                relation.object_entity_id,
+                _relation_props(
+                    relation,
+                    ["predicate", "confidence", "evidence_span", "extraction_method"],
+                ),
+            )
+            edges += 1
+
     return edges

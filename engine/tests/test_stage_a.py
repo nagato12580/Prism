@@ -269,3 +269,31 @@ def test_extract_entities_for_chunk_returns_relation_candidates(mock_chat):
     assert r.object_surface == "RRF融合"
     assert r.confidence == 0.85
     assert r.extraction_method.startswith("llm_stage_a:INFERRED")
+
+
+def test_project_item_entities_projects_relation_as_related_to():
+    from backend.app.database import Base, engine as _engine
+    from backend.app.models import KnowledgeItem, KnowledgeChunk, KnowledgeEntity, EntityMention, EntityRelation
+    from sqlalchemy.orm import sessionmaker
+    Base.metadata.create_all(_engine)
+    db = sessionmaker(bind=_engine)()
+    try:
+        db.query(EntityRelation).delete()
+        db.query(EntityMention).delete()
+        db.query(KnowledgeEntity).delete()
+        db.query(KnowledgeChunk).delete()
+        db.query(KnowledgeItem).delete()
+        db.commit()
+        db.add(KnowledgeItem(id="i1", user_id="default-user", title="doc"))
+        db.add(KnowledgeChunk(id="c1", item_id="i1", chunk_text="x", chunk_index=0, chunk_type="child"))
+        e1 = KnowledgeEntity(id="e1", user_id="default-user", entity_type="concept", canonical_name="混合检索", normalized_key="a", status="active")
+        e2 = KnowledgeEntity(id="e2", user_id="default-user", entity_type="method", canonical_name="RRF融合", normalized_key="b", status="active")
+        db.add_all([e1, e2]); db.flush()
+        db.add(EntityMention(id="m1", entity_id="e1", source_kind="document_chunk", source_id="c1", item_id="i1", chunk_id="c1", surface_text="混合检索", normalized_key="a", confidence=1.0, extraction_method="llm_stage_a:EXTRACTED"))
+        db.add(EntityRelation(id="r1", subject_entity_id="e1", predicate="uses", object_entity_id="e2", relation_key="rk1", source_kind="document_chunk", source_id="c1", confidence=0.85, extraction_method="llm_stage_a:INFERRED"))
+        db.commit()
+        fake = FakeGraphWithDelete()
+        project_item_entities(db, fake, item_id="i1", user_id="default-user")
+        assert ("Entity", "e1", "RELATED_TO", "Entity", "e2") in fake.relations
+    finally:
+        db.close()

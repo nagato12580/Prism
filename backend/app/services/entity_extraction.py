@@ -137,7 +137,9 @@ def settle_entity_candidates(
     for candidate in candidates:
         if candidate.kind != "relation":
             continue
-        subject = _resolve_entity_for_relation(db, settled_by_surface, user_id, "person", candidate.subject_surface)
+        subject = _resolve_entity_for_relation(
+            db, settled_by_surface, user_id, "", candidate.subject_surface
+        )
         object_entity = _resolve_entity_for_relation(
             db,
             settled_by_surface,
@@ -329,14 +331,31 @@ def _resolve_entity_for_relation(
     entity_type: str,
     surface_text: str,
 ) -> KnowledgeEntity | None:
-    entity = settled_by_surface.get((entity_type, surface_text))
-    if entity:
-        return entity
-    return (
+    # 1) prefer an exact (type, surface) hit among just-settled entities
+    if entity_type:
+        hit = settled_by_surface.get((entity_type, surface_text))
+        if hit:
+            return hit
+    else:
+        # unknown type: match any settled entity sharing this surface
+        for (etype, surf), ent in settled_by_surface.items():
+            if surf == surface_text:
+                return ent
+    # 2) fall back to the DB, keyed by normalized surface; scoped to user.
+    key = normalize_entity_key(surface_text)
+    if entity_type:
+        return (
+            db.query(KnowledgeEntity)
+            .filter_by(user_id=user_id, entity_type=entity_type, normalized_key=key)
+            .one_or_none()
+        )
+    # unknown type: any entity with this normalized key
+    matches = (
         db.query(KnowledgeEntity)
-        .filter_by(user_id=user_id, entity_type=entity_type, normalized_key=normalize_entity_key(surface_text))
-        .one_or_none()
+        .filter_by(user_id=user_id, normalized_key=key)
+        .all()
     )
+    return matches[0] if matches else None
 
 
 def _upsert_relation(

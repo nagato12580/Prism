@@ -82,3 +82,37 @@ def test_settle_entity_candidates_persists_entity_and_mention_from_prebuilt_cand
 def test_entity_candidate_default_confidence_is_zero():
     c = EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x")
     assert c.confidence == 0.0
+
+
+def test_settle_entity_candidates_persists_concept_relation():
+    from backend.app.database import Base, engine as _engine
+    from backend.app.models import EntityRelation, KnowledgeEntity
+    from sqlalchemy.orm import sessionmaker
+    Base.metadata.create_all(_engine)
+    db = sessionmaker(bind=_engine)()
+    try:
+        candidates = [
+            EntityCandidate(kind="entity", entity_type="concept", surface_text="混合检索",
+                            normalized_key="混合检索", aliases=["混合检索"], confidence=1.0,
+                            extraction_method="llm_stage_a:EXTRACTED"),
+            EntityCandidate(kind="entity", entity_type="method", surface_text="RRF融合",
+                            normalized_key="rrf融合", aliases=["rrf融合"], confidence=1.0,
+                            extraction_method="llm_stage_a:EXTRACTED"),
+            EntityCandidate(kind="relation", confidence=0.85,
+                            evidence_span="混合检索 uses RRF融合",
+                            extraction_method="llm_stage_a:INFERRED",
+                            subject_surface="混合检索", predicate="uses",
+                            object_surface="RRF融合", object_entity_type=""),
+        ]
+        settle_entity_candidates(db, candidates, source_kind="document_chunk", source_id="c1",
+                                 item_id="i1", chunk_id="c1", user_id="default-user")
+        db.commit()
+        rels = db.query(EntityRelation).all()
+        assert len(rels) == 1
+        subj = db.query(KnowledgeEntity).filter_by(canonical_name="混合检索").one()
+        obj = db.query(KnowledgeEntity).filter_by(canonical_name="RRF融合").one()
+        assert rels[0].subject_entity_id == subj.id
+        assert rels[0].object_entity_id == obj.id
+        assert rels[0].predicate == "uses"
+    finally:
+        db.close()
