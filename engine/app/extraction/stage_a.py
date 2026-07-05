@@ -7,7 +7,7 @@ from backend.app.services.entity_resolution import alias_keys_for_surface, norma
 
 from ..config import settings
 from ..llm.client import chat
-from .prompts import STAGE_A_EXTRACTION_PROMPT, parse_stage_a_json
+from .prompts import STAGE_A_EXTRACTION_PROMPT, parse_stage_a_json, parse_stage_a_relations
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -25,8 +25,11 @@ def extract_entities_for_chunk(chunk_text: str, chunk_id: str = "") -> list[Enti
     except Exception as exc:
         logger.warning("[stage_a] llm_failed chunk_id=%s error=%s", chunk_id, exc)
         return []
-    parsed = parse_stage_a_json(raw)
-    return [_to_candidate(p, chunk_id) for p in parsed]
+    entities = parse_stage_a_json(raw)
+    relations = parse_stage_a_relations(raw)
+    candidates = [_to_candidate(p, chunk_id) for p in entities]
+    candidates.extend(_to_relation_candidate(r, chunk_id) for r in relations)
+    return candidates
 
 
 def _stage_a_model() -> str | None:
@@ -47,6 +50,23 @@ def _to_candidate(item: dict, chunk_id: str) -> EntityCandidate:
         confidence=score,
         evidence_span=item.get("evidence", "")[:500],
         extraction_method=f"llm_stage_a:{tier}",
+    )
+
+
+def _to_relation_candidate(item: dict, chunk_id: str) -> EntityCandidate:
+    subject = item["subject"]
+    obj = item["object"]
+    tier = item["tier"]
+    score = item["score"]
+    return EntityCandidate(
+        kind="relation",
+        confidence=score,
+        evidence_span=f"{subject} {item['predicate']} {obj}",
+        extraction_method=f"llm_stage_a:{tier}",
+        subject_surface=subject,
+        predicate=item["predicate"],
+        object_surface=obj,
+        object_entity_type="",
     )
 
 

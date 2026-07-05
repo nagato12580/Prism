@@ -2,7 +2,7 @@ import os
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///./_stage_a_test.db"
 
-from engine.app.extraction.prompts import parse_stage_a_json, STAGE_A_EXTRACTION_PROMPT
+from engine.app.extraction.prompts import parse_stage_a_json, parse_stage_a_relations, STAGE_A_EXTRACTION_PROMPT
 
 
 def test_parse_stage_a_json_clean_array():
@@ -233,3 +233,39 @@ def test_project_item_entities_deletes_old_sources_before_projecting():
         assert any(e["id"] == "e1" for e in fake.upserted_entities)
     finally:
         db.close()
+
+
+def test_parse_stage_a_relations_clean():
+    raw = '{"entities":[],"relations":[{"subject":"混合检索","predicate":"uses","object":"RRF融合","tier":"INFERRED","score":0.85}]}'
+    rels = parse_stage_a_relations(raw)
+    assert len(rels) == 1
+    assert rels[0]["subject"] == "混合检索"
+    assert rels[0]["predicate"] == "uses"
+    assert rels[0]["object"] == "RRF融合"
+    assert rels[0]["score"] == 0.85
+
+
+def test_parse_stage_a_relations_rejects_bad_score():
+    raw = '{"entities":[],"relations":[{"subject":"a","predicate":"related_to","object":"b","tier":"EXTRACTED","score":0.5}]}'
+    assert parse_stage_a_relations(raw) == []
+
+
+@patch("engine.app.extraction.stage_a.chat")
+def test_extract_entities_for_chunk_returns_relation_candidates(mock_chat):
+    mock_chat.return_value = (
+        '{"entities":['
+        '{"entity_type":"concept","surface":"混合检索","tier":"EXTRACTED","score":1.0,"evidence":""}'
+        '],"relations":['
+        '{"subject":"混合检索","predicate":"uses","object":"RRF融合","tier":"INFERRED","score":0.85}'
+        ']}'
+    )
+    from engine.app.extraction.stage_a import extract_entities_for_chunk
+    cands = extract_entities_for_chunk("text", chunk_id="c1")
+    rels = [c for c in cands if c.kind == "relation"]
+    assert len(rels) == 1
+    r = rels[0]
+    assert r.subject_surface == "混合检索"
+    assert r.predicate == "uses"
+    assert r.object_surface == "RRF融合"
+    assert r.confidence == 0.85
+    assert r.extraction_method.startswith("llm_stage_a:INFERRED")
