@@ -15,6 +15,11 @@ from ..milvus_client import delete_vectors_by_ids, insert_vectors_batch
 from .chunker import chunk_parent_child
 from .vectorizer import embed_texts
 
+from ..extraction.stage_a import extract_stage_a_parallel
+from backend.app.services.entity_extraction import settle_entity_candidates
+from backend.app.services.graph_projection import project_item_entities
+from backend.app.services.graph_client import GraphClient
+
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 _Session = sessionmaker(bind=_engine)
 logger = logging.getLogger("uvicorn.error")
@@ -153,6 +158,59 @@ def _bulk_index_chunks_es(
         raise
 
 
+def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
+    """Stage A: LLM-extract entities for every child chunk, settle to MySQL, project to Neo4j.
+
+    Failures are logged and swallowed so graph/extraction issues never break ingestion.
+    """
+    if not settings.ENTITY_EXTRACT_ENABLED:
+        return
+    try:
+        from backend.app.models.knowledge_item import KnowledgeChunk
+
+        chunks = (
+            db.query(KnowledgeChunk)
+            .filter(KnowledgeChunk.item_id == item_id, KnowledgeChunk.chunk_type == "child")
+            .all()
+        )
+        if not chunks:
+            return
+        chunk_inputs = [(c.id, c.chunk_text or "") for c in chunks]
+        _log_stage(item_id, "stage_a_extract", chunks=len(chunk_inputs))
+        per_chunk = extract_stage_a_parallel(chunk_inputs)
+
+        for chunk in chunks:
+            candidates = per_chunk.get(chunk.id, [])
+            if not candidates:
+                continue
+            settle_entity_candidates(
+                db,
+                candidates,
+                source_kind="document_chunk",
+                source_id=chunk.id,
+                item_id=item_id,
+                chunk_id=chunk.id,
+                user_id=user_id,
+            )
+        db.commit()
+        _log_stage(item_id, "stage_a_settled")
+
+        _project_item_entities_to_graph(db, item_id, user_id)
+    except Exception as exc:
+        logger.warning("[ingest.pipeline] stage_a_failed item_id=%s error=%s", item_id, exc)
+
+
+def _project_item_entities_to_graph(db, item_id: str, user_id: str) -> None:
+    try:
+        client = GraphClient()
+        try:
+            project_item_entities(db, client, item_id=item_id, user_id=user_id)
+        finally:
+            client.close()
+    except Exception as exc:
+        logger.warning("[ingest.pipeline] graph_projection_failed item_id=%s error=%s", item_id, exc)
+
+
 def ingest_item(item_id: str, progress=None) -> int:
     """Process one knowledge item and return the number of child chunks."""
     from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem
@@ -286,6 +344,10 @@ def ingest_item(item_id: str, progress=None) -> int:
 
         _log_stage(item_id, "commit")
         db.commit()
+
+        user_id = (item.user_id if hasattr(item, "user_id") else None) or "default-user"
+        _run_stage_a_for_item(db, item_id, user_id)
+
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         _log_stage(item_id, "done", children=len(child_texts), elapsed_ms=elapsed_ms)
         return len(child_texts)
