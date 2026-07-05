@@ -80,3 +80,118 @@ def export_graph_for_graphify(db, user_id: str = "default-user") -> dict:
             _add_edge(a, b, "co_occurs_with", "INFERRED", 0.75)
 
     return {"nodes": nodes, "edges": edges}
+
+
+def _remap_communities(new_comms: dict[int, list[str]], old: dict[str, int]) -> dict[str, int]:
+    """Map new community ids back to stable old ids by max Jaccard overlap.
+
+    new_comms: {new_cid: [node_ids]} from graphify.cluster
+    old: {node_id: old_cid} read from Neo4j before recompute
+    Returns {node_id: final_cid} where final_cid reuses old ids when possible.
+    """
+    old_by_cid: dict[int, set[str]] = defaultdict(set)
+    for node_id, cid in old.items():
+        old_by_cid[cid].add(node_id)
+
+    used_old: set[int] = set()
+    new_to_final: dict[int, int] = {}
+    next_id = (max(old_by_cid.keys()) + 1) if old_by_cid else 0
+
+    for new_cid, members in new_comms.items():
+        member_set = set(members)
+        best_old, best_score = None, 0.0
+        for old_cid, old_set in old_by_cid.items():
+            if old_cid in used_old or not old_set:
+                continue
+            union = member_set | old_set
+            score = len(member_set & old_set) / len(union) if union else 0.0
+            if score > best_score:
+                best_score, best_old = score, old_cid
+        if best_old is not None and best_score > 0:
+            new_to_final[new_cid] = best_old
+            used_old.add(best_old)
+        else:
+            new_to_final[new_cid] = next_id
+            next_id += 1
+
+    return {node_id: new_to_final[cid] for cid, members in new_comms.items() for node_id in members}
+
+
+def run_analysis(db, graph, user_id: str = "default-user", top_god: int = 20, top_surprising: int = 20) -> dict:
+    """Run graphify analysis over the full entity graph and write results to Neo4j.
+
+    Never raises (caller wraps in try/except, but we guard anyway).
+    """
+    try:
+        from graphify.build import build_from_json
+        from graphify.cluster import cluster, score_all
+        from graphify.analyze import surprising_connections
+        from graphify.diagnostics import diagnose_extraction
+    except Exception as exc:
+        logger.warning("[analyzer] graphify_import_failed error=%s", exc)
+        return {"node_count": 0, "skipped": True}
+
+    exported = export_graph_for_graphify(db, user_id=user_id)
+    node_count = len(exported["nodes"])
+    if node_count == 0:
+        return {"node_count": 0, "skipped": True}
+
+    try:
+        G = build_from_json(exported, directed=False)
+        communities = cluster(G)                       # {cid: [members]}
+        cohesion_by_cid = score_all(G, communities)    # {cid: float}
+        old = graph.read_entity_communities() if hasattr(graph, "read_entity_communities") else {}
+        final = _remap_communities(communities, old)   # {node_id: final_cid}
+
+        # god nodes = top by degree (graphify.god_nodes filters out concept nodes,
+        # so compute hubs directly)
+        ranked = sorted(G.degree, key=lambda x: x[1], reverse=True)
+        god_ids = {nid for nid, _ in ranked[:top_god]}
+
+        # surprising connections
+        surprising = []
+        try:
+            surprising = surprising_connections(G, communities, top_n=top_surprising)
+        except Exception as exc:
+            logger.warning("[analyzer] surprising_failed error=%s", exc)
+
+        # write back per node
+        for node_id, cid in final.items():
+            graph.set_entity_analysis(
+                node_id,
+                community_id=int(cid),
+                is_god=node_id in god_ids,
+                cohesion=float(cohesion_by_cid.get(_new_cid_for_node(communities, node_id), 0.0)),
+            )
+
+        # write surprising edges
+        for s in surprising:
+            try:
+                graph.relate(
+                    "Entity", s.get("source"), "RELATED_TO", "Entity", s.get("target"),
+                    {"surprising": True, "note": s.get("note", "")},
+                )
+            except Exception as exc:
+                logger.warning("[analyzer] surprising_edge_write_failed %s", exc)
+
+        # diagnostics: log only, never block
+        try:
+            diag = diagnose_extraction(exported, directed=False)
+            dangling = diag.get("dangling_endpoint_edges", 0)
+            if dangling:
+                logger.warning("[analyzer] diagnostics dangling_endpoint_edges=%s", dangling)
+        except Exception:
+            pass
+
+        return {"node_count": node_count, "communities": len(communities),
+                "god_nodes": len(god_ids), "surprising": len(surprising)}
+    except Exception as exc:
+        logger.warning("[analyzer] run_analysis_failed error=%s", exc)
+        return {"node_count": node_count, "skipped": True, "error": str(exc)}
+
+
+def _new_cid_for_node(communities: dict[int, list[str]], node_id: str) -> int:
+    for cid, members in communities.items():
+        if node_id in members:
+            return cid
+    return -1

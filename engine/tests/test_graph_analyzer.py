@@ -77,3 +77,59 @@ def test_graph_client_read_write_analysis():
     client.set_entity_analysis("e2", community_id=7, is_god=True, cohesion=0.42)
     # a write happened
     assert any("SET" in q for q, _ in sess.written)
+
+
+from engine.app.graph.analyzer import run_analysis, _remap_communities
+
+
+def test_remap_keeps_stable_ids_for_unchanged_community():
+    # old: {e1,e2,e3}->cid 5
+    old = {"e1": 5, "e2": 5, "e3": 5}
+    new = {0: ["e1", "e2", "e3", "e4"]}   # same community, one new node
+    final = _remap_communities(new, old)
+    assert final["e1"] == 5 and final["e2"] == 5 and final["e3"] == 5   # stable
+    assert final["e4"] == 5                                               # joined same community
+
+
+def test_remap_assigns_new_id_to_brand_new_community():
+    old = {"e1": 5}
+    new = {0: ["e1"], 1: ["e2", "e3"]}   # e2,e3 brand new, no overlap with old
+    final = _remap_communities(new, old)
+    assert final["e1"] == 5
+    assert final["e2"] == final["e3"]                                    # same new community
+    assert final["e2"] != 5                                              # a new id
+
+
+class _AnalysisFakeGraph:
+    """Records analysis writes; supports the methods run_analysis calls."""
+    def __init__(self): self.old = {}; self.set_calls = []; self.relations = []
+    def read_entity_communities(self): return dict(self.old)
+    def set_entity_analysis(self, eid, community_id, is_god, cohesion):
+        self.set_calls.append((eid, community_id, is_god, cohesion))
+    def relate(self, sl, si, rt, el, ei, props=None):
+        if sl == "Entity" and el == "Entity":
+            self.relations.append((si, ei, props))
+
+
+def test_run_analysis_writes_community_and_does_not_crash_on_small_graph():
+    db = _db()
+    try:
+        db.query(EntityRelation).delete()
+        db.query(EntityMention).delete()
+        db.query(KnowledgeEntity).delete()
+        db.commit()
+        for i, name in enumerate(["混合检索", "RRF融合", "重排", "metadata filter", "向量召回"], start=1):
+            db.add(KnowledgeEntity(id=f"e{i}", user_id="default-user", entity_type="concept",
+                                   canonical_name=name, normalized_key=name, status="active"))
+        db.flush()
+        db.add(EntityRelation(id="r1", subject_entity_id="e1", predicate="uses", object_entity_id="e2", relation_key="k1", source_kind="document_chunk", source_id="c1", confidence=0.85))
+        db.add(EntityRelation(id="r2", subject_entity_id="e1", predicate="uses", object_entity_id="e3", relation_key="k2", source_kind="document_chunk", source_id="c1", confidence=0.85))
+        db.commit()
+        fake = _AnalysisFakeGraph()
+        result = run_analysis(db, fake, user_id="default-user")
+        # every entity got a community_id written
+        written_ids = {c[0] for c in fake.set_calls}
+        assert written_ids == {f"e{i}" for i in range(1, 6)}
+        assert result["node_count"] == 5
+    finally:
+        db.close()
