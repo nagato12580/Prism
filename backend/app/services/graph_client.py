@@ -119,6 +119,35 @@ class GraphClient:
         """
         self._execute_write(query, {"item_id": item_id})
 
+    def _execute_read(self, query: str, params: dict[str, Any] | None = None) -> list[dict]:
+        with self.driver.session(database=self.database) as session:
+            return session.execute_read(lambda tx: tx.run(query, **(params or {})).data())
+
+    def read_entity_communities(self) -> dict[str, int]:
+        """Return {entity_id: community_id} for entities that already have one."""
+        rows = self._execute_read(
+            "MATCH (e:Entity) WHERE e.community_id IS NOT NULL "
+            "RETURN e.id AS id, e.community_id AS cid"
+        )
+        return {r["id"]: r["cid"] for r in rows if r.get("id") is not None}
+
+    def set_entity_analysis(self, entity_id: str, community_id: int, is_god: bool, cohesion: float) -> None:
+        query = """
+        MATCH (e:Entity {id: $entity_id})
+        SET e.community_id = $community_id,
+            e.is_god = $is_god,
+            e.cohesion = $cohesion
+        """
+        self._execute_write(
+            query,
+            {
+                "entity_id": entity_id,
+                "community_id": community_id,
+                "is_god": is_god,
+                "cohesion": cohesion,
+            },
+        )
+
     def _upsert_node(self, label: str, data: dict[str, Any], fields: list[str]) -> None:
         self._validate_label(label)
         assignments = ", ".join(f"{field}: ${field}" for field in fields)

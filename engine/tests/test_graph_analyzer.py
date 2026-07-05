@@ -41,3 +41,39 @@ def test_export_builds_nodes_and_cooccurrence_and_relation_edges():
         assert (("e2", "e3") in pairs or ("e3", "e2") in pairs)
     finally:
         db.close()
+
+
+from unittest.mock import MagicMock
+from backend.app.services.graph_client import GraphClient
+
+
+class _FakeSession:
+    def __init__(self):
+        self.entities = {}   # id -> props
+        self.written = []
+    def execute_read(self, fn):
+        return fn(self)
+    def execute_write(self, fn):
+        return fn(self)
+    def run(self, query, **params):
+        self.written.append((query, params))
+        if query.strip().startswith("MATCH (e:Entity) WHERE e.community_id"):
+            return MagicMock(data=lambda: [{"id": i, "cid": p["community_id"]} for i, p in self.entities.items() if p.get("community_id") is not None])
+        return MagicMock()
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def test_graph_client_read_write_analysis():
+    sess = _FakeSession()
+    driver = MagicMock(); driver.session.return_value = sess
+    client = GraphClient(driver=driver, database="neo4j")
+
+    # seed one entity with an old community
+    sess.entities["e1"] = {"community_id": 7}
+    old = client.read_entity_communities()
+    assert old == {"e1": 7}
+
+    client.set_entity_analysis("e2", community_id=7, is_god=True, cohesion=0.42)
+    # a write happened
+    assert any("SET" in q for q, _ in sess.written)
