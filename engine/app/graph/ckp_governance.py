@@ -98,3 +98,60 @@ def aggregate_ckp_signals(db, graph, entity_ids: list[str], user_id: str = "defa
         logger.warning("[ckp_gov] are_gods_failed err=%s", exc)
 
     return {"cohesion_score": cohesion_score, "god_backed": god_backed}
+
+
+from ..config import settings
+
+
+def govern_ckp_status_by_graph(db, graph, user_id: str = "default-user") -> dict:
+    """Promote draft CKPs to stable based on graph signals (cohesion / god).
+
+    Only promotes; never demotes. Skips deprecated. Writes signals + reason to
+    CKP.extra_meta. Failure-isolated: returns a result dict, never raises.
+    """
+    promoted = 0
+    signaled = 0
+    if not settings.GRAPH_GOV_ENABLED:
+        return {"promoted": 0, "signaled": 0, "skipped": True}
+    try:
+        from backend.app.models import CanonicalKnowledgePoint
+
+        ckps = (
+            db.query(CanonicalKnowledgePoint)
+            .filter(
+                CanonicalKnowledgePoint.user_id == user_id,
+                CanonicalKnowledgePoint.status != "deprecated",
+            )
+            .all()
+        )
+        for ckp in ckps:
+            entity_ids = map_ckp_to_entities(db, ckp)
+            sig = aggregate_ckp_signals(db, graph, entity_ids, user_id=user_id)
+            reason = ""
+            if ckp.status == "draft":
+                if sig["cohesion_score"] >= settings.GRAPH_GOV_COHESION_THRESHOLD:
+                    ckp.status = "stable"; promoted += 1
+                    reason = f"graph:cohesion({sig['cohesion_score']:.2f})"
+                elif sig["god_backed"]:
+                    ckp.status = "stable"; promoted += 1
+                    reason = "graph:god"
+            # write signals regardless (transparency), preserve existing meta keys
+            meta = dict(ckp.extra_meta or {})
+            meta.update({
+                "graph_cohesion": sig["cohesion_score"],
+                "god_backed": sig["god_backed"],
+                "reason": reason,
+                "graph_governed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            ckp.extra_meta = meta
+            if entity_ids:
+                signaled += 1
+        db.commit()
+        return {"promoted": promoted, "signaled": signaled}
+    except Exception as exc:
+        logger.warning("[ckp_gov] govern_failed err=%s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"promoted": 0, "signaled": 0, "error": str(exc)}

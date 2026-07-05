@@ -90,3 +90,89 @@ def test_aggregate_signals_empty_when_no_mapping():
         assert sig == {"cohesion_score": 0.0, "god_backed": False}
     finally:
         db.close()
+
+
+def test_govern_promotes_draft_to_stable_on_cohesion(monkeypatch):
+    db = _db(); _seed_entities_and_communities(db)
+    g = _FakeGraph(communities={"e1": 0}, gods={"e1": False})
+    db.add(CanonicalKnowledgePoint(id="ckp1", user_id="default-user", title="t",
+                                   canonical_statement="s", concepts=["混合检索"], status="draft"))
+    db.commit()
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_ENABLED", True)
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_COHESION_THRESHOLD", 0.3)
+    try:
+        from engine.app.graph.ckp_governance import govern_ckp_status_by_graph
+        res = govern_ckp_status_by_graph(db, g, user_id="default-user")
+        ckp = db.query(CanonicalKnowledgePoint).filter_by(id="ckp1").one()
+        assert ckp.status == "stable"
+        assert ckp.extra_meta.get("graph_cohesion") == 0.45
+        assert ckp.extra_meta.get("reason", "").startswith("graph:")
+        assert res["promoted"] == 1
+    finally:
+        db.close()
+
+
+def test_govern_promotes_draft_to_stable_on_god_even_without_cohesion(monkeypatch):
+    db = _db(); _seed_entities_and_communities(db)
+    g = _FakeGraph(communities={"e1": 99}, gods={"e1": True})   # cid 99 has no graph_community -> cohesion 0
+    db.add(CanonicalKnowledgePoint(id="ckp1", user_id="default-user", title="t",
+                                   canonical_statement="s", concepts=["混合检索"], status="draft"))
+    db.commit()
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_ENABLED", True)
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_COHESION_THRESHOLD", 0.3)
+    try:
+        from engine.app.graph.ckp_governance import govern_ckp_status_by_graph
+        govern_ckp_status_by_graph(db, g, user_id="default-user")
+        ckp = db.query(CanonicalKnowledgePoint).filter_by(id="ckp1").one()
+        assert ckp.status == "stable"
+        assert ckp.extra_meta.get("reason") == "graph:god"
+    finally:
+        db.close()
+
+
+def test_govern_keeps_draft_when_below_threshold_and_not_god(monkeypatch):
+    db = _db(); _seed_entities_and_communities(db)
+    g = _FakeGraph(communities={"e1": 0}, gods={"e1": False})
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_COHESION_THRESHOLD", 0.9)   # 0.45 < 0.9
+    db.add(CanonicalKnowledgePoint(id="ckp1", user_id="default-user", title="t",
+                                   canonical_statement="s", concepts=["混合检索"], status="draft"))
+    db.commit()
+    try:
+        from engine.app.graph.ckp_governance import govern_ckp_status_by_graph
+        govern_ckp_status_by_graph(db, g, user_id="default-user")
+        ckp = db.query(CanonicalKnowledgePoint).filter_by(id="ckp1").one()
+        assert ckp.status == "draft"
+    finally:
+        db.close()
+
+
+def test_govern_never_demotes_stable(monkeypatch):
+    db = _db(); _seed_entities_and_communities(db)
+    g = _FakeGraph(communities={"e1": 0}, gods={"e1": False})
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_COHESION_THRESHOLD", 0.9)  # would not promote
+    db.add(CanonicalKnowledgePoint(id="ckp1", user_id="default-user", title="t",
+                                   canonical_statement="s", concepts=["混合检索"], status="stable"))
+    db.commit()
+    try:
+        from engine.app.graph.ckp_governance import govern_ckp_status_by_graph
+        govern_ckp_status_by_graph(db, g, user_id="default-user")
+        ckp = db.query(CanonicalKnowledgePoint).filter_by(id="ckp1").one()
+        assert ckp.status == "stable"   # unchanged, not demoted
+    finally:
+        db.close()
+
+
+def test_govern_skips_deprecated(monkeypatch):
+    db = _db(); _seed_entities_and_communities(db)
+    g = _FakeGraph(communities={"e1": 0}, gods={"e1": True})
+    monkeypatch.setattr("engine.app.config.settings.GRAPH_GOV_ENABLED", True)
+    db.add(CanonicalKnowledgePoint(id="ckp1", user_id="default-user", title="t",
+                                   canonical_statement="s", concepts=["混合检索"], status="deprecated"))
+    db.commit()
+    try:
+        from engine.app.graph.ckp_governance import govern_ckp_status_by_graph
+        govern_ckp_status_by_graph(db, g, user_id="default-user")
+        ckp = db.query(CanonicalKnowledgePoint).filter_by(id="ckp1").one()
+        assert ckp.status == "deprecated"   # untouched
+    finally:
+        db.close()
