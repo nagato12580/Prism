@@ -170,3 +170,39 @@ def test_run_analysis_persists_community_labels_and_questions(monkeypatch):
         assert summ.suggested_questions[0]["question"] == "Q?"
     finally:
         db.close()
+
+
+def test_run_analysis_invokes_ckp_governance(monkeypatch):
+    from backend.app.database import Base, engine as _engine
+    from backend.app.models import KnowledgeEntity, EntityRelation
+    from sqlalchemy.orm import sessionmaker
+    from engine.app.graph.analyzer import run_analysis
+
+    Base.metadata.drop_all(_engine)
+    Base.metadata.create_all(_engine)
+    db = sessionmaker(bind=_engine)()
+    try:
+        for i, name in enumerate(["混合检索", "RRF融合", "重排", "metadata filter", "向量召回"], start=1):
+            db.add(KnowledgeEntity(id=f"e{i}", user_id="default-user", entity_type="concept",
+                                   canonical_name=name, normalized_key=name + "_p4task5", status="active"))
+        db.flush()
+        db.add(EntityRelation(id="r1", subject_entity_id="e1", predicate="uses", object_entity_id="e2", relation_key="k1", source_kind="document_chunk", source_id="c1", confidence=0.85))
+        db.commit()
+
+        # patch insights functions that analyzer imports locally
+        monkeypatch.setattr("engine.app.graph.analyzer.generate_community_labels", lambda c, **kw: {cid: f"主题{cid}" for cid in c})
+        monkeypatch.setattr("engine.app.graph.analyzer.compute_suggested_questions", lambda **kw: [])
+
+        called = {"n": 0}
+        def _fake_gov(db, graph, user_id, **kw):
+            called["n"] += 1; return {"promoted": 0, "signaled": 0}
+        monkeypatch.setattr("engine.app.graph.analyzer.govern_ckp_status_by_graph", _fake_gov)
+
+        class _G:
+            def read_entity_communities(self): return {}
+            def set_entity_analysis(self, *a, **kw): pass
+            def relate(self, *a, **kw): pass
+        run_analysis(db, _G(), user_id="default-user")
+        assert called["n"] == 1   # govern called once at end of run_analysis
+    finally:
+        db.close()

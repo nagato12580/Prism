@@ -9,6 +9,7 @@ from collections import defaultdict
 from itertools import combinations
 
 from backend.app.models import EntityMention, EntityRelation, KnowledgeEntity
+from .ckp_governance import govern_ckp_status_by_graph
 from .insights import compute_suggested_questions, generate_community_labels
 
 logger = logging.getLogger("uvicorn.error")
@@ -223,6 +224,12 @@ def run_analysis(db, graph, user_id: str = "default-user", top_god: int = 20, to
                 db.rollback()
             except Exception:
                 pass
+
+        # ---- P4: graph-driven CKP governance (promote draft -> stable) ----
+        try:
+            govern_ckp_status_by_graph(db, graph, user_id=user_id)
+        except Exception as exc:
+            logger.warning("[analyzer] ckp_governance_failed err=%s", exc)
 
         return {"node_count": node_count, "communities": len(communities),
                 "god_nodes": len(god_ids), "surprising": len(surprising)}
