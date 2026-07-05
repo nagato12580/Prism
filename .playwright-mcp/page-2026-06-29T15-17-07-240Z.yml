@@ -1,0 +1,370 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+      - generic [ref=e41]: 用户记忆
+      - generic [ref=e42]:
+        - link "记忆审核 24" [ref=e108] [cursor=pointer]:
+          - /url: /memory/inbox
+          - img [ref=e44]
+          - generic [ref=e47]: 记忆审核
+          - generic [ref=e109]: "24"
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e91]: 知识治理图谱
+            - heading "CKP 与 PKU 治理网络" [level=1] [ref=e92]
+          - generic [ref=e432]:
+            - generic [ref=e433]:
+              - img
+              - textbox "搜索 CKP 或 PKU" [ref=e434]
+            - button "重排" [ref=e435] [cursor=pointer]:
+              - img [ref=e436]
+              - text: 重排
+            - button "刷新" [ref=e439] [cursor=pointer]:
+              - img [ref=e440]
+              - text: 刷新
+        - generic [ref=e93]:
+          - button "CKP Workbench" [ref=e94] [cursor=pointer]
+          - button "全局网络" [active] [ref=e95] [cursor=pointer]
+        - generic [ref=e445]:
+          - generic [ref=e446]:
+            - generic [ref=e447]:
+              - generic [ref=e448]:
+                - img [ref=e449]
+                - generic [ref=e454]:
+                  - generic [ref=e455]: 全局 CKP 主题网络
+                  - generic [ref=e456]: 点击子 CKP 进入它的 PKU 网络
+              - generic [ref=e457]:
+                - img [ref=e458]
+                - generic [ref=e460]: CKP
+                - generic [ref=e461]: "70"
+              - generic [ref=e462]:
+                - img [ref=e463]
+                - generic [ref=e473]: PKU
+                - generic [ref=e474]: "-"
+            - generic [ref=e475]:
+              - generic [ref=e476]:
+                - button "缩小画布" [ref=e477] [cursor=pointer]:
+                  - img [ref=e478]
+                - generic [ref=e481]: 100%
+                - button "放大画布" [ref=e482] [cursor=pointer]:
+                  - img [ref=e483]
+                - button "重置画布缩放" [ref=e486] [cursor=pointer]:
+                  - img [ref=e487]
+              - img "全局 CKP 主题网络" [ref=e492]:
+                - generic [ref=e493]:
+                  - generic [ref=e494]: 父 CKP
+                  - generic [ref=e495]: 子 CKP
+                - generic [ref=e497]:
+                  - generic [ref=e498]:
+                    - generic: MVL-IV算法的优化与实验验...
+                    - generic: 父 CKP
+                  - generic [ref=e500]:
+                    - generic: 不完整视图下的多视图学习
+                    - generic: 父 CKP
+                  - generic [ref=e502]:
+                    - generic: 实验验证与应用
+                    - generic: CKP
+                  - generic [ref=e504]:
+                    - generic: SOR-like优化算法与收敛...
+                    - generic: CKP
+                  - generic [ref=e506]:
+                    - generic: 不完整视图问题与挑战
+                    - generic: CKP
+                  - generic [ref=e508]:
+                    - generic: 流形正则化与实验验证
+                    - generic: 父 CKP
+                  - generic [ref=e510]:
+                    - generic: 优化推导的多视图表示学习
+                    - generic: 父 CKP
+                  - generic [ref=e512]:
+                    - generic: 实验评估与模型分析
+                    - generic: CKP
+                  - generic [ref=e514]:
+                    - generic: 流形学习与图正则化
+                    - generic: CKP
+                  - generic [ref=e516]:
+                    - generic: 多视图表示学习
+                    - generic: CKP
+                  - generic [ref=e518]:
+                    - generic: 优化推导网络
+                    - generic: CKP
+                  - generic [ref=e520]:
+                    - generic: 分布式数据并行（DDP）
+                    - generic: CKP
+                  - generic [ref=e522]:
+                    - generic: 检索增强生成系统与评估
+                    - generic: 父 CKP
+                  - generic [ref=e524]:
+                    - generic: 异常处理规范
+                    - generic: CKP
+                  - generic [ref=e526]:
+                    - generic: 基础编码原则
+                    - generic: CKP
+                  - generic [ref=e528]:
+                    - generic: 微调流程与全参数微调
+                    - generic: 父 CKP
+                  - generic [ref=e530]:
+                    - generic: 自动化测试的局限与定位
+                    - generic: CKP
+                  - generic [ref=e532]:
+                    - generic: 参数高效微调方法选型
+                    - generic: CKP
+                  - generic [ref=e534]:
+                    - generic: 测试规范
+                    - generic: CKP
+                  - generic [ref=e536]:
+                    - generic: 基础编码风格
+                    - generic: 父 CKP
+                  - generic [ref=e538]:
+                    - generic: 表达式与基本语句规范
+                    - generic: CKP
+                  - generic [ref=e540]:
+                    - generic: AI生成UI原型与透明素材
+                    - generic: CKP
+                  - generic [ref=e542]:
+                    - generic: 导入规范
+                    - generic: CKP
+                  - generic [ref=e544]:
+                    - generic: 分支管理操作
+                    - generic: CKP
+                  - generic [ref=e546]:
+                    - generic: 微调基础与流程
+                    - generic: CKP
+                  - generic [ref=e548]:
+                    - generic: 工具链与自动化
+                    - generic: 父 CKP
+                  - generic [ref=e550]:
+                    - generic: 高效模型工程
+                    - generic: CKP
+                  - generic [ref=e552]:
+                    - generic: 自动化测试实践流程与收益评估
+                    - generic: CKP
+                  - generic [ref=e554]:
+                    - generic: 数据库设计规范
+                    - generic: CKP
+                  - generic [ref=e556]:
+                    - generic: 大模型工程与智能体架构
+                    - generic: 父 CKP
+                  - generic [ref=e558]:
+                    - generic: 数据准备与数据集划分
+                    - generic: CKP
+                  - generic [ref=e560]:
+                    - generic: 最佳实践与冲突解决
+                    - generic: CKP
+                  - generic [ref=e562]:
+                    - generic: Cypress与Playwri...
+                    - generic: CKP
+                  - generic [ref=e564]:
+                    - generic: 代码审查清单
+                    - generic: CKP
+                  - generic [ref=e566]:
+                    - generic: 微调方法与训练配置
+                    - generic: 父 CKP
+                  - generic [ref=e568]:
+                    - generic: 优秀代码特征
+                    - generic: CKP
+                  - generic [ref=e570]:
+                    - generic: 强化学习算法与训练策略
+                    - generic: 父 CKP
+                  - generic [ref=e572]:
+                    - generic: 测试规范
+                    - generic: 父 CKP
+                  - generic [ref=e574]:
+                    - generic: 策略梯度优化算法
+                    - generic: CKP
+                  - generic [ref=e576]:
+                    - generic: 自动化测试实践：局限与流程优化
+                    - generic: 父 CKP
+                  - generic [ref=e578]:
+                    - generic: 模型加载与数据预处理
+                    - generic: CKP
+                  - generic [ref=e580]:
+                    - generic: C/C++文件结构与注释规范
+                    - generic: CKP
+                  - generic [ref=e582]:
+                    - generic: Transformer归一化技...
+                    - generic: CKP
+                  - generic [ref=e584]:
+                    - generic: 数据准备与预处理
+                    - generic: 父 CKP
+                  - generic [ref=e586]:
+                    - generic: RAG检索增强与知识库管理
+                    - generic: CKP
+                  - generic [ref=e588]:
+                    - generic: Git分支、撤销与最佳实践
+                    - generic: 父 CKP
+                  - generic [ref=e590]:
+                    - generic: C/C++代码风格规范
+                    - generic: 父 CKP
+                  - generic [ref=e592]:
+                    - generic: 函数设计与异常处理
+                    - generic: 父 CKP
+                  - generic [ref=e594]:
+                    - generic: 微调总体原则与最佳实践
+                    - generic: 父 CKP
+                  - generic [ref=e596]:
+                    - generic: 命名规范
+                    - generic: CKP
+                  - generic [ref=e598]:
+                    - generic: 日志与安全
+                    - generic: 父 CKP
+                  - generic [ref=e600]:
+                    - generic: 推理增强与过程奖励
+                    - generic: CKP
+                  - generic [ref=e602]:
+                    - generic: 数据库设计规范
+                    - generic: 父 CKP
+                  - generic [ref=e604]:
+                    - generic: Transformer架构归一...
+                    - generic: 父 CKP
+                  - generic [ref=e606]:
+                    - generic: RAG系统核心组件与优化
+                    - generic: 父 CKP
+                  - generic [ref=e608]:
+                    - generic: 代码质量与团队实践
+                    - generic: 父 CKP
+                  - generic [ref=e610]:
+                    - generic: 参数高效微调技术
+                    - generic: 父 CKP
+                  - generic [ref=e612]:
+                    - generic: 函数设计规范
+                    - generic: CKP
+                  - generic [ref=e614]:
+                    - generic: 分布式训练与参数高效微调
+                    - generic: 父 CKP
+                  - generic [ref=e616]:
+                    - generic: 强化学习冷启动
+                    - generic: CKP
+                  - generic [ref=e618]:
+                    - generic: Agent架构与工程实现
+                    - generic: CKP
+                  - generic [ref=e620]:
+                    - generic: 模型评估与推理部署
+                    - generic: CKP
+                  - generic [ref=e622]:
+                    - generic: 高效模型推理与性能剖析
+                    - generic: 父 CKP
+                  - generic [ref=e624]:
+                    - generic: 模型压缩核心技术
+                    - generic: CKP
+                  - generic [ref=e626]:
+                    - generic: C/C++编程实践规范
+                    - generic: 父 CKP
+                  - generic [ref=e628]:
+                    - generic: Cypress与Playwri...
+                    - generic: 父 CKP
+                  - generic [ref=e630]:
+                    - generic: 程序排版规范
+                    - generic: CKP
+                  - generic [ref=e632]:
+                    - generic: 全参数微调
+                    - generic: CKP
+                  - generic [ref=e634]:
+                    - generic: AI生成UI素材与Figma组...
+                    - generic: 父 CKP
+                  - generic [ref=e636]:
+                    - generic: 撤销与回退操作
+                    - generic: CKP
+          - complementary [ref=e638]:
+            - generic [ref=e639]:
+              - generic [ref=e640]:
+                - img [ref=e642]
+                - generic [ref=e644]:
+                  - generic [ref=e645]: CKP
+                  - heading "MVL-IV算法的优化与实验验证" [level=2] [ref=e646]
+              - button "编辑节点" [ref=e647] [cursor=pointer]:
+                - img [ref=e648]
+            - generic [ref=e651]:
+              - generic [ref=e652]:
+                - generic [ref=e653]: 内容
+                - paragraph [ref=e654]: 采用SOR-like优化算法求解共享子空间目标函数，包括自适应松弛因子策略和收敛性分析，并通过图像修复、聚类、分类等实验验证算法在不完整视图下的有效性。
+              - generic [ref=e655]:
+                - generic [ref=e656]:
+                  - generic [ref=e657]: 类型
+                  - generic [ref=e658]: topic
+                - generic [ref=e659]:
+                  - generic [ref=e660]: 置信度
+                  - generic [ref=e661]: "1.00"
+              - generic [ref=e662]:
+                - generic [ref=e663]:
+                  - generic [ref=e664]: 分类
+                  - generic [ref=e665]: "-"
+                - generic [ref=e666]:
+                  - generic [ref=e667]: 状态
+                  - generic [ref=e668]: draft
+              - generic [ref=e669]:
+                - generic [ref=e670]: 关键词
+                - generic [ref=e671]:
+                  - generic [ref=e672]: SOR
+                  - generic [ref=e673]: 自适应松弛因子
+                  - generic [ref=e674]: 收敛性分析
+                  - generic [ref=e675]: MVL-IV
+                  - generic [ref=e676]: 实验验证
+              - generic [ref=e677]:
+                - heading "CKP 层级关系" [level=3] [ref=e678]
+                - generic [ref=e679]:
+                  - generic [ref=e680]:
+                    - generic [ref=e681]:
+                      - img [ref=e682]
+                      - text: subtopic_of
+                    - generic [ref=e684]: 实验验证与应用
+                    - generic [ref=e685]: 子主题3和4分别从优化方法和实验应用两个角度支撑MVL-IV算法的完整实现与评估，合并后形成算法实现与验证的上层主题。
+                  - generic [ref=e686]:
+                    - generic [ref=e687]:
+                      - img [ref=e688]
+                      - text: subtopic_of
+                    - generic [ref=e690]: SOR-like优化算法与收敛性
+                    - generic [ref=e691]: 子主题3和4分别从优化方法和实验应用两个角度支撑MVL-IV算法的完整实现与评估，合并后形成算法实现与验证的上层主题。

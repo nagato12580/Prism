@@ -35,7 +35,7 @@ class Settings:
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "password")
     NEO4J_DATABASE: str = os.getenv("NEO4J_DATABASE", "neo4j")
-    ENTITY_GRAPH_ENABLED: bool = os.getenv("ENTITY_GRAPH_ENABLED", "0") == "1"
+    ENTITY_GRAPH_ENABLED: bool = os.getenv("ENTITY_GRAPH_ENABLED", "1") == "1"
 
     ENGINE_HOST: str = os.getenv("ENGINE_HOST", "0.0.0.0")
     ENGINE_PORT: int = int(os.getenv("ENGINE_PORT", "5180"))

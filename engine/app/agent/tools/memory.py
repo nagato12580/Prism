@@ -203,7 +203,9 @@ def _build_memory_search(ctx: ToolContext) -> StructuredTool:
             "Search confirmed long-term memory and user profile context, including preferences, goals, "
             "constraints, current projects, and stable personal context. Covers both asset-settled memories "
             "and conversation-extracted confirmed statements. Use when understanding the user's "
-            "own preferences or remembered context is necessary."
+            "own preferences or remembered context is necessary. "
+            "Do NOT use for knowledge-base content (CKP/PKU/documents) — use knowledge_evidence_search or "
+            "knowledge_material_search. Do NOT use for named-entity relationships — use entity_graph_search."
         ),
         args_schema=MemorySearchInput,
     )

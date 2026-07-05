@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from sqlalchemy import or_
+
 from backend.app.models import (
     CanonicalKnowledgePoint,
     CanonicalRelation,
@@ -24,6 +26,7 @@ class GraphProjectionResult:
     alias_count: int = 0
     source_count: int = 0
     relation_count: int = 0
+    pku_entity_mention_count: int = 0
 
 
 PARENT_TARGET_RELATIONS = {"parent", "part_of", "subtopic_of"}
@@ -37,17 +40,19 @@ ENTITY_RELATION_TYPES = {
 }
 
 
-def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjectionResult:
+def project_ckp_graph(db, graph, user_id: str = "default-user", *, ckp_ids: set[str] | None = None, pku_ids: set[str] | None = None) -> GraphProjectionResult:
     result = GraphProjectionResult()
 
-    ckps = (
+    ckp_query = (
         db.query(CanonicalKnowledgePoint)
         .filter(
             CanonicalKnowledgePoint.user_id == user_id,
             CanonicalKnowledgePoint.status != "deprecated",
         )
-        .all()
     )
+    if ckp_ids is not None:
+        ckp_query = ckp_query.filter(CanonicalKnowledgePoint.id.in_(ckp_ids))
+    ckps = ckp_query.all()
     active_ckp_ids = {ckp.id for ckp in ckps}
     for ckp in ckps:
         graph.upsert_ckp(
@@ -62,14 +67,16 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
         )
         result.ckp_count += 1
 
-    pkus = (
+    pku_query = (
         db.query(PersonalKnowledgeUnit)
         .filter(
             PersonalKnowledgeUnit.user_id == user_id,
             PersonalKnowledgeUnit.status != "deprecated",
         )
-        .all()
     )
+    if pku_ids is not None:
+        pku_query = pku_query.filter(PersonalKnowledgeUnit.id.in_(pku_ids))
+    pkus = pku_query.all()
     active_pku_ids = {pku.id for pku in pkus}
     seen_source_ids = set()
     for pku in pkus:
@@ -100,13 +107,17 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
         )
         result.relation_count += 1
 
-    ckp_relations = (
-        db.query(CanonicalRelation)
-        .filter(CanonicalRelation.user_id == user_id)
-        .all()
-    )
+    ckp_rel_query = db.query(CanonicalRelation).filter(CanonicalRelation.user_id == user_id)
+    if ckp_ids is not None:
+        ckp_rel_query = ckp_rel_query.filter(
+            or_(
+                CanonicalRelation.source_canonical_id.in_(ckp_ids),
+                CanonicalRelation.target_canonical_id.in_(ckp_ids),
+            )
+        )
+    ckp_relations = ckp_rel_query.all()
     for relation in ckp_relations:
-        if (
+        if ckp_ids is None and (
             relation.source_canonical_id not in active_ckp_ids
             or relation.target_canonical_id not in active_ckp_ids
         ):
@@ -142,9 +153,20 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
             )
         result.relation_count += 1
 
-    links = db.query(PKUCanonicalLink).filter(PKUCanonicalLink.user_id == user_id).all()
+    link_query = db.query(PKUCanonicalLink).filter(PKUCanonicalLink.user_id == user_id)
+    if ckp_ids is not None or pku_ids is not None:
+        link_filters = []
+        if ckp_ids is not None:
+            link_filters.append(PKUCanonicalLink.canonical_id.in_(ckp_ids))
+        if pku_ids is not None:
+            link_filters.append(PKUCanonicalLink.pku_id.in_(pku_ids))
+        if len(link_filters) > 1:
+            link_query = link_query.filter(or_(*link_filters))
+        else:
+            link_query = link_query.filter(link_filters[0])
+    links = link_query.all()
     for link in links:
-        if link.canonical_id not in active_ckp_ids or link.pku_id not in active_pku_ids:
+        if ckp_ids is None and (link.canonical_id not in active_ckp_ids or link.pku_id not in active_pku_ids):
             continue
         graph.relate(
             "CKP",
@@ -156,9 +178,17 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
         )
         result.relation_count += 1
 
-    pku_relations = db.query(PKURelation).filter(PKURelation.user_id == user_id).all()
+    pku_rel_query = db.query(PKURelation).filter(PKURelation.user_id == user_id)
+    if pku_ids is not None:
+        pku_rel_query = pku_rel_query.filter(
+            or_(
+                PKURelation.source_pku_id.in_(pku_ids),
+                PKURelation.target_pku_id.in_(pku_ids),
+            )
+        )
+    pku_relations = pku_rel_query.all()
     for relation in pku_relations:
-        if (
+        if pku_ids is None and (
             relation.source_pku_id not in active_pku_ids
             or relation.target_pku_id not in active_pku_ids
         ):
@@ -179,17 +209,19 @@ def project_ckp_graph(db, graph, user_id: str = "default-user") -> GraphProjecti
     return result
 
 
-def project_entity_graph(db, graph, user_id: str = "default-user") -> GraphProjectionResult:
+def project_entity_graph(db, graph, user_id: str = "default-user", *, entity_ids: set[str] | None = None) -> GraphProjectionResult:
     result = GraphProjectionResult()
 
-    entities = (
+    entity_query = (
         db.query(KnowledgeEntity)
         .filter(
             KnowledgeEntity.user_id == user_id,
             KnowledgeEntity.status != "deprecated",
         )
-        .all()
     )
+    if entity_ids is not None:
+        entity_query = entity_query.filter(KnowledgeEntity.id.in_(entity_ids))
+    entities = entity_query.all()
     active_entity_ids = {entity.id for entity in entities}
     for entity in entities:
         graph.upsert_entity(
@@ -245,9 +277,19 @@ def project_entity_graph(db, graph, user_id: str = "default-user") -> GraphProje
         )
         result.relation_count += 1
 
-    relations = db.query(EntityRelation).filter(EntityRelation.subject_entity_id.in_(active_entity_ids)).all()
+    entity_rel_query = db.query(EntityRelation)
+    if entity_ids is not None:
+        entity_rel_query = entity_rel_query.filter(
+            or_(
+                EntityRelation.subject_entity_id.in_(entity_ids),
+                EntityRelation.object_entity_id.in_(entity_ids),
+            )
+        )
+    else:
+        entity_rel_query = entity_rel_query.filter(EntityRelation.subject_entity_id.in_(active_entity_ids))
+    relations = entity_rel_query.all()
     for relation in relations:
-        if not relation.object_entity_id or relation.object_entity_id not in active_entity_ids:
+        if entity_ids is None and (not relation.object_entity_id or relation.object_entity_id not in active_entity_ids):
             continue
         graph.relate(
             "Entity",
@@ -268,6 +310,104 @@ def project_entity_graph(db, graph, user_id: str = "default-user") -> GraphProje
             ),
         )
         result.relation_count += 1
+
+    return result
+
+
+def project_pku_entity_mentions(db, graph, user_id: str = "default-user", *, pku_ids: set[str] | None = None, entity_ids: set[str] | None = None) -> GraphProjectionResult:
+    """Bridge the entity subgraph and the CKP/PKU subgraph.
+
+    Entity extraction and PKU extraction both consume the same source text
+    (chunk / asset unit), so ``EntityMention.source_id`` and
+    ``PersonalKnowledgeUnit.source_id`` share the same value when they
+    originate from the same source.  This function joins them by
+    ``(source_kind, source_id)`` and creates ``PKU -[:MENTIONS_ENTITY]-> Entity``
+    edges, turning the previously implicit 3-hop ``Entity→Source←PKU←CKP``
+    path into an explicit 1-hop ``Entity←MENTIONS_ENTITY←PKU←CKP`` path.
+
+    Child-to-parent rollup: PKU extraction runs only on parent chunks, while
+    entity extraction runs on both parent and child chunks.  To maximize the
+    bridge coverage, entity mentions found on child chunks are rolled up to
+    their parent chunk before matching against PKU ``source_id``.
+    """
+    result = GraphProjectionResult()
+
+    pku_query = (
+        db.query(PersonalKnowledgeUnit)
+        .filter(
+            PersonalKnowledgeUnit.user_id == user_id,
+            PersonalKnowledgeUnit.status != "deprecated",
+        )
+    )
+    if pku_ids is not None:
+        pku_query = pku_query.filter(PersonalKnowledgeUnit.id.in_(pku_ids))
+    pkus = pku_query.all()
+    if not pkus:
+        return result
+
+    mention_query = (
+        db.query(EntityMention, KnowledgeEntity)
+        .join(KnowledgeEntity, EntityMention.entity_id == KnowledgeEntity.id)
+        .filter(
+            KnowledgeEntity.user_id == user_id,
+            KnowledgeEntity.status != "deprecated",
+        )
+    )
+    if entity_ids is not None:
+        mention_query = mention_query.filter(KnowledgeEntity.id.in_(entity_ids))
+    mentions = mention_query.all()
+    if not mentions:
+        return result
+
+    # Collect child chunk ids that need parent lookup
+    child_source_ids = {
+        mention.source_id
+        for mention, _ in mentions
+        if mention.source_kind == "document_chunk" and mention.source_id
+    }
+    parent_map: dict[str, str] = {}
+    if child_source_ids:
+        child_chunks = (
+            db.query(KnowledgeChunk.id, KnowledgeChunk.parent_id)
+            .filter(
+                KnowledgeChunk.id.in_(child_source_ids),
+                KnowledgeChunk.parent_id.isnot(None),
+            )
+            .all()
+        )
+        parent_map = {str(c.id): str(c.parent_id) for c in child_chunks if c.parent_id}
+
+    entities_by_source: dict[tuple[str, str], set[str]] = {}
+    for mention, entity in mentions:
+        source_kind = mention.source_kind or ""
+        source_id = mention.source_id or ""
+        if not source_id:
+            continue
+        # Roll up child chunk mentions to their parent chunk
+        if source_kind == "document_chunk" and source_id in parent_map:
+            source_id = parent_map[source_id]
+        key = (source_kind, source_id)
+        entities_by_source.setdefault(key, set()).add(entity.id)
+
+    for pku in pkus:
+        key = (pku.source_kind or "", pku.source_id or "")
+        entity_ids = entities_by_source.get(key)
+        if not entity_ids:
+            continue
+        for entity_id in entity_ids:
+            graph.relate(
+                "PKU",
+                pku.id,
+                "MENTIONS_ENTITY",
+                "Entity",
+                entity_id,
+                {
+                    "source_kind": pku.source_kind,
+                    "source_id": pku.source_id,
+                },
+            )
+            result.pku_entity_mention_count += 1
+            result.relation_count += 1
 
     return result
 

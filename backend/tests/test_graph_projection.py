@@ -18,7 +18,11 @@ from backend.app.models import (
     PersonalKnowledgeUnit,
 )
 from backend.app.services.graph_client import ALLOWED_RELATIONSHIP_TYPES
-from backend.app.services.graph_projection import project_ckp_graph, project_entity_graph
+from backend.app.services.graph_projection import (
+    project_ckp_graph,
+    project_entity_graph,
+    project_pku_entity_mentions,
+)
 from backend.app.services.graph_projection import ENTITY_RELATION_TYPES
 
 
@@ -804,9 +808,448 @@ def test_project_entity_graph_projects_personal_asset_unit_mention_source():
                 "confidence": 0.9,
                 "evidence_span": "Yanchao Tan, Shiping Wang",
                 "extraction_method": "rule_author_list",
-                "source_kind": "personal_asset_unit",
-                "source_id": "unit-1",
-            },
+            "source_kind": "personal_asset_unit",
+            "source_id": "unit-1",
+        },
+    ) in graph.relations
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_bridges_by_shared_source_id():
+    db = _db_session()
+    try:
+        item = KnowledgeItem(
+            id="item-1",
+            user_id="default-user",
+            title="OpenViewer",
+            content="paper text",
+        )
+        chunk = KnowledgeChunk(
+            id="chunk-1",
+            item_id=item.id,
+            chunk_text="OpenViewer chunk",
+        )
+        pku = _pku("pku-1", chunk.id)
+        person = _entity("person-1", "Yanchao Tan")
+        mention = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id=chunk.id,
+            item_id=item.id,
+            chunk_id=chunk.id,
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+            confidence=0.9,
+            extraction_method="rule_author_line",
+        )
+        db.add_all([item, chunk, pku, person, mention])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph)
+
+        assert result.pku_entity_mention_count == 1
+        assert (
+            "PKU",
+            pku.id,
+            "MENTIONS_ENTITY",
+            "Entity",
+            person.id,
+            {"source_kind": "document_chunk", "source_id": "chunk-1"},
         ) in graph.relations
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_links_multiple_entities_to_one_pku():
+    db = _db_session()
+    try:
+        chunk = KnowledgeChunk(
+            id="chunk-1",
+            item_id="item-1",
+            chunk_text="paper text",
+        )
+        pku = _pku("pku-1", chunk.id)
+        person = _entity("person-1", "Yanchao Tan")
+        org = _entity("org-1", "Fuzhou University", entity_type="organization")
+        mention_p = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id=chunk.id,
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        mention_o = EntityMention(
+            id="mention-2",
+            entity_id=org.id,
+            source_kind="document_chunk",
+            source_id=chunk.id,
+            surface_text="Fuzhou University",
+            normalized_key="FuzhouUniversity",
+        )
+        db.add_all([chunk, pku, person, org, mention_p, mention_o])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph)
+
+        assert result.pku_entity_mention_count == 2
+        entity_ids = {
+            rel[4]
+            for rel in graph.relations
+            if rel[2] == "MENTIONS_ENTITY" and rel[1] == pku.id
+        }
+        assert entity_ids == {person.id, org.id}
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_skips_pkus_without_matching_entity():
+    db = _db_session()
+    try:
+        pku_with_entity = _pku("pku-1", "chunk-1")
+        pku_without_entity = _pku("pku-2", "chunk-2")
+        person = _entity("person-1", "Yanchao Tan")
+        mention = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        db.add_all([pku_with_entity, pku_without_entity, person, mention])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph)
+
+        assert result.pku_entity_mention_count == 1
+        assert all(rel[1] != pku_without_entity.id for rel in graph.relations)
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_skips_deprecated():
+    db = _db_session()
+    try:
+        active_pku = _pku("pku-1", "chunk-1")
+        deprecated_pku = _pku("pku-2", "chunk-1", status="deprecated")
+        active_entity = _entity("person-1", "Yanchao Tan")
+        deprecated_entity = _entity("person-2", "Old Person", status="deprecated")
+        mention_active = EntityMention(
+            id="mention-1",
+            entity_id=active_entity.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        mention_deprecated = EntityMention(
+            id="mention-2",
+            entity_id=deprecated_entity.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            surface_text="Old Person",
+            normalized_key="OldPerson",
+        )
+        db.add_all([active_pku, deprecated_pku, active_entity, deprecated_entity, mention_active, mention_deprecated])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph)
+
+        assert result.pku_entity_mention_count == 1
+        assert (
+            "PKU",
+            active_pku.id,
+            "MENTIONS_ENTITY",
+            "Entity",
+            active_entity.id,
+            {"source_kind": "document_chunk", "source_id": "chunk-1"},
+        ) in graph.relations
+        assert not any(
+            rel[1] == deprecated_pku.id or rel[4] == deprecated_entity.id
+            for rel in graph.relations
+        )
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_rolls_up_child_to_parent():
+    """Entity mentions on child chunks should bridge to PKUs on the parent chunk."""
+    db = _db_session()
+    try:
+        item = KnowledgeItem(
+            id="item-1",
+            user_id="default-user",
+            title="Paper",
+            content="paper text",
+        )
+        parent_chunk = KnowledgeChunk(
+            id="parent-chunk",
+            item_id=item.id,
+            chunk_text="parent text",
+            chunk_type="parent",
+        )
+        child_chunk = KnowledgeChunk(
+            id="child-chunk",
+            item_id=item.id,
+            chunk_text="child text",
+            chunk_type="child",
+            parent_id="parent-chunk",
+        )
+        # PKU points to parent chunk (as in production)
+        pku = _pku("pku-1", parent_chunk.id)
+        person = _entity("person-1", "Yanchao Tan")
+        # Entity mention is on child chunk, not parent
+        mention = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id=child_chunk.id,
+            item_id=item.id,
+            chunk_id=child_chunk.id,
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        db.add_all([item, parent_chunk, child_chunk, pku, person, mention])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph)
+
+        assert result.pku_entity_mention_count == 1
+        assert (
+            "PKU",
+            pku.id,
+            "MENTIONS_ENTITY",
+            "Entity",
+            person.id,
+            {"source_kind": "document_chunk", "source_id": "parent-chunk"},
+        ) in graph.relations
+    finally:
+        db.close()
+
+
+# --- Incremental projection tests ---
+
+
+def test_project_ckp_graph_respects_ckp_ids_filter():
+    """When ckp_ids is provided, only those CKPs are projected."""
+    db = _db_session()
+    try:
+        included = _ckp("ckp-included", "Included CKP")
+        excluded = _ckp("ckp-excluded", "Excluded CKP")
+        db.add_all([included, excluded])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_ckp_graph(db, graph, ckp_ids={"ckp-included"})
+
+        assert result.ckp_count == 1
+        assert [node["id"] for node in graph.ckps] == ["ckp-included"]
+    finally:
+        db.close()
+
+
+def test_project_ckp_graph_respects_pku_ids_filter():
+    """When pku_ids is provided, only those PKUs (and their sources) are projected."""
+    db = _db_session()
+    try:
+        included = _pku("pku-included", "chunk-1")
+        excluded = _pku("pku-excluded", "chunk-2")
+        db.add_all([included, excluded])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_ckp_graph(db, graph, pku_ids={"pku-included"})
+
+        assert result.pku_count == 1
+        assert [node["id"] for node in graph.pkus] == ["pku-included"]
+    finally:
+        db.close()
+
+
+def test_project_ckp_graph_includes_relations_touching_filtered_ckp():
+    """When ckp_ids filters to one CKP, relations where the other side is
+    outside the filter are still projected (the other side already exists in Neo4j)."""
+    db = _db_session()
+    try:
+        new_ckp = _ckp("ckp-new", "New CKP")
+        existing_ckp = _ckp("ckp-existing", "Existing CKP")
+        relation = CanonicalRelation(
+            user_id="default-user",
+            source_canonical_id=new_ckp.id,
+            target_canonical_id=existing_ckp.id,
+            relation_type="related_to",
+            confidence=0.9,
+            reason="cross reference",
+        )
+        db.add_all([new_ckp, existing_ckp, relation])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_ckp_graph(db, graph, ckp_ids={"ckp-new"})
+
+        assert result.ckp_count == 1
+        assert [node["id"] for node in graph.ckps] == ["ckp-new"]
+        # The relation touches new_ckp, so it must be projected even though existing_ckp is outside the filter
+        assert (
+            "CKP",
+            new_ckp.id,
+            "RELATED_TO",
+            "CKP",
+            existing_ckp.id,
+            {"relation_type": "related_to", "confidence": 0.9, "reason": "cross reference"},
+        ) in graph.relations
+    finally:
+        db.close()
+
+
+def test_project_ckp_graph_includes_pku_ckp_links_when_pku_in_filter():
+    """When only pku_ids is provided, SUPPORTED_BY links touching those PKUs must be
+    projected even if the CKP is outside the filter."""
+    db = _db_session()
+    try:
+        pku = _pku("pku-new", "chunk-1")
+        ckp = _ckp("ckp-existing", "Existing CKP")
+        link = PKUCanonicalLink(
+            user_id="default-user",
+            pku_id=pku.id,
+            canonical_id=ckp.id,
+            relation_type="supports",
+            role="evidence",
+            confidence=0.85,
+            reason="new evidence",
+        )
+        db.add_all([pku, ckp, link])
+        db.commit()
+
+        graph = FakeGraph()
+        project_ckp_graph(db, graph, pku_ids={"pku-new"})
+
+        assert ("CKP", ckp.id, "SUPPORTED_BY", "PKU", pku.id,
+                {"relation_type": "supports", "role": "evidence", "confidence": 0.85, "reason": "new evidence"}) in graph.relations
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_respects_entity_ids_filter():
+    """When entity_ids is provided, only those entities are projected."""
+    db = _db_session()
+    try:
+        included = _entity("entity-included", "Included Person")
+        excluded = _entity("entity-excluded", "Excluded Person")
+        db.add_all([included, excluded])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph, entity_ids={"entity-included"})
+
+        assert result.entity_count == 1
+        assert [node["id"] for node in graph.entities] == ["entity-included"]
+    finally:
+        db.close()
+
+
+def test_project_entity_graph_projects_relation_touching_filtered_entity():
+    """Entity relations where only one side is in the filter must still be projected."""
+    db = _db_session()
+    try:
+        new_person = _entity("entity-new", "New Person")
+        existing_paper = _entity("entity-existing", "Existing Paper", entity_type="paper")
+        relation = EntityRelation(
+            id="rel-1",
+            subject_entity_id=new_person.id,
+            predicate="authored",
+            object_entity_id=existing_paper.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+        )
+        db.add_all([new_person, existing_paper, relation])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_entity_graph(db, graph, entity_ids={"entity-new"})
+
+        assert result.entity_count == 1
+        authored_rels = [
+            r for r in graph.relations
+            if r[0] == "Entity" and r[1] == new_person.id
+            and r[2] == "AUTHORED" and r[3] == "Entity" and r[4] == existing_paper.id
+        ]
+        assert len(authored_rels) == 1
+        assert authored_rels[0][5]["source_kind"] == "document_chunk"
+        assert authored_rels[0][5]["source_id"] == "chunk-1"
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_respects_pku_ids_filter():
+    """When pku_ids is provided, only bridges for those PKUs are created."""
+    db = _db_session()
+    try:
+        pku_included = _pku("pku-1", "chunk-1")
+        pku_excluded = _pku("pku-2", "chunk-1")
+        person = _entity("person-1", "Yanchao Tan")
+        mention = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        db.add_all([pku_included, pku_excluded, person, mention])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph, pku_ids={"pku-1"})
+
+        assert result.pku_entity_mention_count == 1
+        assert ("PKU", pku_included.id, "MENTIONS_ENTITY", "Entity", person.id) in [
+            (r[0], r[1], r[2], r[3], r[4]) for r in graph.relations
+        ]
+        assert not any(r[1] == pku_excluded.id for r in graph.relations)
+    finally:
+        db.close()
+
+
+def test_project_pku_entity_mentions_respects_entity_ids_filter():
+    """When entity_ids is provided, only bridges for those entities are created."""
+    db = _db_session()
+    try:
+        pku = _pku("pku-1", "chunk-1")
+        person = _entity("person-1", "Yanchao Tan")
+        org = _entity("org-1", "Fuzhou University", entity_type="organization")
+        mention_p = EntityMention(
+            id="mention-1",
+            entity_id=person.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            surface_text="Yanchao Tan",
+            normalized_key="YanchaoTan",
+        )
+        mention_o = EntityMention(
+            id="mention-2",
+            entity_id=org.id,
+            source_kind="document_chunk",
+            source_id="chunk-1",
+            surface_text="Fuzhou University",
+            normalized_key="FuzhouUniversity",
+        )
+        db.add_all([pku, person, org, mention_p, mention_o])
+        db.commit()
+
+        graph = FakeGraph()
+        result = project_pku_entity_mentions(db, graph, entity_ids={"person-1"})
+
+        assert result.pku_entity_mention_count == 1
+        bridged_entities = {r[4] for r in graph.relations if r[2] == "MENTIONS_ENTITY"}
+        assert bridged_entities == {"person-1"}
     finally:
         db.close()

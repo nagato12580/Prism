@@ -233,7 +233,8 @@ def _create_topic(client, name="Uploads"):
     return response.json()
 
 
-def test_upload_document_resource_creates_item(client, monkeypatch):
+def test_upload_document_resource_creates_item(db_session, monkeypatch):
+    client = _knowledge_upload_client(db_session)
     topic = _create_topic(client)
     called = []
     monkeypatch.setattr("backend.app.api.knowledge._trigger_ingestion", lambda item_id: called.append(item_id))
@@ -246,14 +247,80 @@ def test_upload_document_resource_creates_item(client, monkeypatch):
 
     assert response.status_code == 200
     resource = response.json()
+    assert resource["topic_id"] == topic["id"]
     assert resource["title"] == "notes"
+    assert resource["original_filename"] == "notes.txt"
     assert resource["media_type"] == "document"
     assert resource["processing_status"] == "completed"
     assert resource["description"] == "Greeting"
     assert resource["tags"] == ["intro", "hello"]
+    assert resource["storage_path"]
+    assert resource["md5"]
     assert resource["content_text"] == "hello document"
     assert resource["item_id"]
     assert called == []
+
+
+def _knowledge_upload_client(db_session):
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.api.knowledge import router as knowledge_router
+    from backend.app.api.upload import router as upload_router
+    from backend.app.database import get_db
+
+    app = FastAPI()
+    api_prefix = APIRouter(prefix="/api/v1")
+    api_prefix.include_router(knowledge_router)
+    api_prefix.include_router(upload_router)
+    app.include_router(api_prefix)
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    return TestClient(app)
+
+
+def test_legacy_file_upload_with_topic_id_links_file_item_to_topic(db_session, monkeypatch):
+    client = _knowledge_upload_client(db_session)
+    topic = _create_topic(client, "Legacy Uploads")
+    called = []
+    monkeypatch.setattr("backend.app.api.upload._trigger_ingestion", lambda item_id: called.append(item_id))
+
+    response = client.post(
+        "/api/v1/upload/file",
+        files={"file": ("legacy.txt", b"legacy document", "text/plain")},
+        data={"topic_id": topic["id"]},
+    )
+
+    assert response.status_code == 200
+    item = response.json()
+    resource = db_session.query(KnowledgeFile).filter_by(item_id=item["id"]).one()
+    assert resource.topic_id == topic["id"]
+    assert resource.user_id == "default-user"
+    assert resource.title == "legacy"
+    assert resource.original_filename == "legacy.txt"
+    assert resource.media_type == "document"
+    assert resource.mime_type == "text/plain"
+    assert resource.file_ext == ".txt"
+    assert resource.md5
+    assert resource.content_text == "legacy document"
+    assert called == [item["id"]]
+
+
+def test_legacy_file_upload_rejects_unknown_topic_id(db_session, monkeypatch):
+    client = _knowledge_upload_client(db_session)
+    monkeypatch.setattr("backend.app.api.upload._trigger_ingestion", lambda item_id: None)
+
+    response = client.post(
+        "/api/v1/upload/file",
+        files={"file": ("legacy.txt", b"legacy document", "text/plain")},
+        data={"topic_id": "missing-topic"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "topic_not_found"
 
 
 def test_upload_document_marks_abnormal_text_invalid(db_session, monkeypatch):

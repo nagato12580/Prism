@@ -1,0 +1,102 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+        - link "图谱探索" [ref=e41] [cursor=pointer]:
+          - /url: /graph/explore
+          - img [ref=e42]
+          - generic [ref=e48]: 图谱探索
+      - generic [ref=e49]: 用户记忆
+      - generic [ref=e50]:
+        - link "记忆审核" [ref=e51] [cursor=pointer]:
+          - /url: /memory/inbox
+          - img [ref=e52]
+          - generic [ref=e55]: 记忆审核
+        - link "用户画像" [ref=e56] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e57]
+          - generic [ref=e66]: 用户画像
+        - link "记忆图谱" [ref=e67] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e68]
+          - generic [ref=e75]: 记忆图谱
+  - generic [ref=e76]:
+    - banner [ref=e77]:
+      - generic [ref=e78]:
+        - img
+        - textbox "全局搜索" [ref=e79]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e80]:
+        - button "切换为暗色主题" [ref=e81] [cursor=pointer]:
+          - img [ref=e82]
+          - generic [ref=e84]: 暗色
+        - generic [ref=e85]:
+          - generic [ref=e86]: A
+          - generic [ref=e87]: admin@example.com
+    - main [ref=e88]:
+      - generic [ref=e91]:
+        - generic [ref=e92]:
+          - generic [ref=e93]:
+            - heading "图谱探索" [level=1] [ref=e94]
+            - paragraph [ref=e95]: 直接从 Neo4j 查询节点与关系，力导向布局自动排列
+          - button "刷新" [disabled] [ref=e97]:
+            - img [ref=e98]
+            - text: 刷新
+        - generic [ref=e103]:
+          - generic [ref=e104]:
+            - img [ref=e105]
+            - textbox "搜索节点标签…" [ref=e108]
+          - combobox [ref=e109]:
+            - option "30 节点"
+            - option "50 节点" [selected]
+            - option "100 节点"
+            - option "200 节点"
+          - generic [ref=e110]:
+            - button "CKP" [ref=e111] [cursor=pointer]:
+              - img [ref=e112]
+              - text: CKP
+            - button "PKU" [ref=e114] [cursor=pointer]:
+              - img [ref=e115]
+              - text: PKU
+            - button "来源" [ref=e125] [cursor=pointer]:
+              - img [ref=e126]
+              - text: 来源
+            - button "实体" [ref=e129] [cursor=pointer]:
+              - img [ref=e130]
+              - text: 实体
+            - button "别名" [ref=e135] [cursor=pointer]:
+              - img [ref=e136]
+              - text: 别名
+            - button "主题组" [ref=e139] [cursor=pointer]:
+              - img [ref=e140]
+              - text: 主题组
+        - generic [ref=e146]:
+          - img [ref=e147]
+          - text: 正在从 Neo4j 加载图谱…

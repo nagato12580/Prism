@@ -13,7 +13,7 @@ from backend.app.models import (
     PersonalAssetUnit,
     PersonalKnowledgeUnit,
 )
-from engine.app.agent.tools.base import BUILTIN_REGISTRY, ToolContext, build_enabled_tools
+from engine.app.agent.tools.base import ToolContext, build_enabled_tools
 import engine.app.agent.tools.governed_knowledge as governed_tool
 import engine.app.agent.tools.knowledge_governance  # noqa: F401
 import engine.app.agent.tools.assets  # noqa: F401
@@ -116,7 +116,7 @@ def test_governed_knowledge_search_returns_ckp_pku_and_raw_sources(monkeypatch):
 
     monkeypatch.setattr(governed_tool, "_Session", Session)
     ctx = ToolContext(rag_runner=None, citations=[], stats_holder={})
-    tool = BUILTIN_REGISTRY["governed_knowledge_search"].builder(ctx)
+    tool = governed_tool._build_governed_knowledge_search(ctx)
 
     payload = json.loads(tool.invoke({"query": "personal metadata filter retrieval", "limit": 5}))
 
@@ -150,7 +150,7 @@ def test_governed_knowledge_search_returns_synthesized_knowledge_without_ckp(mon
 
     monkeypatch.setattr(governed_tool, "_Session", Session)
     ctx = ToolContext(rag_runner=None, citations=[], stats_holder={})
-    tool = BUILTIN_REGISTRY["governed_knowledge_search"].builder(ctx)
+    tool = governed_tool._build_governed_knowledge_search(ctx)
 
     payload = json.loads(tool.invoke({"query": "personal knowledge search graph design principles", "limit": 5}))
 

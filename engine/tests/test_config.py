@@ -26,7 +26,7 @@ def test_settings_include_default_neo4j_values(monkeypatch):
     assert settings.NEO4J_USERNAME == "neo4j"
     assert settings.NEO4J_PASSWORD == "password"
     assert settings.NEO4J_DATABASE == "neo4j"
-    assert settings.ENTITY_GRAPH_ENABLED is False
+    assert settings.ENTITY_GRAPH_ENABLED is True
 
 
 def test_settings_read_neo4j_values_from_environment(monkeypatch):

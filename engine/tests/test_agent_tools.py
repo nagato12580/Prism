@@ -11,6 +11,7 @@ import engine.app.agent.tools.knowledge_governance as kg_tools
 import engine.app.agent.tools.clarify  # noqa: F401
 import engine.app.agent.tools.datetime  # noqa: F401
 import engine.app.agent.tools.web_search  # noqa: F401
+from engine.app.agent.tools.knowledge import build as build_knowledge_search
 
 
 class FakeRagRunner:
@@ -33,8 +34,7 @@ def test_builtin_registry_contains_initial_tools():
         "page_index_get_document",
         "page_index_get_document_structure",
         "page_index_get_page_content",
-        "governed_knowledge_search",
-        "knowledge_search",
+        "governed_knowledge_v2",
         "asset_search",
         "asset_overview",
         "asset_related",
@@ -45,7 +45,12 @@ def test_builtin_registry_contains_initial_tools():
     }.issubset(
         BUILTIN_REGISTRY
     )
+    # 冗余工具已下线：knowledge_search（通用 RAG）与 governed_knowledge_search（V1 词法）
+    # 不应再注册；governed_knowledge_v2 取代 V1 成为治理知识向量检索实现。
+    assert "knowledge_search" not in BUILTIN_REGISTRY
+    assert "governed_knowledge_search" not in BUILTIN_REGISTRY
     assert BUILTIN_REGISTRY["web_search"].default_enabled is False
+    assert BUILTIN_REGISTRY["governed_knowledge_v2"].default_enabled is False
 
 
 def test_build_enabled_tools_skips_disabled_web_search():
@@ -91,9 +96,43 @@ def test_model_facing_knowledge_tools_have_clear_task_schemas():
     assert {"query"}.issubset(raw.args)
 
 
+def test_knowledge_tool_descriptions_have_comparison_style_boundaries():
+    """每个检索工具的 description 必须包含 'Do NOT use' 反向指引，明确与邻居工具的分工。"""
+    ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
+    tools = {
+        t.name: t
+        for t in build_enabled_tools(
+            ctx, overrides={"governed_knowledge_v2": True, "deep_knowledge_search": True}
+        )
+    }
+
+    expected = {
+        "knowledge_topic_search": ("Do NOT", "knowledge_evidence_search"),
+        "knowledge_evidence_search": ("Do NOT", "knowledge_topic_search"),
+        "knowledge_material_search": ("Do NOT", "knowledge_topic_search"),
+        "raw_document_search": ("Do NOT", "knowledge_evidence_search"),
+        "entity_graph_search": ("Do NOT", "knowledge_topic_search"),
+        "memory_search": ("Do NOT", "knowledge_evidence_search"),
+        "governed_knowledge_v2": ("Do NOT", "entity_graph_search"),
+        "deep_knowledge_search": ("Do NOT", "governed_knowledge_v2"),
+    }
+    missing = []
+    for name, (marker, redirect) in expected.items():
+        tool = tools.get(name)
+        if tool is None:
+            missing.append(f"{name}: tool not built")
+            continue
+        desc = tool.description
+        if marker.lower() not in desc.lower():
+            missing.append(f"{name}: missing '{marker}' boundary")
+        if redirect.lower() not in desc.lower():
+            missing.append(f"{name}: missing redirect to {redirect}")
+    assert not missing, "description boundary gaps: " + "; ".join(missing)
+
+
 def test_knowledge_search_records_sources_and_stats():
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
-    tool = BUILTIN_REGISTRY["knowledge_search"].builder(ctx)
+    tool = build_knowledge_search(ctx)
 
     text = tool.invoke({"query": "phase 2"})
     payload = json.loads(text)
@@ -400,7 +439,7 @@ def test_memory_search_prefers_vector_recall_and_propagates_score(monkeypatch):
     assert hit["source"] == "conversation"
     assert abs(hit["score"] - 0.82) < 1e-6
     ctx = ToolContext(rag_runner=FakeRagRunner(), citations=[], stats_holder={})
-    tool = BUILTIN_REGISTRY["knowledge_search"].builder(ctx)
+    tool = build_knowledge_search(ctx)
 
     first_text = tool.invoke({"query": "phase 2"})
     second_text = tool.invoke({"query": "phase 2"})

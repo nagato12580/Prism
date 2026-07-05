@@ -44,6 +44,53 @@ def test_extracts_author_relations_to_paper():
     )
 
 
+def test_extracts_author_names_when_tokens_have_attached_footnote_numbers():
+    text = (
+        "OpenViewer: Openness-Aware Multi-View Learning\n"
+        "Shide Du1,2, Zihan Fang1,2, Yanchao Tan1,2, Changwei Wang3, Shiping Wang1,2\n"
+    )
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    names = {(item.entity_type, item.surface_text) for item in candidates if item.kind == "entity"}
+
+    assert ("person", "Shide Du") in names
+    assert ("person", "Zihan Fang") in names
+    assert ("person", "Yanchao Tan") in names
+    assert ("person", "Changwei Wang") in names
+    assert ("person", "Shiping Wang") in names
+
+
+def test_extracts_author_names_when_line_uses_semicolon_and_and_separator():
+    text = (
+        "OpenViewer: Openness-Aware Multi-View Learning\n"
+        "Yanchao Tan and Shiping Wang; Changwei Wang\n"
+    )
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    names = {(item.entity_type, item.surface_text) for item in candidates if item.kind == "entity"}
+
+    assert ("person", "Yanchao Tan") in names
+    assert ("person", "Shiping Wang") in names
+    assert ("person", "Changwei Wang") in names
+
+
+def test_does_not_extract_title_case_roles_or_terms_as_person_names():
+    text = (
+        "Proximal Gradient and Senior Member are discussed in this section.\n"
+        "Associate Professor and Corresponding Author are role labels, not people.\n"
+        "Beam Search is an algorithm.\n"
+    )
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    names = {(item.entity_type, item.surface_text) for item in candidates if item.kind == "entity"}
+
+    assert ("person", "Proximal Gradient") not in names
+    assert ("person", "Senior Member") not in names
+    assert ("person", "Associate Professor") not in names
+    assert ("person", "Corresponding Author") not in names
+    assert ("person", "Beam Search") not in names
+
+
 def test_extracts_paper_title_after_preface_lines():
     text = (
         "Preface line one\n"
@@ -77,6 +124,39 @@ def test_extracts_affiliation_relation_to_fuzhou_university():
         and item.object_entity_type == "organization"
         for item in relations
     )
+
+
+def test_extracts_multiple_organizations_when_affiliation_line_uses_semicolon():
+    text = (
+        "OpenViewer: Openness-Aware Multi-View Learning\n"
+        "Yanchao Tan, Shiping Wang\n"
+        "School of Computer Science; Peking University, Beijing, China\n"
+        "yctan@fzu.edu.cn\n"
+    )
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    entities = {(c.entity_type, c.surface_text) for c in candidates if c.kind == "entity"}
+    relations = {(c.subject_surface, c.predicate, c.object_surface) for c in candidates if c.kind == "relation"}
+
+    assert ("organization", "School of Computer Science") in entities
+    assert ("organization", "Peking University") in entities
+    assert ("Yanchao Tan", "affiliated_with", "School of Computer Science") in relations
+    assert ("Yanchao Tan", "affiliated_with", "Peking University") in relations
+
+
+def test_extracts_organizations_after_stripping_affiliation_footnote_numbers():
+    text = (
+        "OpenViewer: Openness-Aware Multi-View Learning\n"
+        "Yanchao Tan1,2, Shiping Wang1,2\n"
+        "1 College of Computer and Data Science, Fuzhou University, 2 School of Computer Science\n"
+    )
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    entities = {(c.entity_type, c.surface_text) for c in candidates if c.kind == "entity"}
+
+    assert ("organization", "College of Computer and Data Science") in entities
+    assert ("organization", "Fuzhou University") in entities
+    assert ("organization", "School of Computer Science") in entities
 
 
 def test_extract_and_settle_entities_is_idempotent_for_entities_mentions_and_relations():
@@ -475,3 +555,30 @@ def test_personal_asset_unit_governance_extracts_entities(monkeypatch):
         .first()
     )
     assert mention is not None
+
+
+def test_noisey_long_code_block_is_not_extracted_as_paper_or_organization():
+    text = (
+        "0hooks:- id: ruff\n"
+        "args: [\"--fix\"]\n"
+        "```yaml\nrepos:\n- repo: https://github.com/astral-sh/ruff-pre-commit\n```")
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    entities = {(c.entity_type, c.surface_text) for c in candidates if c.kind == "entity"}
+    papers = [c.surface_text for c in candidates if c.kind == "entity" and c.entity_type == "paper"]
+
+    assert papers == []
+    assert not any(entity_type == "paper" for entity_type, _ in entities)
+    assert not any(entity_type == "organization" for entity_type, _ in entities)
+
+
+def test_overlong_rule_like_colon_line_is_not_extracted_as_paper_title():
+    text = (
+        "Recommended format: ```json{\"instruction\":\"classify\",\"input\":\"hello\",\"output\":\"world\"}```\n"
+        "Yanchao Tan, Shiping Wang\n"
+    )
+
+    candidates = extract_entity_candidates_from_text(text, source_kind="document_chunk")
+    papers = [c.surface_text for c in candidates if c.kind == "entity" and c.entity_type == "paper"]
+
+    assert papers == []

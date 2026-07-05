@@ -7,7 +7,11 @@ from backend.app.config import settings
 from backend.app.models import KnowledgeChunk
 from backend.app.services.entity_extraction import extract_and_settle_entities
 from backend.app.services.graph_client import GraphClient
-from backend.app.services.graph_projection import project_ckp_graph, project_entity_graph
+from backend.app.services.graph_projection import (
+    project_ckp_graph,
+    project_entity_graph,
+    project_pku_entity_mentions,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -55,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             ckp_result = project_ckp_graph(db, graph)
             entity_result = project_entity_graph(db, graph)
+            bridge_result = project_pku_entity_mentions(db, graph)
         finally:
             graph.close()
 
@@ -68,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
             f"entity_source_count={entity_result.source_count} "
             f"ckp_relation_count={ckp_result.relation_count} "
             f"entity_relation_count={entity_result.relation_count} "
-            f"total_relation_count={ckp_result.relation_count + entity_result.relation_count}"
+            f"pku_entity_mention_count={bridge_result.pku_entity_mention_count} "
+            f"total_relation_count={ckp_result.relation_count + entity_result.relation_count + bridge_result.relation_count}"
         )
         return 0
     finally:

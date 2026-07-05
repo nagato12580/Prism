@@ -70,6 +70,9 @@ class GovernanceResult:
     canonical_count: int
     link_count: int
     pku_relation_count: int = 0
+    pku_ids: frozenset[str] = frozenset()
+    ckp_ids: frozenset[str] = frozenset()
+    entity_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -1795,7 +1798,7 @@ def _settle_local_pku_topics(
             if relation:
                 relation_ids.add(relation.id)
 
-    return (len(ckp_ids), len(link_ids) + len(relation_ids))
+    return (ckp_ids, len(ckp_ids), len(link_ids) + len(relation_ids))
 
 
 def _create_or_get_pku_relation(
@@ -1841,7 +1844,7 @@ def settle_personal_asset_item_to_governance(db: Session, asset: PersonalAssetIt
     if asset.status != "confirmed":
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
 
-    extract_and_settle_entities(
+    settled_entities = extract_and_settle_entities(
         db,
         source_kind="personal_asset_item",
         source_id=asset.id,
@@ -1862,6 +1865,7 @@ def settle_personal_asset_item_to_governance(db: Session, asset: PersonalAssetIt
         ),
         user_id=asset.user_id or DEFAULT_USER_ID,
     )
+    entity_ids_result: set[str] = {e.id for e in settled_entities}
 
     pku_ids: set[str] = set()
     ckp_ids: set[str] = set()
@@ -1890,14 +1894,14 @@ def settle_personal_asset_item_to_governance(db: Session, asset: PersonalAssetIt
         ckp_ids.add(ckp.id)
         link_ids.add(link.id)
 
-    return GovernanceResult(pku_count=len(pku_ids), canonical_count=len(ckp_ids), link_count=len(link_ids))
+    return GovernanceResult(pku_count=len(pku_ids), canonical_count=len(ckp_ids), link_count=len(link_ids), pku_ids=frozenset(pku_ids), ckp_ids=frozenset(ckp_ids), entity_ids=frozenset(entity_ids_result))
 
 
 def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUnit) -> GovernanceResult:
     if unit.status != "confirmed":
         return GovernanceResult(pku_count=0, canonical_count=0, link_count=0)
 
-    extract_and_settle_entities(
+    settled_entities = extract_and_settle_entities(
         db,
         source_kind="personal_asset_unit",
         source_id=unit.id,
@@ -1906,6 +1910,7 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
         text=" ".join(filter(None, [unit.title, unit.summary, unit.content])),
         user_id=unit.user_id or DEFAULT_USER_ID,
     )
+    entity_ids: set[str] = {e.id for e in settled_entities}
 
     extraction = _extract_asset_unit_pkus_with_llm(unit)
     extracted_pkus = list(extraction.pkus)
@@ -1944,7 +1949,7 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
             pku_by_ref[_normalize_space(extracted.local_id)] = pku
         pku_by_ref[_normalize_space(extracted.statement)] = pku
 
-    topic_ckp_count, topic_link_count = _settle_local_pku_topics(
+    topic_ckp_ids, topic_ckp_count, topic_link_count = _settle_local_pku_topics(
         db,
         user_id=unit.user_id or DEFAULT_USER_ID,
         source_kind="personal_asset_unit",
@@ -1981,6 +1986,9 @@ def settle_personal_asset_unit_to_governance(db: Session, unit: PersonalAssetUni
         canonical_count=topic_ckp_count,
         link_count=topic_link_count,
         pku_relation_count=len(relation_ids),
+        pku_ids=frozenset(pku_ids),
+        ckp_ids=topic_ckp_ids,
+        entity_ids=frozenset(entity_ids),
     )
 
 
@@ -2153,6 +2161,7 @@ def settle_document_item_to_governance(db: Session, item_id: str, progress=None)
     total_chunks = len(chunks)
     pku_ids: set[str] = set()
     relation_ids: set[str] = set()
+    entity_ids: set[str] = set()
     local_pku_refs: list[tuple[str, PersonalKnowledgeUnit]] = []
 
     for index, chunk in enumerate(chunks):
@@ -2165,7 +2174,7 @@ def settle_document_item_to_governance(db: Session, item_id: str, progress=None)
         # Extract bottom-layer entities from chunk text and persist audit rows.
         # Decoupled from PKU extraction so named entities are captured even when
         # LLM PKU extraction returns nothing; transaction control stays with the caller.
-        extract_and_settle_entities(
+        chunk_entities = extract_and_settle_entities(
             db,
             source_kind="document_chunk",
             source_id=chunk.id,
@@ -2174,6 +2183,7 @@ def settle_document_item_to_governance(db: Session, item_id: str, progress=None)
             chunk_id=chunk.id,
             user_id=item_user_id,
         )
+        entity_ids.update(e.id for e in chunk_entities)
         extraction = _extract_document_chunk_pkus_with_llm(
             item,
             chunk,
@@ -2230,7 +2240,7 @@ def settle_document_item_to_governance(db: Session, item_id: str, progress=None)
         progress(current=total_chunks, total=total_chunks, stage="governance")
 
     db.commit()
-    topic_ckp_count, topic_link_count = _settle_local_pku_topics(
+    topic_ckp_ids, topic_ckp_count, topic_link_count = _settle_local_pku_topics(
         db,
         user_id=item_user_id,
         source_kind="document_chunk",
@@ -2249,4 +2259,7 @@ def settle_document_item_to_governance(db: Session, item_id: str, progress=None)
         canonical_count=topic_ckp_count,
         link_count=topic_link_count,
         pku_relation_count=len(relation_ids),
+        pku_ids=frozenset(pku_ids),
+        ckp_ids=topic_ckp_ids,
+        entity_ids=frozenset(entity_ids),
     )

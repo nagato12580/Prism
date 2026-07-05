@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.base import ToolContext
 from engine.app.agent.tools.evidence import normalize_evidence_items
 
 
@@ -86,14 +86,3 @@ def build(ctx: ToolContext) -> StructuredTool:
         description="Search Prism's indexed knowledge and return grounded evidence.",
         args_schema=KnowledgeSearchInput,
     )
-
-
-register_tool(
-    ToolSpec(
-        key=KEY,
-        name=KEY,
-        description="Search Prism's indexed knowledge and return grounded evidence.",
-        builder=build,
-        default_enabled=False,
-    )
-)

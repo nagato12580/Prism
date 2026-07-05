@@ -446,6 +446,155 @@ def _page_index(query: str, top_k: int) -> list[dict[str, Any]]:
     return _dedupe_hits(hits)[:top_k]
 
 
+_graph_driver = None
+
+
+def _get_graph_driver():
+    global _graph_driver
+    if _graph_driver is None:
+        from neo4j import GraphDatabase
+
+        _graph_driver = GraphDatabase.driver(
+            settings.NEO4J_URI, auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
+        )
+    return _graph_driver
+
+
+def _graph_ckp_pku(query: str, top_k: int) -> list[dict[str, Any]]:
+    """Neo4j graph retrieval: CKP title term match → SUPPORTED_BY → PKU → EVIDENCED_BY → Source(document_chunk)."""
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    driver = _get_graph_driver()
+    cypher = """
+    UNWIND $terms AS term
+    MATCH (c:CKP) WHERE c.title CONTAINS term AND c.status <> 'deprecated'
+    WITH c, collect(term) AS matched_terms
+    MATCH (c)-[:SUPPORTED_BY]->(p:PKU)-[:EVIDENCED_BY]->(src:Source)
+    WHERE src.source_kind = 'document_chunk' AND src.source_id IS NOT NULL
+    WITH c, src, matched_terms, count(DISTINCT p) AS pku_count
+    RETURN src.source_id AS chunk_id, src.item_id AS item_id, src.title AS src_title,
+           c.title AS ckp_title, c.id AS ckp_id,
+           size(matched_terms) AS term_hits, pku_count,
+           toFloat(coalesce(c.confidence, 0)) AS ckp_confidence
+    """
+    hits: list[dict[str, Any]] = []
+    with driver.session(database=settings.NEO4J_DATABASE) as session:
+        for rec in session.run(cypher, {"terms": terms}):
+            cid = str(rec["chunk_id"] or "")
+            if not cid:
+                continue
+            score = float(rec["term_hits"]) * 2.0 + float(rec["pku_count"]) * 0.3 + float(rec["ckp_confidence"] or 0) * 0.5
+            hits.append({
+                "chunk_id": cid,
+                "item_id": rec["item_id"],
+                "score": round(score, 4),
+                "source": "graph_ckp_pku",
+                "ckp_title": rec["ckp_title"],
+                "ckp_id": rec["ckp_id"],
+                "term_hits": rec["term_hits"],
+                "pku_count": rec["pku_count"],
+            })
+    hits.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
+def _graph_source(query: str, top_k: int) -> list[dict[str, Any]]:
+    """Neo4j graph retrieval: Source title term match (document_chunk only) → chunk_ids."""
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    driver = _get_graph_driver()
+    cypher = """
+    UNWIND $terms AS term
+    MATCH (src:Source)
+    WHERE src.source_kind = 'document_chunk' AND src.source_id IS NOT NULL
+      AND (src.title CONTAINS term OR src.id CONTAINS term)
+    WITH src, collect(term) AS matched_terms
+    RETURN src.source_id AS chunk_id, src.item_id AS item_id, src.title AS src_title,
+           size(matched_terms) AS term_hits
+    """
+    hits: list[dict[str, Any]] = []
+    with driver.session(database=settings.NEO4J_DATABASE) as session:
+        for rec in session.run(cypher, {"terms": terms}):
+            cid = str(rec["chunk_id"] or "")
+            if not cid:
+                continue
+            hits.append({
+                "chunk_id": cid,
+                "item_id": rec["item_id"],
+                "score": float(rec["term_hits"]),
+                "source": "graph_source",
+                "src_title": rec["src_title"],
+                "term_hits": rec["term_hits"],
+            })
+    hits.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
+def _graph_entity_ckp(query: str, top_k: int) -> list[dict[str, Any]]:
+    """Neo4j graph retrieval via Entity→PKU→CKP bridge with MENTIONS_ENTITY edges.
+
+    Matches query terms against Entity canonical_name/normalized_key, then
+    traverses Entity←MENTIONS_ENTITY←PKU←SUPPORTED_BY←CKP and follows
+    PKU-EVIDENCED_BY→Source to collect document chunks.  Also matches CKP
+    title terms and traverses the reverse path CKP→PKU→MENTIONS_ENTITY→Entity
+    to surface entities related to matched CKPs.
+    """
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    driver = _get_graph_driver()
+    cypher = """
+    // Path A: query term -> Entity -> PKU -> CKP -> Source chunks
+    UNWIND $terms AS term_a
+    OPTIONAL MATCH (e:Entity)
+    WHERE e.canonical_name CONTAINS term_a OR e.normalized_key CONTAINS term_a
+    WITH collect(DISTINCT e) AS ent_a, term_a
+    UNWIND ent_a AS e_a
+    OPTIONAL MATCH (e_a)<-[:MENTIONS_ENTITY]-(p:PKU)<-[:SUPPORTED_BY]-(c:CKP)
+    OPTIONAL MATCH (p)-[:EVIDENCED_BY]->(src:Source)
+    WHERE src.source_kind = 'document_chunk' AND src.source_id IS NOT NULL
+    WITH src, c, count(DISTINCT e_a) AS entity_hits
+    WHERE src IS NOT NULL
+    RETURN src.source_id AS chunk_id, src.item_id AS item_id, src.title AS src_title,
+           c.title AS ckp_title, entity_hits, 'entity_to_ckp' AS path
+
+    UNION
+
+    // Path B: query term -> CKP title -> PKU -> Source chunks
+    UNWIND $terms AS term_b
+    OPTIONAL MATCH (c:CKP)
+    WHERE c.title CONTAINS term_b AND c.status <> 'deprecated'
+    WITH collect(DISTINCT c) AS ckps_b, term_b
+    UNWIND ckps_b AS c_b
+    OPTIONAL MATCH (c_b)-[:SUPPORTED_BY]->(p:PKU)-[:EVIDENCED_BY]->(src:Source)
+    WHERE src.source_kind = 'document_chunk' AND src.source_id IS NOT NULL
+    WITH src, c_b, 0 AS entity_hits
+    WHERE src IS NOT NULL
+    RETURN src.source_id AS chunk_id, src.item_id AS item_id, src.title AS src_title,
+           c_b.title AS ckp_title, entity_hits, 'ckp_to_source' AS path
+    """
+    hits: list[dict[str, Any]] = []
+    with driver.session(database=settings.NEO4J_DATABASE) as session:
+        for rec in session.run(cypher, {"terms": terms}):
+            cid = str(rec["chunk_id"] or "")
+            if not cid:
+                continue
+            score = float(rec["entity_hits"]) * 2.0 + 1.0
+            hits.append({
+                "chunk_id": cid,
+                "item_id": rec["item_id"],
+                "score": score,
+                "source": "graph_entity_ckp",
+                "ckp_title": rec["ckp_title"],
+                "path": rec["path"],
+                "entity_hits": rec["entity_hits"],
+            })
+    hits.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return _dedupe_hits(hits)[:top_k]
+
+
 def _chain_map() -> dict[str, tuple[str, Retriever]]:
     return {
         "traditional": ("traditional_hybrid", _traditional_hybrid),
@@ -454,6 +603,9 @@ def _chain_map() -> dict[str, tuple[str, Retriever]]:
         "bottom_up": ("bottom_up", _bottom_up),
         "governed_v2": ("governed_v2", _governed_v2),
         "page_index": ("page_index", _page_index),
+        "graph_ckp_pku": ("graph_ckp_pku", _graph_ckp_pku),
+        "graph_source": ("graph_source", _graph_source),
+        "graph_entity_ckp": ("graph_entity_ckp", _graph_entity_ckp),
     }
 
 
@@ -611,7 +763,7 @@ def main() -> None:
     parser.add_argument(
         "--chains",
         nargs="+",
-        choices=["traditional", "governed", "governed_evidence", "bottom_up", "governed_v2", "page_index"],
+        choices=["traditional", "governed", "governed_evidence", "bottom_up", "governed_v2", "page_index", "graph_ckp_pku", "graph_source", "graph_entity_ckp"],
         default=["traditional", "governed"],
         help="Retrieval chains to evaluate",
     )

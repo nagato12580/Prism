@@ -1,0 +1,1980 @@
+{
+  "meta": {
+    "name": "entity_graph_v1",
+    "description": "Entity-centric retrieval eval built from Neo4j MENTIONS_ENTITY bridge edges",
+    "total_queries": 24,
+    "query_type": "entity-centric",
+    "built_at": "2026-06-30",
+    "filter_rules": {
+      "allowed_entity_types": [
+        "email",
+        "person",
+        "organization"
+      ],
+      "max_name_length": 120,
+      "reject_noise_regex": "[`{}\\[\\]<>]|###|```|::|#include|def\\s+|class\\s+|json|yaml|csv",
+      "min_chunk_count": 1,
+      "min_pku_count": 1,
+      "notes": "paper entities are restricted to concise title-like strings; TEST@EXAMPLE.COM and code/markup fragments are filtered out"
+    }
+  },
+  "queries": [
+    {
+      "id": "eq001",
+      "question": "机构 `Fuzhou University` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Fuzhou University",
+      "entity_type": "organization",
+      "entity_id": "7a4f69b7-d05e-412d-88d0-12a2ccc00a01",
+      "relevant_children": [
+        {
+          "chunk_id": "ef863352-e6b9-47b2-a2ec-949c2c6de4ca",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "2020, pp.1243–1253.[37] T.Wang, D.Jin, R.Wang, D.He, and Y.Huang, “Powerful graph convolu-tional networks with adaptive propagation mechanism for homophily andheterophily,” in Proc.AAAI Conf.Artif.Intell., 2022, pp.4210–4218.[38] Z.Wu, Z.Zhang, and J.Fan, “Graph convolutional kernel machine versusgraph convolutional networks,” in Proc.Adv.Neural Inf.Process.Syst.,2023, pp.1–23.[39] Y.Mao, X.Yan, Q.Guo, and Y.Ye, “Deep mutual information max-imin for cross-modal clustering,” in Proc.AAAI Conf.Artif.Intell., 2021,pp.8893–8901.[40] H.Tao, C.Hou, F.Nie, J.Zhu, and D.Yi, “Scalable multi-view semi-supervised classiﬁcation via adaptive regression,” IEEE Trans."
+        },
+        {
+          "chunk_id": "3bbe687f-7c4a-43fb-a364-0939c1d6d879",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Nie, J.Zhu, and D.Yi, “Scalable multi-view semi-supervised classiﬁcation via adaptive regression,” IEEE Trans.Image Pro-cess., vol.26, no.9, pp.4283–4296, Sep.2017.[41] Y.Xie, W.Zhang, Y.Qu, L.Dai, and D.Tao, “Hyper-laplacian regular-ized multilinear multiview self-representations for clustering and semisu-pervised learning,” IEEE Trans.Cybern., vol.50, no.2, pp.572–586,Feb.2020.[42] M.Yang, C.Deng, and F.Nie, “Adaptive-weighting discriminative regres-sionformulti-viewclassiﬁcation,”PatternRecognit.,vol.88,pp.236–245,2019.[43] S.Li, W.-T.Li, and W.Wang, “Co-GCN for multi-view semi-supervisedlearning,” in Proc.AAAI Conf.Artif.Intell., 2020, pp.4691–4698."
+        },
+        {
+          "chunk_id": "3273f322-4962-4376-961b-9f69b4c8d58c",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Intell., 2020, pp.4691–4698.[44] S.Wang, Z.Chen, S.Du, and Z.Lin, “Learning deep sparse regu-larizers with applications to multi-view clustering and semi-supervisedclassiﬁcation,” IEEE Trans.Pattern Anal.Mach.Intell., vol.44, no.9,pp.5042–5055, Sep.2022.Zihan Fang received the B.E.degree in 2022 from theCollege of Computer and Data Science, Fuzhou Uni-versity, Fuzhou, China, where she is currently work-ing toward the M.S.degree with the College of Com-puter Science and Data Science.Her research inter-ests include machine learning, multi-view learning,and differentiable programming.Shide Du received the M.S.degree in 2022 from theCollege of Computer and Data Science, Fuzhou Uni-versity, Fuzhou, China, where he is currently workingtoward the Ph.D.degree.His research interests in-clude machine learning, differentiable programming,and deep learning.Authorized licensed use limited to: Fuzhou University."
+        },
+        {
+          "chunk_id": "e9b8687a-e6cf-4e10-b48d-2476fcfa803b",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "His research interests in-clude machine learning, differentiable programming,and deep learning.Authorized licensed use limited to: Fuzhou University.Downloaded on April 09,2025 at 07:47:46 UTC from IEEE Xplore.Restrictions apply.FANG et al.: REPRESENTATION LEARNING MEETS OPTIMIZATION-DERIVED NETWORKS: FROM SINGLE-VIEW TO MULTI-VIEW8901Zhiling Cai received the Ph.D.degree from theUniversity of Electronic Science and Technologyof China, Chengdu, China.He is currently a Lec-turer with the College of Computer and Informa-tion Science, Fujian Agriculture and Forestry Uni-versity, Fuzhou, China.His research interests includemachine learning, data mining, and reinforcementlearning.Shiyang Lan received the B.E.degree in 2022 fromthe College of Computer and Data Science, FuzhouUniversity, Fuzhou, China, where she is currentlyworking toward the M.S.degree with the College ofComputer Science and Data Science.Her research in-terests include multi-view learning and deep learning.Chunming Wu received the B.E."
+        },
+        {
+          "chunk_id": "58f36c7c-2a58-4248-a42d-3a14c92aa30b",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "E.degree in 2022from the College of Computer and Data Science,Fuzhou University, Fuzhou, China, where he is cur-rently working toward the M.S.degree with the Col-lege of Computer Science and Data Science.His re-search interests include multi-view learning and dif-ferentiable programming.Yanchao Tan (Member, IEEE) received the Ph.D."
+        },
+        {
+          "chunk_id": "568613c6-4c4b-4f22-a390-548a264c3668",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "degree from the College of Computer Science, Zhe-jiang University, Hangzhou, China.She is currently aLecturer with the College of Computer and Data Sci-ence, Fujian Key Laboratory of Network Computingand Intelligent Information Processing, Fuzhou Uni-versity, Fuzhou, China.Her research interests includedata mining, recommender system, and healthcare.Shiping Wang (Senior Member, IEEE) received thePh.D.degree from the University of Electronic Sci-ence and Technology of China, Chengdu, China,in 2014.From 2013 to 2014, he was a VisitingScholar with the University of Alberta, Edmonton,AB, Canada, from January 2014 to August 2014, hewasa Research Assistant with the NationalUniversityof Singapore, Singapore, from 2015 to 2016, he wasa Research Fellow with the Nanyang TechnologicalUniversity of Singapore, Singapore, and from 2019 to2020, he was a Visiting Researcher with Peking Uni-versity, Beijing, China."
+        },
+        {
+          "chunk_id": "7601d65f-d9de-405e-8863-d4c1bcd7486c",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "From 2013 to 2014, he was a VisitingScholar with the University of Alberta, Edmonton,AB, Canada, from January 2014 to August 2014, hewasa Research Assistant with the NationalUniversityof Singapore, Singapore, from 2015 to 2016, he wasa Research Fellow with the Nanyang TechnologicalUniversity of Singapore, Singapore, and from 2019 to2020, he was a Visiting Researcher with Peking Uni-versity, Beijing, China.He is currently a Professor with the College of Computerand Data Science, and the Director of the Fujian Provincial Key Laboratory ofIntelligent Metro, Fuzhou University, Fuzhou, China.His research interests in-clude machine learning, deep learning, feature representation, and multi-modalfusion.Authorized licensed use limited to: Fuzhou University.Downloaded on April 09,2025 at 07:47:46 UTC from IEEE Xplore.Restrictions apply."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 2,
+        "pku_ids": [
+          "f4d8fe18-3d2a-4b69-9268-5cc5f682c1b7",
+          "50b6f02a-f9b3-4bab-9bf0-66fcdea29d82",
+          "5947559d-df5d-4bca-bfca-ca604640b1a4",
+          "a16fcc66-95fe-47f6-8fe8-8ec20da12de6",
+          "acccc83b-8018-41bc-8fc3-69aa22c05b89"
+        ]
+      }
+    },
+    {
+      "id": "eq002",
+      "question": "邮箱 `dacheng.tao@uts.edu.au` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "dacheng.tao@uts.edu.au",
+      "entity_type": "email",
+      "entity_id": "fc83c1fd-d1db-4f82-93c3-955f1f369047",
+      "relevant_children": [
+        {
+          "chunk_id": "3164afe1-8367-41e0-91d9-c0a5bf4a6d93",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "5812IEEE TRANSACTIONS ON IMAGE PROCESSING, VOL.24, NO.12, DECEMBER 2015Multi-View Learning With Incomplete ViewsChang Xu, Dacheng Tao, Fellow, IEEE, and Chao XuAbstract—One underlying assumption of the conventionalmulti-view learning algorithms is that all examples can besuccessfully observed on all the views.However, due to variousfailures or faults in collecting and pre-processing the dataon different views, we are more likely to be faced with anincomplete-view setting, where an example could be missing itsrepresentation on one view (i.e., missing view) or could be onlypartially observed on that view (i.e., missing variables).Low-rankassumption used to be effective for recovering the random missingvariables of features, but it is disabled by concentrated missingvariables and has no effect on missing views.This paper suggeststhat the key to handling the incomplete-view problem is to exploitthe connections between multiple views, enabling the incompleteviews to be restored with the help of the complete views.We propose an effective algorithm to accomplish multi-viewlearning with incomplete views by assuming that different viewsare generated from a shared subspace."
+        },
+        {
+          "chunk_id": "24cbd5b4-8972-4538-9f1d-6df369f1192e",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "We propose an effective algorithm to accomplish multi-viewlearning with incomplete views by assuming that different viewsare generated from a shared subspace.To handle the large-scaleproblem and obtain fast convergence, we investigate a successiveover-relaxation method to solve the objective function.Conver-gence of the optimization technique is theoretically analyzed.The experimental results on toy data and real-world data setssuggest that studying the incomplete-view problem in multi-viewlearning is signiﬁcant and that the proposed algorithm caneffectively handle the incomplete views in different applications.Index Terms—Multi-view learning, incomplete views.I.INTRODUCTIONMANY scientiﬁc data are described by heterogeneousfeatures collected from diverse data collection sourcesor obtained from various feature extractors.In video surveil-lance, for example, a series of cameras might be positioned indifferent locations to achieve comprehensive surveillance.Thevideos which describe the same scene but are captured by dif-ferent cameras, are integrated for content analysis.An imageManuscript received January 23, 2015; revised June 11, 2015; acceptedOctober 1, 2015.Date of publication October 13, 2015; date of currentversion October 27, 2015."
+        },
+        {
+          "chunk_id": "397be883-f476-47df-9579-ad6bff99c3b7",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication October 13, 2015; date of currentversion October 27, 2015.This work was supported in part by the NationalBasic Research Program, China, under Grant 2011CB302400, in part bythe National Key Technology Research and Development Program underGrant 2015BAF15B00, in part by the Shenzhen City Techonology BasicResearch Program under Grant JCYJ 20120614152136201, in part by theNational Natural Science Foundation of China under Grant NSFC 61375026,and in part by the Australian Research Council under Grant DP-140102164,Grant FT-130101457, and Grant LP-140100569.The associate editor coor-dinating the review of this manuscript and approving it for publication wasDr.Christos Bouganis.Chang Xu and Chao Xu are with the Key Laboratory of Machine Perception,Cooperative Medianet Innovation Center, School of Electronics EngineeringandComputerScience,MinistryofEducation,PekingUniversity,Beijing100871,China(e-mail:xuchang@pku.edu.cn;xuchao@cis.pku.edu.cn).D."
+        },
+        {
+          "chunk_id": "3e8f70a9-57a8-4e77-abf4-5e1c61bd7f46",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "D.Tao is with the Centre for Quantum Computation and Intelligent Systemsand the Faculty of Engineering and Information Technology, University ofTechnology, Sydney, 81 Broadway Street, Ultimo, NSW 2007, Australia(email: dacheng.tao@uts.edu.au).Color versions of one or more of the ﬁgures in this paper are availableonline at http://ieeexplore.ieee.org.Digital Object Identiﬁer 10.1109/TIP.2015.2490539can be represented by a variety of visual features which havedifferent physical meanings and depict the data from distinctpoints of view.GIST is suitable for recognizing natural sceneimages [1]; HOG is good at describing the shape informationof the image [2]; CTM captures the color information [3]; andLBP extracts the texture information of the images [4]–[6].It is therefore natural to regard heterogeneous features asdiverse views for describing the data.Since an individualview cannot comprehensively describe all examples, it iscrucial to integrate these multiple views to accomplish learningtasks [7]–[11]."
+        },
+        {
+          "chunk_id": "2e60825e-a603-4b1c-bf74-67d18659a6d9",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Since an individualview cannot comprehensively describe all examples, it iscrucial to integrate these multiple views to accomplish learningtasks [7]–[11].Multi-view learning came to public attention in the earlyyears of this century, starting with a series of works onco-training methods [12]–[15].The main aim of co-trainingis to maximize the mutual agreement between two distinctviews of the unlabeled data in a semi-supervised setting,and the reasons for its success have been investigated by[16] and [17].Another ﬂourishing research topic, multiple"
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 8,
+        "chunk_count": 1,
+        "pku_ids": [
+          "0e924b90-ad6a-46e7-989e-a0ec5c2b49d4",
+          "34e2cc06-1352-4696-b6d7-e75c566acb0c",
+          "6718337d-4d22-4fa5-b0e6-3fb4d6b653aa",
+          "7d45a90b-c051-4a7f-8d4f-81e3bf92356c",
+          "8508730b-1caf-452b-95f4-0375f099e64d",
+          "8eb88d19-ea62-435b-8cef-715ce1b08643",
+          "d0b5dff5-4675-4242-b9d7-1e1c6f39fe41",
+          "d3037ab6-e00a-41d6-9a44-ec2592f32be1"
+        ]
+      }
+    },
+    {
+      "id": "eq003",
+      "question": "邮箱 `xuchang@pku.edu.cn` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "xuchang@pku.edu.cn",
+      "entity_type": "email",
+      "entity_id": "136c88a0-03bf-46b4-8b88-1766624e1d90",
+      "relevant_children": [
+        {
+          "chunk_id": "3164afe1-8367-41e0-91d9-c0a5bf4a6d93",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "5812IEEE TRANSACTIONS ON IMAGE PROCESSING, VOL.24, NO.12, DECEMBER 2015Multi-View Learning With Incomplete ViewsChang Xu, Dacheng Tao, Fellow, IEEE, and Chao XuAbstract—One underlying assumption of the conventionalmulti-view learning algorithms is that all examples can besuccessfully observed on all the views.However, due to variousfailures or faults in collecting and pre-processing the dataon different views, we are more likely to be faced with anincomplete-view setting, where an example could be missing itsrepresentation on one view (i.e., missing view) or could be onlypartially observed on that view (i.e., missing variables).Low-rankassumption used to be effective for recovering the random missingvariables of features, but it is disabled by concentrated missingvariables and has no effect on missing views.This paper suggeststhat the key to handling the incomplete-view problem is to exploitthe connections between multiple views, enabling the incompleteviews to be restored with the help of the complete views.We propose an effective algorithm to accomplish multi-viewlearning with incomplete views by assuming that different viewsare generated from a shared subspace."
+        },
+        {
+          "chunk_id": "24cbd5b4-8972-4538-9f1d-6df369f1192e",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "We propose an effective algorithm to accomplish multi-viewlearning with incomplete views by assuming that different viewsare generated from a shared subspace.To handle the large-scaleproblem and obtain fast convergence, we investigate a successiveover-relaxation method to solve the objective function.Conver-gence of the optimization technique is theoretically analyzed.The experimental results on toy data and real-world data setssuggest that studying the incomplete-view problem in multi-viewlearning is signiﬁcant and that the proposed algorithm caneffectively handle the incomplete views in different applications.Index Terms—Multi-view learning, incomplete views.I.INTRODUCTIONMANY scientiﬁc data are described by heterogeneousfeatures collected from diverse data collection sourcesor obtained from various feature extractors.In video surveil-lance, for example, a series of cameras might be positioned indifferent locations to achieve comprehensive surveillance.Thevideos which describe the same scene but are captured by dif-ferent cameras, are integrated for content analysis.An imageManuscript received January 23, 2015; revised June 11, 2015; acceptedOctober 1, 2015.Date of publication October 13, 2015; date of currentversion October 27, 2015."
+        },
+        {
+          "chunk_id": "397be883-f476-47df-9579-ad6bff99c3b7",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication October 13, 2015; date of currentversion October 27, 2015.This work was supported in part by the NationalBasic Research Program, China, under Grant 2011CB302400, in part bythe National Key Technology Research and Development Program underGrant 2015BAF15B00, in part by the Shenzhen City Techonology BasicResearch Program under Grant JCYJ 20120614152136201, in part by theNational Natural Science Foundation of China under Grant NSFC 61375026,and in part by the Australian Research Council under Grant DP-140102164,Grant FT-130101457, and Grant LP-140100569.The associate editor coor-dinating the review of this manuscript and approving it for publication wasDr.Christos Bouganis.Chang Xu and Chao Xu are with the Key Laboratory of Machine Perception,Cooperative Medianet Innovation Center, School of Electronics EngineeringandComputerScience,MinistryofEducation,PekingUniversity,Beijing100871,China(e-mail:xuchang@pku.edu.cn;xuchao@cis.pku.edu.cn).D."
+        },
+        {
+          "chunk_id": "3e8f70a9-57a8-4e77-abf4-5e1c61bd7f46",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "D.Tao is with the Centre for Quantum Computation and Intelligent Systemsand the Faculty of Engineering and Information Technology, University ofTechnology, Sydney, 81 Broadway Street, Ultimo, NSW 2007, Australia(email: dacheng.tao@uts.edu.au).Color versions of one or more of the ﬁgures in this paper are availableonline at http://ieeexplore.ieee.org.Digital Object Identiﬁer 10.1109/TIP.2015.2490539can be represented by a variety of visual features which havedifferent physical meanings and depict the data from distinctpoints of view.GIST is suitable for recognizing natural sceneimages [1]; HOG is good at describing the shape informationof the image [2]; CTM captures the color information [3]; andLBP extracts the texture information of the images [4]–[6].It is therefore natural to regard heterogeneous features asdiverse views for describing the data.Since an individualview cannot comprehensively describe all examples, it iscrucial to integrate these multiple views to accomplish learningtasks [7]–[11]."
+        },
+        {
+          "chunk_id": "2e60825e-a603-4b1c-bf74-67d18659a6d9",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Since an individualview cannot comprehensively describe all examples, it iscrucial to integrate these multiple views to accomplish learningtasks [7]–[11].Multi-view learning came to public attention in the earlyyears of this century, starting with a series of works onco-training methods [12]–[15].The main aim of co-trainingis to maximize the mutual agreement between two distinctviews of the unlabeled data in a semi-supervised setting,and the reasons for its success have been investigated by[16] and [17].Another ﬂourishing research topic, multiple"
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 8,
+        "chunk_count": 1,
+        "pku_ids": [
+          "0e924b90-ad6a-46e7-989e-a0ec5c2b49d4",
+          "34e2cc06-1352-4696-b6d7-e75c566acb0c",
+          "6718337d-4d22-4fa5-b0e6-3fb4d6b653aa",
+          "7d45a90b-c051-4a7f-8d4f-81e3bf92356c",
+          "8508730b-1caf-452b-95f4-0375f099e64d",
+          "8eb88d19-ea62-435b-8cef-715ce1b08643",
+          "d0b5dff5-4675-4242-b9d7-1e1c6f39fe41",
+          "d3037ab6-e00a-41d6-9a44-ec2592f32be1"
+        ]
+      }
+    },
+    {
+      "id": "eq004",
+      "question": "邮箱 `xuchao@cis.pku.edu.cn` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "xuchao@cis.pku.edu.cn",
+      "entity_type": "email",
+      "entity_id": "8b30b47d-a22c-428c-9636-00062734b9f9",
+      "relevant_children": [
+        {
+          "chunk_id": "3164afe1-8367-41e0-91d9-c0a5bf4a6d93",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "5812IEEE TRANSACTIONS ON IMAGE PROCESSING, VOL.24, NO.12, DECEMBER 2015Multi-View Learning With Incomplete ViewsChang Xu, Dacheng Tao, Fellow, IEEE, and Chao XuAbstract—One underlying assumption of the conventionalmulti-view learning algorithms is that all examples can besuccessfully observed on all the views.However, due to variousfailures or faults in collecting and pre-processing the dataon different views, we are more likely to be faced with anincomplete-view setting, where an example could be missing itsrepresentation on one view (i.e., missing view) or could be onlypartially observed on that view (i.e., missing variables).Low-rankassumption used to be effective for recovering the random missingvariables of features, but it is disabled by concentrated missingvariables and has no effect on missing views.This paper suggeststhat the key to handling the incomplete-view problem is to exploitthe connections between multiple views, enabling the incompleteviews to be restored with the help of the complete views.We propose an effective algorithm to accomplish multi-viewlearning with incomplete views by assuming that different viewsare generated from a shared subspace."
+        },
+        {
+          "chunk_id": "24cbd5b4-8972-4538-9f1d-6df369f1192e",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "We propose an effective algorithm to accomplish multi-viewlearning with incomplete views by assuming that different viewsare generated from a shared subspace.To handle the large-scaleproblem and obtain fast convergence, we investigate a successiveover-relaxation method to solve the objective function.Conver-gence of the optimization technique is theoretically analyzed.The experimental results on toy data and real-world data setssuggest that studying the incomplete-view problem in multi-viewlearning is signiﬁcant and that the proposed algorithm caneffectively handle the incomplete views in different applications.Index Terms—Multi-view learning, incomplete views.I.INTRODUCTIONMANY scientiﬁc data are described by heterogeneousfeatures collected from diverse data collection sourcesor obtained from various feature extractors.In video surveil-lance, for example, a series of cameras might be positioned indifferent locations to achieve comprehensive surveillance.Thevideos which describe the same scene but are captured by dif-ferent cameras, are integrated for content analysis.An imageManuscript received January 23, 2015; revised June 11, 2015; acceptedOctober 1, 2015.Date of publication October 13, 2015; date of currentversion October 27, 2015."
+        },
+        {
+          "chunk_id": "397be883-f476-47df-9579-ad6bff99c3b7",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication October 13, 2015; date of currentversion October 27, 2015.This work was supported in part by the NationalBasic Research Program, China, under Grant 2011CB302400, in part bythe National Key Technology Research and Development Program underGrant 2015BAF15B00, in part by the Shenzhen City Techonology BasicResearch Program under Grant JCYJ 20120614152136201, in part by theNational Natural Science Foundation of China under Grant NSFC 61375026,and in part by the Australian Research Council under Grant DP-140102164,Grant FT-130101457, and Grant LP-140100569.The associate editor coor-dinating the review of this manuscript and approving it for publication wasDr.Christos Bouganis.Chang Xu and Chao Xu are with the Key Laboratory of Machine Perception,Cooperative Medianet Innovation Center, School of Electronics EngineeringandComputerScience,MinistryofEducation,PekingUniversity,Beijing100871,China(e-mail:xuchang@pku.edu.cn;xuchao@cis.pku.edu.cn).D."
+        },
+        {
+          "chunk_id": "3e8f70a9-57a8-4e77-abf4-5e1c61bd7f46",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "D.Tao is with the Centre for Quantum Computation and Intelligent Systemsand the Faculty of Engineering and Information Technology, University ofTechnology, Sydney, 81 Broadway Street, Ultimo, NSW 2007, Australia(email: dacheng.tao@uts.edu.au).Color versions of one or more of the ﬁgures in this paper are availableonline at http://ieeexplore.ieee.org.Digital Object Identiﬁer 10.1109/TIP.2015.2490539can be represented by a variety of visual features which havedifferent physical meanings and depict the data from distinctpoints of view.GIST is suitable for recognizing natural sceneimages [1]; HOG is good at describing the shape informationof the image [2]; CTM captures the color information [3]; andLBP extracts the texture information of the images [4]–[6].It is therefore natural to regard heterogeneous features asdiverse views for describing the data.Since an individualview cannot comprehensively describe all examples, it iscrucial to integrate these multiple views to accomplish learningtasks [7]–[11]."
+        },
+        {
+          "chunk_id": "2e60825e-a603-4b1c-bf74-67d18659a6d9",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Since an individualview cannot comprehensively describe all examples, it iscrucial to integrate these multiple views to accomplish learningtasks [7]–[11].Multi-view learning came to public attention in the earlyyears of this century, starting with a series of works onco-training methods [12]–[15].The main aim of co-trainingis to maximize the mutual agreement between two distinctviews of the unlabeled data in a semi-supervised setting,and the reasons for its success have been investigated by[16] and [17].Another ﬂourishing research topic, multiple"
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 8,
+        "chunk_count": 1,
+        "pku_ids": [
+          "0e924b90-ad6a-46e7-989e-a0ec5c2b49d4",
+          "34e2cc06-1352-4696-b6d7-e75c566acb0c",
+          "6718337d-4d22-4fa5-b0e6-3fb4d6b653aa",
+          "7d45a90b-c051-4a7f-8d4f-81e3bf92356c",
+          "8508730b-1caf-452b-95f4-0375f099e64d",
+          "8eb88d19-ea62-435b-8cef-715ce1b08643",
+          "d0b5dff5-4675-4242-b9d7-1e1c6f39fe41",
+          "d3037ab6-e00a-41d6-9a44-ec2592f32be1"
+        ]
+      }
+    },
+    {
+      "id": "eq005",
+      "question": "人物 `Chunming Wu` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Chunming Wu",
+      "entity_type": "person",
+      "entity_id": "fead450d-fd4b-43fa-9e86-d29a3e65ab4d",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq006",
+      "question": "人物 `Shide Du` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Shide Du",
+      "entity_type": "person",
+      "entity_id": "c9208cb6-8e65-49d7-8948-a00c75f49115",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq007",
+      "question": "人物 `Shiping Wang` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Shiping Wang",
+      "entity_type": "person",
+      "entity_id": "9a3b2931-6f08-478e-8198-60ccd9580a90",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq008",
+      "question": "人物 `Shiyang Lan` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Shiyang Lan",
+      "entity_type": "person",
+      "entity_id": "2a1d54b3-96b8-4b1c-88e6-0e3acd1e2349",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq009",
+      "question": "人物 `Yanchao Tan` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Yanchao Tan",
+      "entity_type": "person",
+      "entity_id": "0923b7dd-ac22-42dc-9d43-f8006dd2c9f0",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq010",
+      "question": "人物 `Zhiling Cai` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Zhiling Cai",
+      "entity_type": "person",
+      "entity_id": "fd5b438e-44f9-42fd-b6fc-9937ce8e7dba",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq011",
+      "question": "邮箱 `chunmingwu0102@163.com` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "chunmingwu0102@163.com",
+      "entity_type": "email",
+      "entity_id": "b7060b7d-31ef-4f1f-9f4b-0445fd910b8d",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq012",
+      "question": "邮箱 `dushidems@gmail.com` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "dushidems@gmail.com",
+      "entity_type": "email",
+      "entity_id": "9e1058ff-b702-4724-9e2b-c65a99b0c03b",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq013",
+      "question": "邮箱 `fzihan11@163.com` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "fzihan11@163.com",
+      "entity_type": "email",
+      "entity_id": "8ba67254-87ad-41d8-bfd5-2d094137ffcb",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq014",
+      "question": "邮箱 `llanshiyang@163.com` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "llanshiyang@163.com",
+      "entity_type": "email",
+      "entity_id": "44ce926a-64d8-40c0-900e-518f6da1af6b",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq015",
+      "question": "邮箱 `shipingwangphd@163.com` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "shipingwangphd@163.com",
+      "entity_type": "email",
+      "entity_id": "04f5b964-f904-409a-82c8-48befebe28ab",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq016",
+      "question": "邮箱 `yctan@fzu.edu.cn` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "yctan@fzu.edu.cn",
+      "entity_type": "email",
+      "entity_id": "dbdb1af2-9f49-44ee-8fd5-b0b6c2f4ccbd",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq017",
+      "question": "邮箱 `zhilingcai@126.com` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "zhilingcai@126.com",
+      "entity_type": "email",
+      "entity_id": "f4df916f-4020-4cc8-8e18-bd5eb8bd7980",
+      "relevant_children": [
+        {
+          "chunk_id": "93059a4f-feff-404c-9865-1c4087dd701e",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "IEEE TRANSACTIONS ON MULTIMEDIA, VOL.26, 20248889Representation Learning Meets Optimization-DerivedNetworks: From Single-View to Multi-ViewZihan Fang, Shide Du, Zhiling Cai, Shiyang Lan, Chunming Wu, Yanchao Tan, Member, IEEE,and Shiping Wang, Senior Member, IEEEAbstract—Existingrepresentationlearningapproachesliepredominantly in designing models empirically without rigorousmathematical guidelines, neglecting interpretation in terms ofmodeling.In this work, we propose an optimization-derivedrepresentation learning network that embraces both interpretationandextensibility.Toensureinterpretabilityatthedesignlevel, we adopt a transparent approach in customizing therepresentation learning network from an optimization perspective.This involves modularly stitching together components to meetspeciﬁc requirements, enhancing ﬂexibility and generality.Then,we convert the iterative solution of the convex optimizationobjective into the corresponding feed-forward network layers byembedding learnable modules.These above optimization-derivedlayers are seamlessly integrated into a deep neural networkarchitecture, allowing for training in an end-to-end fashion.Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views."
+        },
+        {
+          "chunk_id": "a18ee23f-4548-415e-b570-ed70a235a531",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Furthermore, extra view-wise weights are introduced for multi-view learning to discriminate the contributions of representationsfrom different views.The proposed method outperforms severaladvanced approaches on semi-supervised classiﬁcation tasks,demonstrating its feasibility and effectiveness.Index Terms—Multi-view learning, optimization-derived net-work, representation learning.I.INTRODUCTIONREPRESENTATION learning refers to a category of tech-niques that extracts prominent features to characterizeobjects by compressing the volume of information.Since thequality of the learned representation directly inﬂuences theperformance of subsequent tasks, representation learning hasbeen intensively investigated and practiced in various ﬁelds,including but not limited to information retrieval [1], naturallanguage processing [2] and computer vision [3].Though exist-ing works encompassing heuristic-based [4] and gradient-basedManuscript received 14 August 2023; revised 18 January 2024; accepted24 March 2024.Date of publication 4 April 2024; date of current version 21August 2024."
+        },
+        {
+          "chunk_id": "847f65ea-519e-4950-bd56-4fbb7819b2ad",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Date of publication 4 April 2024; date of current version 21August 2024.This work was supported in part by the National Natural Sci-ence Foundation of China under Grant U21A20472 and Grant 62276065, andin part by the National Key Research and Development Plan of China underGrant 2021YFB3600503.The Associate Editor coordinating the review of thismanuscript and approving it for publication was Prof.Yonggang Wen.(Corre-sponding author: Shiping Wang.)Zihan Fang, Shide Du, Shiyang Lan, Chunming Wu, Yanchao Tan, and Ship-ingWangarewiththeCollegeofComputerandDataScience,FuzhouUniversity,Fuzhou 350108, China, and also with the Key Laboratory of Intelligent Metro,Fujian Province University, Fuzhou 350108, China (e-mail:fzihan11@163.com;dushidems@gmail.com; llanshiyang@163.com; chunmingwu0102@163.com;yctan@fzu.edu.cn; shipingwangphd@163.com)."
+        },
+        {
+          "chunk_id": "f9491315-c5a7-4229-b616-ffabbd70cc09",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "com).Zhiling Cai is with the College of Computer and Information Science, FujianAgriculture and Forestry University, Fuzhou 350002, China (e-mail: zhilingcai@126.com).Digital Object Identiﬁer 10.1109/TMM.2024.3383295approaches [5] have obtained desirable performance, the fol-lowing several concerns still need to be addressed.Amongthe two mainstream solutions, heuristic-based methods ofexplicitly crafting the required properties of representationsthat build upon various theories are able to ensure impartialityand comprehensibility in some security areas.However, theyencounter a bottleneck in ﬁtting large-scale and multi-modaldata to meet the real requirements.In contrast, gradient-basedapproaches push the state-of-the-art due to their impressiverepresentation capabilities.Most deep networks are designedempirically without rigorous mathematical interpretability, andtheir training and optimization process lack guidelines.As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters."
+        },
+        {
+          "chunk_id": "ff23ae70-8ea7-4a53-814f-c793ca410aaa",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "As aresult, designers discard the prior knowledge requiring manualdeﬁnition, instead seeking empirically optimal solutions over alarger parameter space by integrating different modules throughsubstantial trials of experiments, with the consequence thatdoubling the network parameters.In short, the opacity andmystery of neural networks remain an open problem.In order to interpret how the model arrived at a particularresult, it is imperative to design a representation learningnetwork that is able to demonstrate the correspondence betweenthe original high-dimensional data and the ﬁnal parsimoniousrepresentation.Recent academic studies have been committed toﬁnding appropriate strategies to incorporate both traditional anddeep methods to beneﬁt from their respective advantages [6]."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 5,
+        "chunk_count": 1,
+        "pku_ids": [
+          "42b78a5f-524a-493a-b624-5396e4ce9d2b",
+          "543daea4-0fc9-4975-b1b5-66ffc8e7f9e5",
+          "5cfeebf4-72ce-435b-92de-c26c31cd435a",
+          "bdde86a6-7000-4997-b80d-fef34f8e95a0",
+          "d092ec1e-b4d4-4d70-b23d-43703738526b"
+        ]
+      }
+    },
+    {
+      "id": "eq018",
+      "question": "机构 `Zhe-jiang University` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Zhe-jiang University",
+      "entity_type": "organization",
+      "entity_id": "c4c41fae-489a-47c7-96bf-a63f1222d79a",
+      "relevant_children": [
+        {
+          "chunk_id": "568613c6-4c4b-4f22-a390-548a264c3668",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "degree from the College of Computer Science, Zhe-jiang University, Hangzhou, China.She is currently aLecturer with the College of Computer and Data Sci-ence, Fujian Key Laboratory of Network Computingand Intelligent Information Processing, Fuzhou Uni-versity, Fuzhou, China.Her research interests includedata mining, recommender system, and healthcare.Shiping Wang (Senior Member, IEEE) received thePh.D.degree from the University of Electronic Sci-ence and Technology of China, Chengdu, China,in 2014.From 2013 to 2014, he was a VisitingScholar with the University of Alberta, Edmonton,AB, Canada, from January 2014 to August 2014, hewasa Research Assistant with the NationalUniversityof Singapore, Singapore, from 2015 to 2016, he wasa Research Fellow with the Nanyang TechnologicalUniversity of Singapore, Singapore, and from 2019 to2020, he was a Visiting Researcher with Peking Uni-versity, Beijing, China."
+        },
+        {
+          "chunk_id": "7601d65f-d9de-405e-8863-d4c1bcd7486c",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "From 2013 to 2014, he was a VisitingScholar with the University of Alberta, Edmonton,AB, Canada, from January 2014 to August 2014, hewasa Research Assistant with the NationalUniversityof Singapore, Singapore, from 2015 to 2016, he wasa Research Fellow with the Nanyang TechnologicalUniversity of Singapore, Singapore, and from 2019 to2020, he was a Visiting Researcher with Peking Uni-versity, Beijing, China.He is currently a Professor with the College of Computerand Data Science, and the Director of the Fujian Provincial Key Laboratory ofIntelligent Metro, Fuzhou University, Fuzhou, China.His research interests in-clude machine learning, deep learning, feature representation, and multi-modalfusion.Authorized licensed use limited to: Fuzhou University.Downloaded on April 09,2025 at 07:47:46 UTC from IEEE Xplore.Restrictions apply."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 4,
+        "chunk_count": 1,
+        "pku_ids": [
+          "50b6f02a-f9b3-4bab-9bf0-66fcdea29d82",
+          "5947559d-df5d-4bca-bfca-ca604640b1a4",
+          "a16fcc66-95fe-47f6-8fe8-8ec20da12de6",
+          "acccc83b-8018-41bc-8fc3-69aa22c05b89"
+        ]
+      }
+    },
+    {
+      "id": "eq019",
+      "question": "机构 `D.degree from the Institute of Electron-ics` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "D.degree from the Institute of Electron-ics",
+      "entity_type": "organization",
+      "entity_id": "4bb5a219-f0ac-4890-b65f-d11976152a4b",
+      "relevant_children": [
+        {
+          "chunk_id": "7cd95852-22be-4ebe-b168-94d1d7cef28a",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": ", 2009, pp.777–784.Chang Xu received the B.E.degree from TianjinUniversity, in 2011.He is currently pursuing thePh.D.degree with the Key Laboratory of MachinePerception (Ministry of Education), Peking Univer-sity.He was a Research Intern with the Knowl-edge Mining Group, Microsoft Research Asia, anda Research Assistant with the Center of QuantumComputation and Intelligent Systems and the Facultyof Engineering and Information Technology, Univer-sity of Technology, Sydney.His research interests lieprimarily in machine learning, multimedia search,and computer vision.He received the Best Student Paper Award in ACMICIMCS 2013.Dacheng Tao (F’15) is Professor of Computer Sci-ence with the Centre for Quantum Computation andIntelligent Systems, and the Faculty of Engineeringand Information Technology in the University ofTechnology, Sydney.He mainly applies statisticsand mathematics to data analytics problems andhis research interests spread across computer vision,data science, image processing, machine learning,and video surveillance."
+        },
+        {
+          "chunk_id": "a5889b59-650a-4e02-b060-21ef56fe76e4",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "He mainly applies statisticsand mathematics to data analytics problems andhis research interests spread across computer vision,data science, image processing, machine learning,and video surveillance.His research results haveexpounded in one monograph and 100+ publicationsat prestigious journals and prominent conferences,such as IEEE T-PAMI, T-NNLS, T-IP, JMLR, IJCV, NIPS, ICML, CVPR,ICCV, ECCV, AISTATS, ICDM; and ACM SIGKDD, with several best paperawards, such as the best theory/algorithm paper runner up award in IEEEICDM’07, the best student paper award in IEEE ICDM’13, and the 2014ICDM 10 Year Highest-Impact Paper Award.He received the 2015 AustralianScopus-Eureka Prize and the UTS Vice-Chancellor’s Medal for ExceptionalResearch.He is a Fellow of the IEEE, OSA, IAPR, and SPIE.Chao Xu received the B.E.degree from TsinghuaUniversity, in 1988, the M.S.degree from the Uni-versity of Science and Technology of China, in 1991,and the Ph.D."
+        },
+        {
+          "chunk_id": "2484dadd-78c9-4714-ac8e-8621ed794ea0",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "D.degree from the Institute of Electron-ics, Chinese Academy of Sciences, in 1997.From1991 to 1994, he was an Assistant Professor withthe University of Science and Technology of China.Since 1997, he has been with the School of EECS,Peking University, where he is currently a Professor.His research interests are in image and video coding,processing, and understanding.He has authored orco-authored over 80 publications and holds ﬁve patents in these ﬁelds.Authorized licensed use limited to: Fuzhou University.Downloaded on April 13,2025 at 08:32:04 UTC from IEEE Xplore.Restrictions apply."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 1,
+        "chunk_count": 1,
+        "pku_ids": [
+          "9cc1fa53-7587-4698-9006-9420b912f796"
+        ]
+      }
+    },
+    {
+      "id": "eq020",
+      "question": "人物 `J.de Leeuw` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "J.de Leeuw",
+      "entity_type": "person",
+      "entity_id": "185d366e-de96-40c4-9520-3274c77d167f",
+      "relevant_children": [
+        {
+          "chunk_id": "649aa93e-3acf-4657-bbcc-126097a4ed9f",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Oh, “Matrix completion from afew entries,” IEEE Trans.Inf.Theory, vol.56, no.6, pp.2980–2998,Jun.2010.[37] P.Gong, J.Ye, and C.-S.Zhang, “Multi-stage multi-task feature learn-ing,” in Proc.Adv.Neural Inf.Process.Syst., 2012, pp.1988–1996.[38] A.Evgeniou and M.Pontil, “Multi-task feature learning,” in Proc.Adv.Neural Inf.Process.Syst., vol.19.2007, p.41.[39] X.Wang, J.Bi, S.Yu, and J.Sun, “On multiplicative multitask featurelearning,” in Proc.Adv.Neural Inf.Process.Syst., 2014, pp.2411–2419.[40] G.Michailidis and J.de Leeuw, “The Giﬁsystem of descriptivemultivariate analysis,” Statist.Sci., vol.34, no.4, pp.307–336, 1998.[41] J."
+        },
+        {
+          "chunk_id": "f4231f94-77cd-4512-bd53-d89e83b469e1",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "34, no.4, pp.307–336, 1998.[41] J.de Leeuw and P.Mair, “Homogeneity analysis in R: The packagehomals,” Dept.Statist., University of California, Los Angeles, CA, USA,Tech.Rep., 2007.[42] D.M.Strong,“IterativemethodsforsolvingAx=b,”J.OnlineMath.Appl.,2006.[Online].Available:http://www.math.nuk.edu.tw/jinnliu/teaching/na05/JM1.pdf[43] M.White, X.Zhang, D.Schuurmans, and Y.-L.Yu, “Convex multi-view subspace learning,” in Proc.Adv.Neural Inf.Process.Syst., 2012,pp.1673–1681.[44] D.Hardoon, S.Szedmak, and J.Shawe-Taylor, “Canonical correlationanalysis: An overview with application to learning methods,” NeuralComput., vol.16, no.12, pp.2639–2664, Dec.2004."
+        },
+        {
+          "chunk_id": "970d3546-65d6-407e-92c0-3a3c87f50d3d",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "16, no.12, pp.2639–2664, Dec.2004.[45] Z.Wen, W.Yin, and Y.Zhang, “Solving a low-rank factorizationmodel for matrix completion by a nonlinear successive over-relaxationalgorithm,” Math.Program.Comput., vol.4, no.4, pp.333–361, 2012.[46] S.Roth and M.J.Black, “Fields of experts,” Int.J.Comput.Vis., vol.82,no.2, pp.205–229, Apr.2009.[47] M.F.Duarte and Y.H.Hu, “Vehicle classiﬁcation in distributed sensornetworks,” J.Parallel Distrib.Comput., vol.64, no.7, pp.826–838,Jul.2004.Authorized licensed use limited to: Fuzhou University.Downloaded on April 13,2025 at 08:32:04 UTC from IEEE Xplore.Restrictions apply.XU et al.: MULTI-VIEW LEARNING WITH INCOMPLETE VIEWS5825[48] A.Frank et al."
+        },
+        {
+          "chunk_id": "32bb8c58-4d35-40f0-b63e-276695e37de7",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Restrictions apply.XU et al.: MULTI-VIEW LEARNING WITH INCOMPLETE VIEWS5825[48] A.Frank et al., “UCI machine learning repository,” 2010.[49] TheFG-NETAgingDatabase.[Online].Available:http://sting.cycollege.ac.cy/?alanitis/fgnetaging/index.htm[50] S.K.Zhou, B.Georgescu, X.S.Zhou, and D.Comaniciu, “Imagebased regression using boosting method,” in Proc.10th IEEE Int.Conf.Comput.Vis.(ICCV), vol.1.Oct.2005, pp.541–548.[51] K.-Y.Chang, C.-S.Chen, and Y.-P.Hung, “Ordinal hyperplanes rankerwith cost sensitivities for age estimation,” in Proc.IEEE Conf.Comput.Vis.Pattern Recognit.(CVPR), Jun.2011, pp.585–592.[52] A.Lanitis, C.J.Taylor, and T.F.Cootes, “Toward automatic simulationof aging effects on face images,” IEEE Trans."
+        },
+        {
+          "chunk_id": "78da88f4-32f5-4e7a-927f-1f65c10b0a47",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "J.Taylor, and T.F.Cootes, “Toward automatic simulationof aging effects on face images,” IEEE Trans.Pattern Anal.Mach.Intell.,vol.24, no.4, pp.442–455, Apr.2002.[53] S.Ji, L.Sun, R.Jin, and J.Ye, “Multi-label multiple kernel learning,”in Proc.Adv.Neural Inf.Process.Syst."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 1,
+        "chunk_count": 1,
+        "pku_ids": [
+          "d8b5582f-c1cd-42e9-883c-665d9154e156"
+        ]
+      }
+    },
+    {
+      "id": "eq021",
+      "question": "人物 `L.El Ghaoui` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "L.El Ghaoui",
+      "entity_type": "person",
+      "entity_id": "b3ef2c27-88f9-4696-a687-c0e48ee2ce5c",
+      "relevant_children": [
+        {
+          "chunk_id": "368d4541-b7e5-47cc-8800-8ddec1e3b30e",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Tang, “From tiger to panda: Animal headdetection,” IEEE Trans.Image Process., vol.20, no.6, pp.1696–1708,Jun.2011.[3] H.Yu, M.Li, H.-J.Zhang, and J.Feng, “Color texture moments forcontent-based image retrieval,” in Proc.Int.Conf.Image Process., vol.3.Jun.2002, pp.929–932.[4] Z.Guo and D.Zhang, “A completed modeling of local binary patternoperator for texture classiﬁcation,” IEEE Trans.Image Process., vol.19,no.6, pp.1657–1663, Jan.2010.[5] B.Zhang, S.Shan, X.Chen, and W.Gao, “Histogram of Gaborphase patterns (HGPP): A novel object representation approach for facerecognition,” IEEE Trans.Image Process., vol.16, no.1, pp.57–68,Jan.2007.[6] W.Zhang, S.Shan, W.Gao, X."
+        },
+        {
+          "chunk_id": "98ff6a06-087b-419b-b549-e5e279bd5c91",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "[6] W.Zhang, S.Shan, W.Gao, X.Chen, and H.Zhang, “Local Gaborbinary pattern histogram sequence (LGBPHS): A novel non-statisticalmodel for face representation and recognition,” in Proc.10th IEEE Int.Conf.Comput.Vis.(ICCV), vol.1.Oct.2005, pp.786–791.[7] M.Kan, S.Shan, H.Zhang, S.Lao, and X.Chen, “Multi-view dis-criminant analysis,” in Computer Vision—ECCV.New York, NY, USA:Springer-Verlag, 2012, pp.808–821.[8] H.Zhang, W.Gao, X.Chen, S.Shan, and D.Zhao, “Robust multi-view face detection using error correcting output codes,” in ComputerVision—ECCV.New York, NY, USA: Springer-Verlag, 2006, pp.1–12.[9] J.Yu, M.Wang, and D."
+        },
+        {
+          "chunk_id": "564bb20b-91e5-49ba-9ebd-1905a8720a77",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "[9] J.Yu, M.Wang, and D.Tao, “Semisupervised multiview distance metriclearning for cartoon synthesis,” IEEE Trans.Image Process., vol.21,no.11, pp.4636–4648, Nov.2012.[10] J.Salvador and J.R.Casas, “Multi-view video representation based onfast Monte Carlo surface reconstruction,” IEEE Trans.Image Process.,vol.22, no.9, pp.3342–3352, Sep.2013.[11] C.Xu, D.Tao, and C.Xu, “Multi-view self-paced learning for cluster-ing,” in Proc.24th Int.Conf.Artif.Intell., 2015, pp.3974–3980.[12] A.Blum and T.Mitchell, “Combining labeled and unlabeled data withco-training,” in Proc.11th Annu.Conf.Comput.Learn.Theory, 1998,pp.92–100.[13] I.Muslea, S.Minton, and C.A."
+        },
+        {
+          "chunk_id": "93728ee4-3723-4be4-b886-60328baa2426",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "[13] I.Muslea, S.Minton, and C.A.Knoblock, “Active + semi-supervisedlearning = Robust multi-view learning,” in Proc.ICML, vol.2.2002,pp.435–442.[14] Z.-H.Zhou and M.Li, “Tri-training: Exploiting unlabeled data usingthree classiﬁers,” IEEE Trans.Knowl.Data Eng., vol.17, no.11,pp.1529–1541, Nov.2005.[15] V.Sindhwani, P.Niyogi, and M.Belkin, “A co-regularization approachto semi-supervised learning with multiple views,” in Proc.WorkshopLearn.Multiple Views ICML, 2005, pp.1–6.[16] M.-F.Balcan, A.Blum, and K.Yang, “Co-training and expan-sion: Towards bridging theory and practice,” in Proc.NIPS, 2004,pp.89–96.[17] W.Wang and Z.-H.Zhou, “A new analysis of co-training,” in Proc."
+        },
+        {
+          "chunk_id": "086d3419-94a0-4550-b715-3670d7d351c1",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Wang and Z.-H.Zhou, “A new analysis of co-training,” in Proc.ICML, 2010, pp.1135–1142.[18] G.R.G.Lanckriet, N.Cristianini, P.Bartlett, L.El Ghaoui, andM.I.Jordan, “Learning the kernel matrix with semideﬁnite program-ming,” J.Mach.Learn."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 1,
+        "chunk_count": 1,
+        "pku_ids": [
+          "a00f4942-05be-4569-8d68-23a7c89c3c8b"
+        ]
+      }
+    },
+    {
+      "id": "eq022",
+      "question": "人物 `Pattern Anal.Mach.Intell.` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Pattern Anal.Mach.Intell.",
+      "entity_type": "person",
+      "entity_id": "136ccef6-6710-448a-adc1-e193df2e5e46",
+      "relevant_children": [
+        {
+          "chunk_id": "56fb457d-e3d9-46a6-a036-45c9fb0de4c0",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": ", “Heterogeneous graph structure learning for graph neuralnetworks,” in Proc.AAAI Conf.Artif.Intell., 2021, pp.4697–4705.[19] S.Huang, Y.Zhang, L.Fu, and S.Wang, “Learnable multi-view matrixfactorization with graph embedding and ﬂexible loss,” IEEE Trans.Mul-timedia, vol.25, pp.3259–3272, 2023.[20] A.Huang, Z.Wang, Y.Zheng, T.Zhao, and C.-W.Lin, “Embeddingregularizer learning for multi-view semi-supervised classiﬁcation,” IEEETrans.Image Process., vol.30, pp.6997–7011, 2021.[21] Z.Li et al., “Consensus graph learning for multi-view clustering,” IEEETrans.Multimedia, vol.24, pp.2461–2472, 2022.[22] S.Du, Z.Liu, Z.Chen, W.Yang, and S."
+        },
+        {
+          "chunk_id": "404cce80-ffee-48d9-a174-9e136eb75800",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Liu, Z.Chen, W.Yang, and S.Wang, “Differentiable Bi-sparse multi-view co-clustering,” IEEE Trans.Signal Process., vol.69,pp.4623–4636, 2021.[23] J.Xu et al., “Multi-level feature learning for contrastive multi-view clus-tering,” in Proc.IEEE/CVF Conf.Comput.Vis.Pattern Recognit., 2022,pp.16030–16039.[24] M.Yang et al., “Partially view-aligned representation learning with noise-robust contrastive loss,” in Proc.IEEE/CVF Conf.Comput.Vis.PatternRecognit., 2021, pp.1134–1143.[25] Y.Lin et al., “Dual contrastive prediction for incomplete multi-view repre-sentation learning,” IEEE Trans.Pattern Anal.Mach.Intell., vol.45, no.4,pp.4447–4461, Apr.2023.[26] J.Zhang and B."
+        },
+        {
+          "chunk_id": "c61198fd-ca86-4b3c-b56c-32a1c32a8df5",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "2023.[26] J.Zhang and B.Ghanem, “ISTA-Net: Interpretable optimization-inspireddeep network for image compressive sensing,” in Proc.IEEE/CVF Conf.Comput.Vis.Pattern Recognit., 2018, pp.1828–1837.[27] A.Agrawal et al., “Differentiable convex optimization layers,” in Proc.Adv.Neural Inf.Process.Syst., 2019, pp.9558–9570.[28] K.Gregor and Y.LeCun, “Learning fast approximations of sparse coding,”in Proc.Int.Conf.Mach.Learn., 2010, pp.399–406.[29] Y.Yang and D.P.Wipf, “Transformers from an optimization perspective,”in Proc.Adv.Neural Inf.Process.Syst., 2022, pp.36958–36971.[30] P.Sprechmann, A.M.Bronstein, and G.Sapiro, “Learning efﬁcient sparseand low rank models,” IEEE Trans.Pattern Anal.Mach.Intell., vol."
+        },
+        {
+          "chunk_id": "5c47bb5f-d0ec-4f82-8813-0915466f6188",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Pattern Anal.Mach.Intell., vol.37,no.9, pp.1821–1833, Sep.2015.[31] K.Wei et al., “Tuning-free plug-and-play proximal algorithm for in-verse imaging problems,” in Proc.Int.Conf.Mach.Learn., 2020,pp.10158–10169.[32] T.N.Kipf and M.Welling, “Semi-supervised classiﬁcation with graphconvolutional networks,” in Proc.Int.Conf.Learn.Representations, 2017,pp.1–13.[33] P.Velickovic et al., “Graph attention networks,” in Proc.Int.Conf.Mach.Learn., 2018, pp.1–12.[34] F.Wu et al., “Simplifying graph convolutional networks,” in Proc.Int.Conf.Mach.Learn., 2019, pp.6861–6871.[35] Y.Feng, H.You, Z.Zhang, R.Ji, and Y."
+        },
+        {
+          "chunk_id": "9537c525-f72b-4912-8c5a-9bb964492680",
+          "item_id": "f2155cd1-9dbd-461f-a7e9-da6c026778ae",
+          "source_kind": "document_chunk",
+          "chunk_text": "Feng, H.You, Z.Zhang, R.Ji, and Y.Gao, “Hypergraph neural net-works,” in Proc.AAAI Conf.Artif.Intell., 2019, pp.3558–3565.[36] X.Wang et al., “AM-GCN: Adaptive multi-channel graph convolutionalnetworks,” in Proc.ACM SIGKDD Int.Conf.Knowl.Discov.Data Mining,"
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 1,
+        "chunk_count": 1,
+        "pku_ids": [
+          "90203d07-ac63-4b74-a919-75f856dd73dd"
+        ]
+      }
+    },
+    {
+      "id": "eq023",
+      "question": "机构 `Peking University` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "Peking University",
+      "entity_type": "organization",
+      "entity_id": "db7c9d20-48c7-43a9-ae10-c0a99e5e0939",
+      "relevant_children": [
+        {
+          "chunk_id": "7cd95852-22be-4ebe-b168-94d1d7cef28a",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": ", 2009, pp.777–784.Chang Xu received the B.E.degree from TianjinUniversity, in 2011.He is currently pursuing thePh.D.degree with the Key Laboratory of MachinePerception (Ministry of Education), Peking Univer-sity.He was a Research Intern with the Knowl-edge Mining Group, Microsoft Research Asia, anda Research Assistant with the Center of QuantumComputation and Intelligent Systems and the Facultyof Engineering and Information Technology, Univer-sity of Technology, Sydney.His research interests lieprimarily in machine learning, multimedia search,and computer vision.He received the Best Student Paper Award in ACMICIMCS 2013.Dacheng Tao (F’15) is Professor of Computer Sci-ence with the Centre for Quantum Computation andIntelligent Systems, and the Faculty of Engineeringand Information Technology in the University ofTechnology, Sydney.He mainly applies statisticsand mathematics to data analytics problems andhis research interests spread across computer vision,data science, image processing, machine learning,and video surveillance."
+        },
+        {
+          "chunk_id": "a5889b59-650a-4e02-b060-21ef56fe76e4",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "He mainly applies statisticsand mathematics to data analytics problems andhis research interests spread across computer vision,data science, image processing, machine learning,and video surveillance.His research results haveexpounded in one monograph and 100+ publicationsat prestigious journals and prominent conferences,such as IEEE T-PAMI, T-NNLS, T-IP, JMLR, IJCV, NIPS, ICML, CVPR,ICCV, ECCV, AISTATS, ICDM; and ACM SIGKDD, with several best paperawards, such as the best theory/algorithm paper runner up award in IEEEICDM’07, the best student paper award in IEEE ICDM’13, and the 2014ICDM 10 Year Highest-Impact Paper Award.He received the 2015 AustralianScopus-Eureka Prize and the UTS Vice-Chancellor’s Medal for ExceptionalResearch.He is a Fellow of the IEEE, OSA, IAPR, and SPIE.Chao Xu received the B.E.degree from TsinghuaUniversity, in 1988, the M.S.degree from the Uni-versity of Science and Technology of China, in 1991,and the Ph.D."
+        },
+        {
+          "chunk_id": "2484dadd-78c9-4714-ac8e-8621ed794ea0",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "D.degree from the Institute of Electron-ics, Chinese Academy of Sciences, in 1997.From1991 to 1994, he was an Assistant Professor withthe University of Science and Technology of China.Since 1997, he has been with the School of EECS,Peking University, where he is currently a Professor.His research interests are in image and video coding,processing, and understanding.He has authored orco-authored over 80 publications and holds ﬁve patents in these ﬁelds.Authorized licensed use limited to: Fuzhou University.Downloaded on April 13,2025 at 08:32:04 UTC from IEEE Xplore.Restrictions apply."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 1,
+        "chunk_count": 1,
+        "pku_ids": [
+          "9cc1fa53-7587-4698-9006-9420b912f796"
+        ]
+      }
+    },
+    {
+      "id": "eq024",
+      "question": "机构 `University of California` 出现在哪些资料里，它关联了哪些知识点？",
+      "language": "zh",
+      "entity_name": "University of California",
+      "entity_type": "organization",
+      "entity_id": "d37bea7b-eb92-46ad-b338-cea474900de0",
+      "relevant_children": [
+        {
+          "chunk_id": "649aa93e-3acf-4657-bbcc-126097a4ed9f",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Oh, “Matrix completion from afew entries,” IEEE Trans.Inf.Theory, vol.56, no.6, pp.2980–2998,Jun.2010.[37] P.Gong, J.Ye, and C.-S.Zhang, “Multi-stage multi-task feature learn-ing,” in Proc.Adv.Neural Inf.Process.Syst., 2012, pp.1988–1996.[38] A.Evgeniou and M.Pontil, “Multi-task feature learning,” in Proc.Adv.Neural Inf.Process.Syst., vol.19.2007, p.41.[39] X.Wang, J.Bi, S.Yu, and J.Sun, “On multiplicative multitask featurelearning,” in Proc.Adv.Neural Inf.Process.Syst., 2014, pp.2411–2419.[40] G.Michailidis and J.de Leeuw, “The Giﬁsystem of descriptivemultivariate analysis,” Statist.Sci., vol.34, no.4, pp.307–336, 1998.[41] J."
+        },
+        {
+          "chunk_id": "f4231f94-77cd-4512-bd53-d89e83b469e1",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "34, no.4, pp.307–336, 1998.[41] J.de Leeuw and P.Mair, “Homogeneity analysis in R: The packagehomals,” Dept.Statist., University of California, Los Angeles, CA, USA,Tech.Rep., 2007.[42] D.M.Strong,“IterativemethodsforsolvingAx=b,”J.OnlineMath.Appl.,2006.[Online].Available:http://www.math.nuk.edu.tw/jinnliu/teaching/na05/JM1.pdf[43] M.White, X.Zhang, D.Schuurmans, and Y.-L.Yu, “Convex multi-view subspace learning,” in Proc.Adv.Neural Inf.Process.Syst., 2012,pp.1673–1681.[44] D.Hardoon, S.Szedmak, and J.Shawe-Taylor, “Canonical correlationanalysis: An overview with application to learning methods,” NeuralComput., vol.16, no.12, pp.2639–2664, Dec.2004."
+        },
+        {
+          "chunk_id": "970d3546-65d6-407e-92c0-3a3c87f50d3d",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "16, no.12, pp.2639–2664, Dec.2004.[45] Z.Wen, W.Yin, and Y.Zhang, “Solving a low-rank factorizationmodel for matrix completion by a nonlinear successive over-relaxationalgorithm,” Math.Program.Comput., vol.4, no.4, pp.333–361, 2012.[46] S.Roth and M.J.Black, “Fields of experts,” Int.J.Comput.Vis., vol.82,no.2, pp.205–229, Apr.2009.[47] M.F.Duarte and Y.H.Hu, “Vehicle classiﬁcation in distributed sensornetworks,” J.Parallel Distrib.Comput., vol.64, no.7, pp.826–838,Jul.2004.Authorized licensed use limited to: Fuzhou University.Downloaded on April 13,2025 at 08:32:04 UTC from IEEE Xplore.Restrictions apply.XU et al.: MULTI-VIEW LEARNING WITH INCOMPLETE VIEWS5825[48] A.Frank et al."
+        },
+        {
+          "chunk_id": "32bb8c58-4d35-40f0-b63e-276695e37de7",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "Restrictions apply.XU et al.: MULTI-VIEW LEARNING WITH INCOMPLETE VIEWS5825[48] A.Frank et al., “UCI machine learning repository,” 2010.[49] TheFG-NETAgingDatabase.[Online].Available:http://sting.cycollege.ac.cy/?alanitis/fgnetaging/index.htm[50] S.K.Zhou, B.Georgescu, X.S.Zhou, and D.Comaniciu, “Imagebased regression using boosting method,” in Proc.10th IEEE Int.Conf.Comput.Vis.(ICCV), vol.1.Oct.2005, pp.541–548.[51] K.-Y.Chang, C.-S.Chen, and Y.-P.Hung, “Ordinal hyperplanes rankerwith cost sensitivities for age estimation,” in Proc.IEEE Conf.Comput.Vis.Pattern Recognit.(CVPR), Jun.2011, pp.585–592.[52] A.Lanitis, C.J.Taylor, and T.F.Cootes, “Toward automatic simulationof aging effects on face images,” IEEE Trans."
+        },
+        {
+          "chunk_id": "78da88f4-32f5-4e7a-927f-1f65c10b0a47",
+          "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+          "source_kind": "document_chunk",
+          "chunk_text": "J.Taylor, and T.F.Cootes, “Toward automatic simulationof aging effects on face images,” IEEE Trans.Pattern Anal.Mach.Intell.,vol.24, no.4, pp.442–455, Apr.2002.[53] S.Ji, L.Sun, R.Jin, and J.Ye, “Multi-label multiple kernel learning,”in Proc.Adv.Neural Inf.Process.Syst."
+        }
+      ],
+      "meta": {
+        "expected_path": "Entity<-MENTIONS_ENTITY<-PKU-[:EVIDENCED_BY]->Source",
+        "pku_count": 1,
+        "chunk_count": 1,
+        "pku_ids": [
+          "d8b5582f-c1cd-42e9-883c-665d9154e156"
+        ]
+      }
+    }
+  ],
+  "build_debug": {
+    "kept": [
+      {
+        "entity_name": "Fuzhou University",
+        "entity_type": "organization",
+        "chunk_count": 2,
+        "pku_count": 5,
+        "gold_child_count": 7
+      },
+      {
+        "entity_name": "dacheng.tao@uts.edu.au",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "xuchang@pku.edu.cn",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "xuchao@cis.pku.edu.cn",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Chunming Wu",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Shide Du",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Shiping Wang",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Shiyang Lan",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Yanchao Tan",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Zhiling Cai",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "chunmingwu0102@163.com",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "dushidems@gmail.com",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "fzihan11@163.com",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "llanshiyang@163.com",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "shipingwangphd@163.com",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "yctan@fzu.edu.cn",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "zhilingcai@126.com",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 5,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Zhe-jiang University",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 4,
+        "gold_child_count": 2
+      },
+      {
+        "entity_name": "D.degree from the Institute of Electron-ics",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 1,
+        "gold_child_count": 3
+      },
+      {
+        "entity_name": "J.de Leeuw",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 1,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "L.El Ghaoui",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 1,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Pattern Anal.Mach.Intell.",
+        "entity_type": "person",
+        "chunk_count": 1,
+        "pku_count": 1,
+        "gold_child_count": 5
+      },
+      {
+        "entity_name": "Peking University",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 1,
+        "gold_child_count": 3
+      },
+      {
+        "entity_name": "University of California",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 1,
+        "gold_child_count": 5
+      }
+    ],
+    "skipped_count": 68,
+    "sample_skipped": [
+      {
+        "reason": "noise_filtered",
+        "entity_id": "7d9a4419-ea8b-49fa-b78a-d63989244106",
+        "canonical_name": "Authorized licensed use limited to: Fuzhou University.Downloaded on April",
+        "entity_type": "organization",
+        "chunk_count": 2,
+        "pku_count": 13,
+        "pku_ids": [
+          "1ede6ed2-3999-459c-9529-280d72005216",
+          "3081791e-cb42-4fbc-83ae-0317e4b4f848",
+          "5b1ceac0-cfbf-45f4-848f-f2026bb1a8b0",
+          "5c984cb1-1765-4a8a-8d0b-3c618c3fbcac",
+          "789324f5-1a8c-458c-93d0-36bb34150159",
+          "8077a498-b278-4926-a48f-b411eb52d507",
+          "81bd6daf-fc71-43c5-8d9a-91f02bb42c37",
+          "84735c40-3cef-4bf8-897e-e46ea9bba643",
+          "871a289c-7f6d-47b8-b0ba-61f0ab3724b0",
+          "99d2c1a1-1edc-4e23-a6f0-65e3bdd2636d",
+          "bbf6c271-a954-4ee9-8f26-a3045c0b4ec8",
+          "dc32c702-e2b0-419b-92c1-fc18be3a6795",
+          "ea72cdc2-2134-4ec3-8656-0b85c31f4e95"
+        ],
+        "sources": [
+          {
+            "title": "Multi-View_Learning_With_Incomplete_Views",
+            "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+            "source_id": "abfd1cb0-77ea-4df6-9e0b-82fade65939f"
+          },
+          {
+            "title": "Multi-View_Learning_With_Incomplete_Views",
+            "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+            "source_id": "2b099e84-6957-480a-85d2-6d3118a0c2d2"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "e21977ab-f9f2-4020-934d-34289aa9dd38",
+        "canonical_name": "0hooks:- id: ruffargs: [\"--fix\"]- id: ruff-format```## 16.Git 提交规范推荐使用语义化提交信息：```textfeat: add user registrationfix: handle invalid email payloadrefactor: split order servicechore: update dependenciestest: add order calculation testsdocs: update API usage guide```常见类型：| 类型 | 含义 ||---|---|| `feat` | 新功能 || `fix` | 修复问题 || `refactor` | 重构，不改变外部行为 || `test` | 测试相关 || `docs` | 文档相关 || `chore` | 构建、依赖、工具配置 || `perf` | 性能优化 |## 17.Code Review 检查清单",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 15,
+        "pku_ids": [
+          "03df7ce6-6aa2-425d-98e7-f84837edf753",
+          "0cec9464-8471-403a-9bf2-9df6dce22100",
+          "1ad308b9-7c83-4b2b-8f99-8d4c2ebc3cc0",
+          "2285d1db-0ba1-4bf8-9055-7131a227db2e",
+          "30765c74-0c02-48e7-bf11-d0edde5d9e98",
+          "424c26eb-3279-4bbf-bf04-ee9ac3b5bc94",
+          "510b711a-e0e5-4b53-9dbe-d462281a7fc6",
+          "545d5597-dd43-4368-a5f9-c0778b102922",
+          "76a624dc-8415-4822-9ab5-a022add808fb",
+          "9a56c329-3cfa-40c2-b8ab-c6eb09fc6e48",
+          "9c016689-9512-4142-a764-012b1da4486e",
+          "a335e7bd-bebf-42b2-8e31-92db0a9a2c15",
+          "ba2d8552-0d41-4e73-b4a4-9c8ae56877e6",
+          "e20b4560-39a5-44b2-a187-fdcd06e95313",
+          "f0d626b4-c438-4c6c-a555-a9168209acce"
+        ],
+        "sources": [
+          {
+            "title": "python_coding_standards",
+            "item_id": "1e8927d1-f559-4747-bac4-a8417c813eea",
+            "source_id": "a96a0bd4-169f-47c7-93e7-48ac536f3902"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "a6efed87-955f-40bc-8a62-a461dc50662c",
+        "canonical_name": "2 避免循环导入如出现循环导入，应优先通过以下方式解决：- 调整模块职责；- 抽取公共依赖；- 将运行时导入改为类型检查导入；- 使用依赖注入减少模块耦合。```pythonfrom typing import TYPE_CHECKINGif TYPE_CHECKING:from app.models.user import User```## 5.类型标注新增代码应尽量添加类型标注，尤其是公共函数、服务层、工具函数和复杂数据结构。```python",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 15,
+        "pku_ids": [
+          "0b214122-ede1-4379-8311-8fae80d4b699",
+          "155a8828-dd49-4b4a-a893-ce9e07ef999c",
+          "172a5c1f-86da-49e6-b466-b5aa231b42fe",
+          "1953b1f1-3bc1-4156-86c9-408a51bb46b7",
+          "1a1c7d96-8fd6-4bc4-bb15-b613a3efd845",
+          "202158ac-7069-4fe9-b252-bd012fc5e99a",
+          "23e08be6-65b1-4d27-a741-3ec4934f8418",
+          "287f3963-924f-459a-91dd-9ed9dc107d6a",
+          "3e82d023-e243-414c-9188-8aecb29c2755",
+          "4dc80cfe-5434-44fd-8ae6-6b032a524e4b",
+          "65ba1d43-1449-49d8-a7b6-63810a25da4f",
+          "7ead740c-d546-453e-8442-47f4096e5de0",
+          "83a279ac-e065-4cc7-ad2d-ad590c73e122",
+          "891dac44-fe45-4987-9418-13d2e2d95d23",
+          "dbdee13f-d766-4284-9bd9-af8a02e166a4"
+        ],
+        "sources": [
+          {
+            "title": "python_coding_standards",
+            "item_id": "1e8927d1-f559-4747-bac4-a8417c813eea",
+            "source_id": "c7b37408-77f5-4d82-92a9-57a999a4d59e"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "3712f8ca-514a-495f-b95d-ba304c39473d",
+        "canonical_name": "TEST@EXAMPLE.COM",
+        "entity_type": "email",
+        "chunk_count": 1,
+        "pku_count": 15,
+        "pku_ids": [
+          "03df7ce6-6aa2-425d-98e7-f84837edf753",
+          "0cec9464-8471-403a-9bf2-9df6dce22100",
+          "1ad308b9-7c83-4b2b-8f99-8d4c2ebc3cc0",
+          "2285d1db-0ba1-4bf8-9055-7131a227db2e",
+          "30765c74-0c02-48e7-bf11-d0edde5d9e98",
+          "424c26eb-3279-4bbf-bf04-ee9ac3b5bc94",
+          "510b711a-e0e5-4b53-9dbe-d462281a7fc6",
+          "545d5597-dd43-4368-a5f9-c0778b102922",
+          "76a624dc-8415-4822-9ab5-a022add808fb",
+          "9a56c329-3cfa-40c2-b8ab-c6eb09fc6e48",
+          "9c016689-9512-4142-a764-012b1da4486e",
+          "a335e7bd-bebf-42b2-8e31-92db0a9a2c15",
+          "ba2d8552-0d41-4e73-b4a4-9c8ae56877e6",
+          "e20b4560-39a5-44b2-a187-fdcd06e95313",
+          "f0d626b4-c438-4c6c-a555-a9168209acce"
+        ],
+        "sources": [
+          {
+            "title": "python_coding_standards",
+            "item_id": "1e8927d1-f559-4747-bac4-a8417c813eea",
+            "source_id": "a96a0bd4-169f-47c7-93e7-48ac536f3902"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "b902b0b6-da2a-4954-b3c9-7eaba2d50031",
+        "canonical_name": "lint]select = [\"E\",   # pycodestyle errors\"F\",   # pyflakes\"I\",   # isort\"B\",   # flake8-bugbear\"UP\",  # pyupgrade]ignore = [][tool.pytest.ini_options]testpaths = [\"tests\"]python_files = [\"test_*.py\"]python_functions = [\"test_*\"]```### 15.2 `.pre-commit-config.yaml````yamlrepos:- repo: https://github.com/psf/blackrev: 24.10.0hooks:- id: black- repo: https://github.com/astral-sh/ruff-pre-commitrev: v0.8.0hooks:- id: ruffargs: [\"--fix\"]- id: ruff-format```## 16.",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 15,
+        "pku_ids": [
+          "03df7ce6-6aa2-425d-98e7-f84837edf753",
+          "0cec9464-8471-403a-9bf2-9df6dce22100",
+          "1ad308b9-7c83-4b2b-8f99-8d4c2ebc3cc0",
+          "2285d1db-0ba1-4bf8-9055-7131a227db2e",
+          "30765c74-0c02-48e7-bf11-d0edde5d9e98",
+          "424c26eb-3279-4bbf-bf04-ee9ac3b5bc94",
+          "510b711a-e0e5-4b53-9dbe-d462281a7fc6",
+          "545d5597-dd43-4368-a5f9-c0778b102922",
+          "76a624dc-8415-4822-9ab5-a022add808fb",
+          "9a56c329-3cfa-40c2-b8ab-c6eb09fc6e48",
+          "9c016689-9512-4142-a764-012b1da4486e",
+          "a335e7bd-bebf-42b2-8e31-92db0a9a2c15",
+          "ba2d8552-0d41-4e73-b4a4-9c8ae56877e6",
+          "e20b4560-39a5-44b2-a187-fdcd06e95313",
+          "f0d626b4-c438-4c6c-a555-a9168209acce"
+        ],
+        "sources": [
+          {
+            "title": "python_coding_standards",
+            "item_id": "1e8927d1-f559-4747-bac4-a8417c813eea",
+            "source_id": "a96a0bd4-169f-47c7-93e7-48ac536f3902"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "8f829449-bc3a-42a5-87ae-4f56afd5c534",
+        "canonical_name": "推荐使用 instruction / input / output 或 messages 格式。### 单轮格式```json{\"instruction\": \"请判断用户问题的类别\",\"input\": \"我的快递为什么还没到？\",\"output\": \"物流问题\"}```### 对话格式```json{\"messages\": [{\"role\": \"system\", \"content\": \"你是一个客服意图识别助手。\"},{\"role\": \"user\", \"content\": \"我的快递为什么还没到？\"},{\"role\": \"assistant\", \"content\": \"物流问题\"}]}```------## 4.定义标签映射分类任务必须建立 label 与 id 的映射。",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 15,
+        "pku_ids": [
+          "0b3783a8-e34b-42a8-9ee9-366900b1d2d6",
+          "172badb5-6dd1-442c-a542-5a1cc8cbf891",
+          "3e1cb8bf-f359-476b-93cd-dd78c069f18f",
+          "56ae7f5b-2d54-4612-b963-f50cc7ead795",
+          "5e3d21fb-ed2e-4f1d-8d85-8b78bad5cd14",
+          "74692c95-cb95-46b2-91e1-74226ed546d9",
+          "928b12d5-5bd1-4ee5-907d-165484612931",
+          "9eaf17ce-2e37-4266-bfc0-020ae93c184b",
+          "a2dedaf8-dc22-430d-a304-cbd5eca7cc88",
+          "a4e9f59f-364f-4e30-8cd1-4b6393c22116",
+          "a829e701-516f-497b-bd3e-a41baf323229",
+          "af569780-fbe1-4f20-ba5b-d39d7df2805d",
+          "c0b2200a-7921-4c94-8138-57e403d6493a",
+          "c63c9586-fdf3-486f-8360-eddc8818aef8",
+          "dc097c77-9efb-4990-b737-572bb084d9e8"
+        ],
+        "sources": [
+          {
+            "title": "大模型微调指南",
+            "item_id": "aa67312a-53dd-447b-9084-3e6e08f215e7",
+            "source_id": "66e3e8e5-bad7-4168-96da-60af04222bdf"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "2f977bb4-6ccb-4cdf-8bc1-baccd64d9179",
+        "canonical_name": "__new__(cls)# 如果已经有了，就直接返回已有的实例return cls._instance# 测试config1 = SystemConfig()config2 = SystemConfig()print(config1 is config2)  # 输出: True (它们在内存中是同一个对象)```#### 继承并定制不可变类型 (Immutable Types)像 `int`、`str`、`tuple` 这样的内置类型是**不可变**的。这意味着对象一旦创建，就不能再修改。如果你想继承它们并修改初始值，不能在 `__init__` 里做（因为那时对象已经创建定型了），**必须在 `__new__` 里拦截**。",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 13,
+        "pku_ids": [
+          "1ef2a179-7bc9-4e82-b1e7-77fe27ce2bdd",
+          "2fcab6d2-f226-4268-8eee-4139d55c5dfd",
+          "5371d7f6-4f98-4aa8-b096-9475290f4c59",
+          "58f84e04-e568-4b6e-9d28-216dc065827b",
+          "7525c8f1-8d45-4d7d-a073-0232eabd8c55",
+          "7d5775a6-81d7-4a51-98f9-6fc4c36de3d8",
+          "932728ba-8d3c-4327-9f7b-cab2a40aef67",
+          "9a26ceae-7197-4f0a-aefe-176c09dba3ea",
+          "b3bcb776-9489-42c8-95e0-9e6cac0447d2",
+          "c797eada-309b-48a9-b26d-7bf1a5bdd006",
+          "e1bd4c9b-28f0-41f6-b4be-6fe6fca08ae4",
+          "eba66fa9-7f4d-4ebc-ba6b-f99ed48f19cf",
+          "f5e5cbc9-58f0-4f17-b141-8dba3895cb3d"
+        ],
+        "sources": [
+          {
+            "title": "面试常见问题",
+            "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+            "source_id": "7f837269-5563-44b3-9707-2d1c093656de"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "5575e752-f4be-4501-b405-f91a9b18e4b2",
+        "canonical_name": "### 3.Query Construction（查询构建：翻译成机器语言）这一步是将自然语言**结构化**。用户输入的是大白话，但底层的检索通常需要严格的参数。比如在做行程规划 Agent 时，系统需要利用 NER（命名实体识别）等技术，把“明天去大理怎么玩”这句话，精准地转换为类似 `{\"city\": \"大理\", \"date\": \"明天\", \"action\": \"route_planning\"}` 这样的结构化过滤条件或 API 请求参数，然后再去执行检索。",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 12,
+        "pku_ids": [
+          "031c6478-b8a1-489d-8984-3a8d7c7248bc",
+          "1be3f166-e804-4552-9ab3-59fe4f7f973b",
+          "4ac90a6c-c079-4229-93cd-4c34e19f3faa",
+          "737748b9-755b-4c8b-bc3e-42a463d4c34f",
+          "96e9912e-ddd0-4e55-95be-e906acff40ff",
+          "970ecca5-8f4a-4dfc-bb10-2948ec4de504",
+          "a20eb178-8ef5-4d3f-b8c4-629af65093fb",
+          "b36b7610-ca12-4886-81d3-3b9de5fae74f",
+          "b9c8f4ae-a929-42ed-92f6-b0fca14fa27c",
+          "d4c68aa0-3fef-4902-a451-22f9f0c226d3",
+          "e29e01cc-a14a-419f-9b4a-2e3651867eff",
+          "f39bbde9-bafb-4d23-a60f-f7e200d8c424"
+        ],
+        "sources": [
+          {
+            "title": "面试常见问题",
+            "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+            "source_id": "1f62beea-0a8e-44ec-82e9-baa0f7c2dbd2"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "5b5426dd-3175-49aa-a1d2-581df1ec864f",
+        "canonical_name": "2.版权和版本的声明1)程序文件（包括头文件和源文件）头部应进行注释，注释必须列出：版权说明、文件名称、功能、与其它文件的关系、修订记录等对于修订记录暂不做强制要求。示例：下面这段头文件的头注释比较标准，当然，并不局限于此格式，但上述信息建议要包含在内。/**********************************************************************Copyright (c), Surfilter Network Technology Co., Ltd.文件描述: 实现TFTP 客户端发送文件功能，**********************************************************************/注：头文件必须加该注视，源文件不用加。",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 12,
+        "pku_ids": [
+          "544d557d-1cf9-427e-a467-380efe2a2148",
+          "55e0e40b-abaa-4c0d-92d6-91c1c18b3f4d",
+          "60ab52ad-5317-4389-a9a0-d55f8f9572d3",
+          "72b377cf-a644-4da8-9b57-1872dce82b70",
+          "87105e26-d7fb-4ecf-a491-ee1ecfe67c04",
+          "93b70ea1-cffc-4645-a168-33553e2b923f",
+          "a4fb003d-4713-4906-8ca7-8e7225271481",
+          "b13ed57d-97a7-4468-ab47-8e5591044a19",
+          "c63e5c3a-4dd3-44f2-8c6a-4b7c699ededc",
+          "d7594e2b-44ea-45ca-ad2e-bf267fb62306",
+          "db9b538c-31cd-4a84-b0a9-2287dcb26a5c",
+          "e1607e6b-a7b7-455c-ae8d-9da378c6f402"
+        ],
+        "sources": [
+          {
+            "title": "C++编码规范V01.00",
+            "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+            "source_id": "1cab8a39-2d0a-4ec0-ab76-0851edba6b5f"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "0e66b95e-6a1f-4272-8d73-8afe961b4dd6",
+        "canonical_name": "6.时序差分学习（TD Learning）好未来面经（熊）18状态价值函数的贝尔曼方程:这个公式的直观含义是：状态 ss 的价值，等于在该状态下，按照策略 ππ 选择动作 aa 的概率，乘以（执行该动作获得的即时奖励 RR，加上未来状态 s′s′ 的价值乘以折扣因子 γγ）的总和。动作价值函数的贝尔曼方程:这个公式的含义是：在状态 ss 执行动作 aa 的价值，等于执行该动作的即时奖励 RR，加上未来可能进入的状态 s′s′ 下，按照策略 ππ 选择后续动作所能获得的期望价值。",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 12,
+        "pku_ids": [
+          "2835b323-c34d-428a-ab63-615c26e009d6",
+          "2e69b161-772b-44ed-8249-e87358f04233",
+          "30205764-5159-4796-a85e-8f9502d34591",
+          "3a08b040-8d98-4856-9c34-e2c070066a6f",
+          "66a2a704-8912-4009-8a58-c02f2af2cd09",
+          "7da6832e-3cd4-4937-a6dc-37cfa4b5a9d1",
+          "88c17d22-d2a0-4f3c-83bc-ea961429e6c3",
+          "8d92278c-ab17-4464-8480-bb4d78c676bc",
+          "977157f8-13d0-4681-8dc8-b086bf16b437",
+          "d7240bf2-60d5-48ee-bbc6-2973e6b6c781",
+          "f74024b0-d06a-4ccd-a8b2-7b13cf872eab",
+          "fa92a960-694d-4aee-801e-531d3d8aa09c"
+        ],
+        "sources": [
+          {
+            "title": "好未来",
+            "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+            "source_id": "996a3b64-ea59-4d13-bc56-cce52e4d0e96"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "22d54ecb-3ba8-4061-846b-2c7fd10de61f",
+        "canonical_name": "Ltd.文件描述: 实现TFTP 客户端发送文件功能，**********************************************************************/注：头文件必须加该注视，源文件不用加。",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 12,
+        "pku_ids": [
+          "544d557d-1cf9-427e-a467-380efe2a2148",
+          "55e0e40b-abaa-4c0d-92d6-91c1c18b3f4d",
+          "60ab52ad-5317-4389-a9a0-d55f8f9572d3",
+          "72b377cf-a644-4da8-9b57-1872dce82b70",
+          "87105e26-d7fb-4ecf-a491-ee1ecfe67c04",
+          "93b70ea1-cffc-4645-a168-33553e2b923f",
+          "a4fb003d-4713-4906-8ca7-8e7225271481",
+          "b13ed57d-97a7-4468-ab47-8e5591044a19",
+          "c63e5c3a-4dd3-44f2-8c6a-4b7c699ededc",
+          "d7594e2b-44ea-45ca-ad2e-bf267fb62306",
+          "db9b538c-31cd-4a84-b0a9-2287dcb26a5c",
+          "e1607e6b-a7b7-455c-ae8d-9da378c6f402"
+        ],
+        "sources": [
+          {
+            "title": "C++编码规范V01.00",
+            "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+            "source_id": "1cab8a39-2d0a-4ec0-ab76-0851edba6b5f"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "37eb4407-31c5-4aac-838c-021d4cc2fdea",
+        "canonical_name": "h 被重复引用#define GRAPHICS_H#include <math.h>// 引用标准库的头文件…#include “myheader.h”// 引用非标准库的头文件…void Function1(…);// 全局函数声明…class Box// 类结构声明{…};#endif3.2.1.4.定义文件的结构假设定义文件的名称为graphics.cpp，定义文件的结构参见示例：#include “graphics.h”// 引用头文件…// 全局函数的实现体C/C++编码规范任子行内部资料不得外传7 / 17void Function1(…){…}// 类成员函数的实现体void Box::Draw(…){…}3.2.1.5.头文件的作用1)通过头文件来调用库功能。2)头文件能加强类型安全检查。3.2.",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 12,
+        "pku_ids": [
+          "544d557d-1cf9-427e-a467-380efe2a2148",
+          "55e0e40b-abaa-4c0d-92d6-91c1c18b3f4d",
+          "60ab52ad-5317-4389-a9a0-d55f8f9572d3",
+          "72b377cf-a644-4da8-9b57-1872dce82b70",
+          "87105e26-d7fb-4ecf-a491-ee1ecfe67c04",
+          "93b70ea1-cffc-4645-a168-33553e2b923f",
+          "a4fb003d-4713-4906-8ca7-8e7225271481",
+          "b13ed57d-97a7-4468-ab47-8e5591044a19",
+          "c63e5c3a-4dd3-44f2-8c6a-4b7c699ededc",
+          "d7594e2b-44ea-45ca-ad2e-bf267fb62306",
+          "db9b538c-31cd-4a84-b0a9-2287dcb26a5c",
+          "e1607e6b-a7b7-455c-ae8d-9da378c6f402"
+        ],
+        "sources": [
+          {
+            "title": "C++编码规范V01.00",
+            "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+            "source_id": "1cab8a39-2d0a-4ec0-ab76-0851edba6b5f"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "c39ff22f-d4f0-4007-ab55-d2d351d0be91",
+        "canonical_name": "动作价值函数的贝尔曼方程:这个公式的含义是：在状态 ss 执行动作 aa 的价值，等于执行该动作的即时奖励 RR，加上未来可能进入的状态 s′s′ 下，按照策略 ππ 选择后续动作所能获得的期望价值。TD 学习通过采样得到真实的下一个状态，然后用当前对该状态价值的估计来更新当前状态的价值结合了动态规划和蒙特卡洛的优点，如TD(0)，SARSA，Q-learning等。TD(0)：基于当前预测与下一个状态的预测之间的差异更新价值函数。SARSA：一种在线策略TD学习算法。Q-learning：一种离线策略TD学习算法，目标是找到最优策略。7.",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 12,
+        "pku_ids": [
+          "2835b323-c34d-428a-ab63-615c26e009d6",
+          "2e69b161-772b-44ed-8249-e87358f04233",
+          "30205764-5159-4796-a85e-8f9502d34591",
+          "3a08b040-8d98-4856-9c34-e2c070066a6f",
+          "66a2a704-8912-4009-8a58-c02f2af2cd09",
+          "7da6832e-3cd4-4937-a6dc-37cfa4b5a9d1",
+          "88c17d22-d2a0-4f3c-83bc-ea961429e6c3",
+          "8d92278c-ab17-4464-8480-bb4d78c676bc",
+          "977157f8-13d0-4681-8dc8-b086bf16b437",
+          "d7240bf2-60d5-48ee-bbc6-2973e6b6c781",
+          "f74024b0-d06a-4ccd-a8b2-7b13cf872eab",
+          "fa92a960-694d-4aee-801e-531d3d8aa09c"
+        ],
+        "sources": [
+          {
+            "title": "好未来",
+            "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+            "source_id": "996a3b64-ea59-4d13-bc56-cce52e4d0e96"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "8208d466-fe3e-4883-ba21-653341c64bc2",
+        "canonical_name": "建立基线不要只看微调后的绝对指标，要和基线比较。常见基线：```text- 原始大模型 zero-shot- 原始大模型 few-shot- 传统机器学习模型，如 TF-IDF + LR- 旧线上模型- 人工规则系统```成功不是“模型训练完了”，而是：```text微调模型稳定超过基线。```------# 第五阶段：推理落地## 1.单条预测分类任务推理流程：```text输入文本→ tokenizer→ model→ logits→ softmax→ 取最大概率类别→ id2label 转回标签```示例输出：```json{\"text\": \"我的快递为什么还没到？\",\"pred_label\": \"物流问题\",\"confidence\": 0.93}```------## 2.",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 11,
+        "pku_ids": [
+          "0946635f-f00f-4245-af07-9ecd94042269",
+          "108f33d7-2e6d-4ef5-8269-d6e674717033",
+          "6fe37288-2088-42bc-9119-b17f539343ba",
+          "80016ee1-e1f1-48e5-8166-d0d4f7f2f79c",
+          "950aaa6a-e14e-4ce9-9911-1126697dcc89",
+          "aa105d39-8307-4866-ba20-962e53551377",
+          "ad832980-b0af-4f5c-926f-e915115a5dd8",
+          "bd3287d2-4a4d-45f8-b7e2-faabff61cfe5",
+          "c00935ea-c030-4c59-b282-fce565d26ced",
+          "cd89dbc1-336d-4c2b-9731-8a7222268e9e",
+          "fd0cd486-01bc-4004-a100-b205cc25f4a7"
+        ],
+        "sources": [
+          {
+            "title": "大模型微调指南",
+            "item_id": "aa67312a-53dd-447b-9084-3e6e08f215e7",
+            "source_id": "760beb4d-425d-42c4-972e-7a47eb218284"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "24cf737c-10cf-42b2-afc3-5451115d8c8b",
+        "canonical_name": "a : b; // 良好的风格x=a<b?a:b; // 不好的风格C/C++编码规范任子行内部资料不得外传9 / 17int *x = &y; // 良好的风格int * x = & y; // 不良的风格array[5] = 0; // 不要写成array [ 5 ] = 0;a.Function(); // 不要写成a .Function();b->Function(); // 不要写成b -> Function();3.2.2.4.对齐1)",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 10,
+        "pku_ids": [
+          "10783d07-d34e-4cbd-9e8b-1bda300bcf9d",
+          "22498acb-5c59-444e-984c-cdc4dbe3e254",
+          "230f1b1d-4268-4b35-91c3-e14b93da8e26",
+          "3fc6680c-2bb0-4ac1-a2ab-b8239f761d41",
+          "481591aa-5644-4d6d-8292-deb60889f126",
+          "82773712-4f36-4c27-83e1-db46afd94d32",
+          "b01cf54c-304f-4602-a843-2d998ee751c9",
+          "d013ccb6-7057-491e-ad0d-a24bb8b075e6",
+          "f110c397-ffb0-443e-8ebe-f67c12ff3810",
+          "fd47cf74-0c13-4d09-ab8c-bdfb9f83ae04"
+        ],
+        "sources": [
+          {
+            "title": "C++编码规范V01.00",
+            "item_id": "5a2a52d3-86e6-4ebb-8c68-d3e238fc4a1c",
+            "source_id": "d6bf5e42-1e90-495e-8fc4-016a3e7a9bc0"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "02052c43-d00e-4e5e-a321-c7841441c411",
+        "canonical_name": "通过中间步骤推断呢:回了有点不懂✅ 你的理解总结如下：你提到了 CoT（Chain-of-Thought）：即让模型输出推理步骤而不是直接给出答案。对方觉得太泛了，于是引入了：ORM（Outcome Reward Model）：对最终答案打分；好未来面经（熊）10PRM（Process Reward Model）：对中间推理步骤进行打分。然后你们深入讨论到：问：是对“思考过程”打分还是对“答案”打分？答：目前主要是对 answer部分打分，因为答案更容易标注和评估。追问：如果模型没学过某个问题，无法直接得出答案，只能通过中间推理步骤推断呢？",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 9,
+        "pku_ids": [
+          "0ee88432-bc39-4f61-92ab-2108b4ff39cb",
+          "6bc6282b-706f-466d-91c8-56d1e240abfb",
+          "71ce9784-0ebb-4da9-b427-410456e347d9",
+          "7bd8dc5c-761e-4de9-9575-930d2cec2e88",
+          "a504ca66-bd61-4f96-8f84-c70a95024084",
+          "c69c0ee5-0135-4ff0-8472-ccfda8f5ab07",
+          "cb572556-c54a-46b3-ace1-5098d245be56",
+          "df3d7359-5549-408f-b966-cdb0459ca25c",
+          "e500cbd7-10f4-4bc7-9a0d-afc02ab41ef6"
+        ],
+        "sources": [
+          {
+            "title": "好未来",
+            "item_id": "a436ecb1-8553-4ae0-b8e3-0ed972cdf87b",
+            "source_id": "67fa8fd0-de2b-48d8-bed8-4c18dd4a105e"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "905a485d-c7bb-4218-8963-3458d67ba7d2",
+        "canonical_name": "**一个关键的规则：** 只有当 `__new__` 确实返回了当前类（`cls`）的实例时，Python 才会接着调用 `__init__`。如果 `__new__` 返回了别的东西，或者返回了 `None`，`__init__` 就**绝对不会**被执行。## 正常创建对象，`__new__` 还能干嘛#### 实现单例模式 (Singleton)在开发复杂系统（比如多智能体调度系统或全局配置管理器）时，我们通常希望整个程序运行期间，某个类只有一个实例对象，避免重复消耗资源或状态不同步。这可以用 `__new__` 轻松实现：```class SystemConfig:_instance = None  # 用于保存唯一实例的类属性def __new__(cls, *args, **kwargs):if cls.",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "pku_ids": [
+          "49bb54cf-1948-40a1-948f-a841c13911d3",
+          "62103aa5-835d-4793-8356-9e56b1f969c1",
+          "8589f2a0-7dea-4850-9c2a-8a9fc63f0291",
+          "8b82bda3-e45f-4fdb-bcfe-18b94279b7f6",
+          "a404059f-7bc2-4fbb-b112-2208bd727c44",
+          "a8fe6113-b99e-4ea7-b3a9-7ffd5941fdae",
+          "cd78c8ab-6bde-4b09-8c3c-fe8dae3fac2c",
+          "d40b32d0-829f-4d0c-bbdb-35fdb019e161"
+        ],
+        "sources": [
+          {
+            "title": "面试常见问题",
+            "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+            "source_id": "5e876c0c-83d5-47aa-b839-211d3591fff1"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "f4c91619-40bb-46f5-a3c0-91e6b7d946c2",
+        "canonical_name": "DECEMBER 2015Multi-View Learning With Incomplete ViewsChang Xu",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "pku_ids": [
+          "0e924b90-ad6a-46e7-989e-a0ec5c2b49d4",
+          "34e2cc06-1352-4696-b6d7-e75c566acb0c",
+          "6718337d-4d22-4fa5-b0e6-3fb4d6b653aa",
+          "7d45a90b-c051-4a7f-8d4f-81e3bf92356c",
+          "8508730b-1caf-452b-95f4-0375f099e64d",
+          "8eb88d19-ea62-435b-8cef-715ce1b08643",
+          "d0b5dff5-4675-4242-b9d7-1e1c6f39fe41",
+          "d3037ab6-e00a-41d6-9a44-ec2592f32be1"
+        ],
+        "sources": [
+          {
+            "title": "Multi-View_Learning_With_Incomplete_Views",
+            "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+            "source_id": "3da8f13c-0c55-4bde-9ec5-0d036b063141"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "707e4b52-d6cd-4fdb-a7f5-3b62a9a61f27",
+        "canonical_name": "theconsistency and complementarity) between multiple views torestore the incomplete views.A.Multi-View Learning With Incomplete ViewsWe consider the data matrices of n examples on m views{X1",
+        "entity_type": "organization",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "pku_ids": [
+          "5b1ceac0-cfbf-45f4-848f-f2026bb1a8b0",
+          "5c984cb1-1765-4a8a-8d0b-3c618c3fbcac",
+          "789324f5-1a8c-458c-93d0-36bb34150159",
+          "8077a498-b278-4926-a48f-b411eb52d507",
+          "84735c40-3cef-4bf8-897e-e46ea9bba643",
+          "871a289c-7f6d-47b8-b0ba-61f0ab3724b0",
+          "dc32c702-e2b0-419b-92c1-fc18be3a6795",
+          "ea72cdc2-2134-4ec3-8656-0b85c31f4e95"
+        ],
+        "sources": [
+          {
+            "title": "Multi-View_Learning_With_Incomplete_Views",
+            "item_id": "ed456a1e-0a57-4073-a2aa-dee58aea2625",
+            "source_id": "2b099e84-6957-480a-85d2-6d3118a0c2d2"
+          }
+        ]
+      },
+      {
+        "reason": "noise_filtered",
+        "entity_id": "622a0c1c-b0e2-46ef-b8f0-afbab5ad1a6d",
+        "canonical_name": "这可以用 `__new__` 轻松实现：```class SystemConfig:_instance = None  # 用于保存唯一实例的类属性def __new__(cls, *args, **kwargs):if cls._instance is None:# 如果还没有实例，就创建一个print(\"初始化全局配置实例...\")cls._instance = super().",
+        "entity_type": "paper",
+        "chunk_count": 1,
+        "pku_count": 8,
+        "pku_ids": [
+          "49bb54cf-1948-40a1-948f-a841c13911d3",
+          "62103aa5-835d-4793-8356-9e56b1f969c1",
+          "8589f2a0-7dea-4850-9c2a-8a9fc63f0291",
+          "8b82bda3-e45f-4fdb-bcfe-18b94279b7f6",
+          "a404059f-7bc2-4fbb-b112-2208bd727c44",
+          "a8fe6113-b99e-4ea7-b3a9-7ffd5941fdae",
+          "cd78c8ab-6bde-4b09-8c3c-fe8dae3fac2c",
+          "d40b32d0-829f-4d0c-bbdb-35fdb019e161"
+        ],
+        "sources": [
+          {
+            "title": "面试常见问题",
+            "item_id": "28841883-d42b-4670-a124-c571f73f8d1a",
+            "source_id": "5e876c0c-83d5-47aa-b839-211d3591fff1"
+          }
+        ]
+      }
+    ]
+  }
+}

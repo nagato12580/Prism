@@ -21,6 +21,7 @@ from ..prompts.asset_parse import (
 )
 from ..models.asset import AssetRelation, AssetUsageEvent, ExtensionPoint, PersonalAsset, PersonalAssetItem, PersonalAssetUnit
 from ..models.memory import MemoryEntry
+from ..services.graph_sync import project_governance_graph_if_enabled
 from ..services.knowledge_governance import GovernanceResult, settle_personal_asset_unit_to_governance
 from ..services.memory_context import recall_preference_context
 from ..services.memory_entity import extract_and_link_entities
@@ -933,6 +934,13 @@ def confirm_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
     unit.confirmed_at = local_now()
     governance = settle_personal_asset_unit_to_governance(db, unit)
     db.commit()
+    project_governance_graph_if_enabled(
+        db,
+        user_id=unit.user_id or DEFAULT_USER_ID,
+        pku_ids=set(governance.pku_ids) if governance else None,
+        ckp_ids=set(governance.ckp_ids) if governance else None,
+        entity_ids=set(governance.entity_ids) if governance else None,
+    )
     db.refresh(unit)
     return PersonalAssetUnitConfirmResponse(
         unit=unit,

@@ -7,6 +7,22 @@ from backend.app.services.entity_resolution import alias_keys_for_surface, norma
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PERSON_RE = re.compile(r"^[A-Z][A-Za-z'.-]+\s+[A-Z][A-Za-z'.-]+$")
+_PERSON_STOP_TERMS = {
+    "senior member",
+    "junior member",
+    "associate professor",
+    "assistant professor",
+    "corresponding author",
+    "proximal gradient",
+    "stochastic gradient",
+    "gradient descent",
+    "beam search",
+    "multi-view",
+    "multi view",
+    "deep norm",
+    "post norm",
+    "pre norm",
+}
 _ORG_TERMS = (
     "University",
     "College",
@@ -18,6 +34,22 @@ _ORG_TERMS = (
     "Inc",
     "Ltd",
     "Corporation",
+)
+_ORG_SPLIT_RE = re.compile(r"[,;]")
+_NOISE_TOKENS = (
+    "```",
+    "###",
+    "#include",
+    "class ",
+    "def ",
+    "id:",
+    "repo:",
+    "hooks",
+    "json",
+    "yaml",
+    "csv",
+    "args:",
+    "select =",
 )
 
 
@@ -90,6 +122,17 @@ def extract_entity_candidates_from_text(text: str, source_kind: str = "") -> lis
     return _dedupe_candidates(candidates)
 
 
+def _looks_like_noise_span(text: str) -> bool:
+    lowered = text.lower()
+    if any(token in lowered for token in _NOISE_TOKENS):
+        return True
+    if len(text) > 160:
+        return True
+    if text.count("{") + text.count("}") + text.count("[") + text.count("]") >= 4:
+        return True
+    return False
+
+
 def extract_and_settle_entities(
     db,
     source_kind: str,
@@ -156,7 +199,12 @@ def _extract_paper_title(lines: list[str]) -> str:
     for line in lines:
         if ":" in line and "@" not in line:
             title = line.strip()
-            if len(title) <= 300:
+            if _looks_like_noise_span(title):
+                continue
+            prefix = title.split(":", 1)[0].strip().lower()
+            if prefix in {"repos", "repo", "args", "hooks", "select", "ignore"}:
+                continue
+            if len(title) <= 120 and not _looks_like_noise_span(title):
                 return title
     return ""
 
@@ -169,14 +217,36 @@ def _extract_author_names(lines: list[str], paper_title: str) -> list[str]:
             continue
         for token in re.split(r",|;|\band\b", line):
             cleaned = _clean_author_token(token)
-            if _PERSON_RE.fullmatch(cleaned) and cleaned not in names:
+            if _looks_like_person_name(cleaned) and cleaned not in names:
                 names.append(cleaned)
     return names
+
+
+def _looks_like_person_name(text: str) -> bool:
+    if not _PERSON_RE.fullmatch(text):
+        return False
+    lowered = text.lower().strip()
+    if lowered in _PERSON_STOP_TERMS:
+        return False
+    parts = text.split()
+    if len(parts) != 2:
+        return False
+    # Reject titles / role nouns that often appear in paper front matter or prose.
+    if any(part.lower() in {"member", "professor", "author", "editor", "gradient", "search", "norm"} for part in parts):
+        return False
+    # Real person names are usually alphabetic with modest token length.
+    if any(len(part) < 2 or len(part) > 20 for part in parts):
+        return False
+    return True
 
 
 def _clean_author_token(token: str) -> str:
     cleaned = token.strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
+    # Strip footnote-style leading markers such as "1 ", "1,2 ", "* ".
+    cleaned = re.sub(r"^[*\d,]+\s*", "", cleaned)
+    # Strip attached footnote markers like "Yanchao Tan1,2".
+    cleaned = re.sub(r"(?<=[A-Za-z])\d+(?:,\d+)*$", "", cleaned).strip()
     cleaned = re.sub(r"\d+(?:,\d+)*$", "", cleaned).strip()
     return cleaned
 
@@ -186,17 +256,24 @@ def _extract_organizations(lines: list[str]) -> list[str]:
     for line in lines:
         if _EMAIL_RE.search(line):
             continue
-        for part in line.split(","):
+        for part in _ORG_SPLIT_RE.split(line):
             if not _contains_org_term(part):
                 continue
             organization = _clean_organization(part)
-            if organization and organization not in organizations:
+            if (
+                organization
+                and organization not in organizations
+                and len(organization) <= 80
+                and not _looks_like_noise_span(organization)
+            ):
                 organizations.append(organization)
     return organizations
 
 
 def _clean_organization(value: str) -> str:
     organization = re.sub(r"^\d+\s+", "", value.strip(" ,.;"))
+    organization = re.sub(r"^\d+(?:,\d+)*\s*", "", organization)
+    organization = re.sub(r"\s*\d+(?:,\d+)*$", "", organization)
     organization = re.sub(r"\s+", " ", organization)
     return organization
 

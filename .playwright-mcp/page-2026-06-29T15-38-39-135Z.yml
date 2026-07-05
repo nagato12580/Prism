@@ -1,0 +1,587 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+      - generic [ref=e41]: 用户记忆
+      - generic [ref=e42]:
+        - link "记忆审核 24" [ref=e110] [cursor=pointer]:
+          - /url: /memory/inbox
+          - img [ref=e44]
+          - generic [ref=e47]: 记忆审核
+          - generic [ref=e111]: "24"
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e91]: 知识治理图谱
+            - heading "CKP 与 PKU 治理网络" [level=1] [ref=e92]
+          - generic [ref=e112]:
+            - generic [ref=e113]:
+              - img
+              - textbox "搜索 CKP 或 PKU" [ref=e114]
+            - button "重排" [ref=e115] [cursor=pointer]:
+              - img [ref=e116]
+              - text: 重排
+            - button "刷新" [ref=e119] [cursor=pointer]:
+              - img [ref=e120]
+              - text: 刷新
+        - generic [ref=e93]:
+          - button "CKP Workbench" [ref=e94] [cursor=pointer]
+          - button "全局网络" [active] [ref=e95] [cursor=pointer]
+        - generic [ref=e125]:
+          - generic [ref=e126]:
+            - generic [ref=e127]:
+              - generic [ref=e128]:
+                - img [ref=e129]
+                - generic [ref=e134]:
+                  - generic [ref=e135]: 全局知识图谱
+                  - generic [ref=e136]: 点击子 CKP 聚焦查看它的来源单元
+              - generic [ref=e137]:
+                - img [ref=e138]
+                - generic [ref=e140]: CKP
+                - generic [ref=e141]: "14"
+              - generic [ref=e142]:
+                - img [ref=e143]
+                - generic [ref=e153]: PKU
+                - generic [ref=e154]: "96"
+              - generic [ref=e155]:
+                - img [ref=e156]
+                - generic [ref=e159]: 来源
+                - generic [ref=e160]: "24"
+            - generic [ref=e161]:
+              - generic [ref=e162]:
+                - button "缩小画布" [ref=e163] [cursor=pointer]:
+                  - img [ref=e164]
+                - generic [ref=e167]: 100%
+                - button "放大画布" [ref=e168] [cursor=pointer]:
+                  - img [ref=e169]
+                - button "重置画布缩放" [ref=e172] [cursor=pointer]:
+                  - img [ref=e173]
+              - img "全局知识图谱（CKP · PKU · 来源单元）" [ref=e178]:
+                - generic [ref=e179]:
+                  - generic [ref=e180]: CKP
+                  - generic [ref=e181]: PKU
+                - generic [ref=e183]:
+                  - generic [ref=e184]:
+                    - generic: MVL-IV算法的优化与实验验...
+                    - generic: CKP
+                  - generic [ref=e186]:
+                    - generic: 不完整视图下的多视图学习
+                    - generic: CKP
+                  - generic [ref=e188]:
+                    - generic: 实验验证与应用
+                    - generic: CKP
+                  - generic [ref=e190]:
+                    - generic: SOR-like优化算法与收敛...
+                    - generic: CKP
+                  - generic [ref=e192]:
+                    - generic: 不完整视图问题与挑战
+                    - generic: CKP
+                  - generic [ref=e194]:
+                    - generic: 流形正则化与实验验证
+                    - generic: CKP
+                  - generic [ref=e196]:
+                    - generic: 优化推导的多视图表示学习
+                    - generic: CKP
+                  - generic [ref=e198]:
+                    - generic: 实验评估与模型分析
+                    - generic: CKP
+                  - generic [ref=e200]:
+                    - generic: 流形学习与图正则化
+                    - generic: CKP
+                  - generic [ref=e202]:
+                    - generic: 多视图表示学习
+                    - generic: CKP
+                  - generic [ref=e204]:
+                    - generic: 优化推导网络
+                    - generic: CKP
+                  - generic [ref=e206]:
+                    - generic: 微调流程与全参数微调
+                    - generic: CKP
+                  - generic [ref=e208]:
+                    - generic: Shiping Wang是IE...
+                    - generic: PKU
+                  - generic [ref=e210]:
+                    - generic: Shiping Wang曾于2...
+                    - generic: PKU
+                  - generic [ref=e212]:
+                    - generic: Shiping Wang的研究...
+                    - generic: PKU
+                  - generic [ref=e214]:
+                    - generic: Shiping Wang现任福...
+                    - generic: PKU
+                  - generic [ref=e216]:
+                    - generic: 实验采用了八种基线方法：MVA...
+                    - generic: PKU
+                  - generic [ref=e218]:
+                    - generic: 实验使用了六个多视图数据集：H...
+                    - generic: PKU
+                  - generic [ref=e220]:
+                    - generic: 多视图数据由来自多个特征提取器...
+                    - generic: PKU
+                  - generic [ref=e222]:
+                    - generic: 残差比γ定义为当前迭代残差范数...
+                    - generic: PKU
+                  - generic [ref=e224]:
+                    - generic: P1 ≥ 0，因为(Ui)k+...
+                    - generic: PKU
+                  - generic [ref=e226]:
+                    - generic: 残差变化可以分解为三个部分P1...
+                    - generic: PKU
+                  - generic [ref=e228]:
+                    - generic: P2 ≥ 0，因为(W)k+1...
+                    - generic: PKU
+                  - generic [ref=e230]:
+                    - generic: 实验中使用10%的标记数据随机...
+                    - generic: PKU
+                  - generic [ref=e232]:
+                    - generic: ORLNet的参数设置：阈值θ...
+                    - generic: PKU
+                  - generic [ref=e234]:
+                    - generic: 采用准确率作为所有方法的评估指...
+                    - generic: PKU
+                  - generic [ref=e236]:
+                    - generic: ORLNet在所有数据集上表现...
+                    - generic: PKU
+                  - generic [ref=e238]:
+                    - generic: 单视图半监督分类实验使用了六个...
+                    - generic: PKU
+                  - generic [ref=e240]:
+                    - generic: 用于比较的基线模型包括GCN、...
+                    - generic: PKU
+                  - generic [ref=e242]:
+                    - generic: 训练数据中10%的标记样本随机...
+                    - generic: PKU
+                  - generic [ref=e244]:
+                    - generic: 网络层数选择范围为2到6，阈值...
+                    - generic: PKU
+                  - generic [ref=e246]:
+                    - generic: 优化派生网络通过迭代更新Gv、...
+                    - generic: PKU
+                  - generic [ref=e248]:
+                    - generic: 移除双重流形正则化（ORLNe...
+                    - generic: PKU
+                  - generic [ref=e250]:
+                    - generic: 流形学习通过保持数据在原空间中...
+                    - generic: PKU
+                  - generic [ref=e252]:
+                    - generic: 提出了一种优化推导的表示学习网...
+                    - generic: PKU
+                  - generic [ref=e254]:
+                    - generic: 优化推导网络的核心概念是用可训...
+                    - generic: PKU
+                  - generic [ref=e256]:
+                    - generic: 优化推导网络将深度神经网络的传...
+                    - generic: PKU
+                  - generic [ref=e258]:
+                    - generic: "目标函数 min_{Z,G} ..."
+                    - generic: PKU
+                  - generic [ref=e260]:
+                    - generic: 在优化推导网络中，每个优化迭代...
+                    - generic: PKU
+                  - generic [ref=e262]:
+                    - generic: 加权融合（ORLNet）在HW...
+                    - generic: PKU
+                  - generic [ref=e264]:
+                    - generic: 多视图表示学习的优化目标函数包...
+                    - generic: PKU
+                  - generic [ref=e266]:
+                    - generic: 实验中MVL-IV算法与MCS...
+                    - generic: PKU
+                  - generic [ref=e268]:
+                    - generic: 在FG-Net年龄估计数据集上...
+                    - generic: PKU
+                  - generic [ref=e270]:
+                    - generic: MVL-IV-MKL算法在不同...
+                    - generic: PKU
+                  - generic [ref=e272]:
+                    - generic: 对于缺失视图，对比算法使用观测...
+                    - generic: PKU
+                  - generic [ref=e274]:
+                    - generic: MVL-IV算法在TRECVI...
+                    - generic: PKU
+                  - generic [ref=e276]:
+                    - generic: 对于每个视频镜头，使用1894...
+                    - generic: PKU
+                  - generic [ref=e278]:
+                    - generic: TRECVID2003数据集包...
+                    - generic: PKU
+                  - generic [ref=e280]:
+                    - generic: 提出SOR-like优化算法的...
+                    - generic: PKU
+                  - generic [ref=e282]:
+                    - generic: ORLNet收敛快速，目标函数...
+                    - generic: PKU
+                  - generic [ref=e284]:
+                    - generic: ORLNet的目标函数值在迭代...
+                    - generic: PKU
+                  - generic [ref=e286]:
+                    - generic: ORLNet在多视图半监督分类...
+                    - generic: PKU
+                  - generic [ref=e288]:
+                    - generic: 基于低秩假设，多视图学习的目标...
+                    - generic: PKU
+                  - generic [ref=e290]:
+                    - generic: 多核学习（MKL）属于多视图学...
+                    - generic: PKU
+                  - generic [ref=e292]:
+                    - generic: 即使一个视图被破坏，它仍然包含...
+                    - generic: PKU
+                  - generic [ref=e294]:
+                    - generic: 模型(2)假设不同视图有各自的...
+                    - generic: PKU
+                  - generic [ref=e296]:
+                    - generic: 低秩矩阵Z可以分解为Z=UW的...
+                    - generic: PKU
+                  - generic [ref=e298]:
+                    - generic: 现有多视图学习算法严重依赖于全...
+                    - generic: PKU
+                  - generic [ref=e300]:
+                    - generic: 在实际数据收集和处理过程中，由...
+                    - generic: PKU
+                  - generic [ref=e302]:
+                    - generic: 第i个视图上的残差定义为S_i...
+                    - generic: PKU
+                  - generic [ref=e304]:
+                    - generic: 对于不完整视图的多视图学习，每...
+                    - generic: PKU
+                  - generic [ref=e306]:
+                    - generic: ORLNet模型整合了拓扑结构...
+                    - generic: PKU
+                  - generic [ref=e308]:
+                    - generic: 图拉普拉斯矩阵 L = D -...
+                    - generic: PKU
+                  - generic [ref=e310]:
+                    - generic: IHGNN利用高阶跨视图元路径...
+                    - generic: PKU
+                  - generic [ref=e312]:
+                    - generic: 将凸优化目标的迭代解转换为对应...
+                    - generic: PKU
+                  - generic [ref=e314]:
+                    - generic: 优化推导网络基于经典优化方法如...
+                    - generic: PKU
+                  - generic [ref=e316]:
+                    - generic: 现有表示学习方法主要凭经验设计...
+                    - generic: PKU
+                  - generic [ref=e318]:
+                    - generic: 优化派生网络通过将网络层与目标...
+                    - generic: PKU
+                  - generic [ref=e320]:
+                    - generic: 稀疏正则（L1范数）通过将不重...
+                    - generic: PKU
+                  - generic [ref=e322]:
+                    - generic: 表示学习是多媒体技术中普遍使用...
+                    - generic: PKU
+                  - generic [ref=e324]:
+                    - generic: 在优化推导网络中，第k层网络层...
+                    - generic: PKU
+                  - generic [ref=e326]:
+                    - generic: ORLNet的损失函数由一致性...
+                    - generic: PKU
+                  - generic [ref=e328]:
+                    - generic: 原始多视图特征图中存在噪声，对...
+                    - generic: PKU
+                  - generic [ref=e330]:
+                    - generic: ORLNet是一个面向多视图场...
+                    - generic: PKU
+                  - generic [ref=e332]:
+                    - generic: 嵌入学习层U和W在多视图学习中...
+                    - generic: PKU
+                  - generic [ref=e334]:
+                    - generic: 在多视图学习中引入额外的视图权...
+                    - generic: PKU
+                  - generic [ref=e336]:
+                    - generic: 多视图数据的简单融合（如平均融...
+                    - generic: PKU
+                  - generic [ref=e338]:
+                    - generic: MVL-IV算法能够同时处理缺...
+                    - generic: PKU
+                  - generic [ref=e340]:
+                    - generic: 在SensIT Vehicle...
+                    - generic: PKU
+                  - generic [ref=e342]:
+                    - generic: MVL-IV算法在缺失视图设置...
+                    - generic: PKU
+                  - generic [ref=e344]:
+                    - generic: MVL-IV能够有效处理缺失视...
+                    - generic: PKU
+                  - generic [ref=e346]:
+                    - generic: MVL-IV恢复的信息比ad-...
+                    - generic: PKU
+                  - generic [ref=e348]:
+                    - generic: MVL-IV算法在缺失视图设置...
+                    - generic: PKU
+                  - generic [ref=e350]:
+                    - generic: MVL-IV算法能够利用视图间...
+                    - generic: PKU
+                  - generic [ref=e352]:
+                    - generic: 在Hotel Review数据...
+                    - generic: PKU
+                  - generic [ref=e354]:
+                    - generic: 在玩具数据和真实数据集上的实验...
+                    - generic: PKU
+                  - generic [ref=e356]:
+                    - generic: 对于SOR-like优化方法，...
+                    - generic: PKU
+                  - generic [ref=e358]:
+                    - generic: SOR技术可以持续减少达到收敛...
+                    - generic: PKU
+                  - generic [ref=e360]:
+                    - generic: SOR方法中Ui和W的更新可表...
+                    - generic: PKU
+                  - generic [ref=e362]:
+                    - generic: 精心设计的U更新可以大幅降低计...
+                    - generic: PKU
+                  - generic [ref=e364]:
+                    - generic: MVL-IV的最终优化算法综合...
+                    - generic: PKU
+                  - generic [ref=e366]:
+                    - generic: 给定由SOR-like方案(1...
+                    - generic: PKU
+                  - generic [ref=e368]:
+                    - generic: SOR方法将标准Gauss-S...
+                    - generic: PKU
+                  - generic [ref=e370]:
+                    - generic: λ的自适应更新策略：若γ(λ)...
+                    - generic: PKU
+                  - generic [ref=e372]:
+                    - generic: ORLNet的网络层数对应优化...
+                    - generic: PKU
+                  - generic [ref=e374]:
+                    - generic: ORLNet学习到的表示块对角...
+                    - generic: PKU
+                  - generic [ref=e376]:
+                    - generic: 学习到的表示具有强判别性，能够...
+                    - generic: PKU
+                  - generic [ref=e378]:
+                    - generic: ORLNet是将表示学习与优化...
+                    - generic: PKU
+                  - generic [ref=e380]:
+                    - generic: 增加网络深度有助于提取深层信息...
+                    - generic: PKU
+                  - generic [ref=e382]:
+                    - generic: 多视图损失函数中的超参数γ1和...
+                    - generic: PKU
+                  - generic [ref=e384]:
+                    - generic: ORLNet的整体计算复杂度为...
+                    - generic: PKU
+                  - generic [ref=e386]:
+                    - generic: t-SNE可视化显示，随着迭代...
+                    - generic: PKU
+                  - generic [ref=e388]:
+                    - generic: 当正则化参数α和λ设为1时，O...
+                    - generic: PKU
+                  - generic [ref=e390]:
+                    - generic: t-SNE可视化显示随迭代次数...
+                    - generic: PKU
+                  - generic [ref=e392]:
+                    - generic: ORLNet的t-SNE可视化...
+                    - generic: PKU
+                  - generic [ref=e394]:
+                    - generic: ORLNet在不同数据集上选择...
+                    - generic: PKU
+                  - generic [ref=e396]:
+                    - generic: 传统的矩阵补全方法不适用于恢复...
+                    - generic: PKU
+                  - generic [ref=e398]:
+                    - generic: 处理不完整视图问题的关键是通过...
+                    - generic: PKU
+                  - generic [ref=e400]:
+                    - generic: 全参数微调
+                    - generic: CKP
+                  - generic [ref=e402]:
+                    - generic: 微调基础与流程
+                    - generic: CKP
+          - complementary [ref=e404]:
+            - generic [ref=e405]:
+              - generic [ref=e406]:
+                - img [ref=e408]
+                - generic [ref=e410]:
+                  - generic [ref=e411]: CKP
+                  - heading "实验验证与应用" [level=2] [ref=e458]
+              - button "编辑节点" [ref=e413] [cursor=pointer]:
+                - img [ref=e414]
+            - generic [ref=e417]:
+              - button "查看 PKU 网络" [ref=e459] [cursor=pointer]:
+                - img [ref=e460]
+                - text: 查看 PKU 网络
+              - generic [ref=e418]:
+                - generic [ref=e419]: 内容
+                - paragraph [ref=e420]: 通过图像修复、聚类、分类等实验验证MVL-IV算法在不完整视图下的有效性，相比基线方法性能优越。
+              - generic [ref=e421]:
+                - generic [ref=e422]:
+                  - generic [ref=e423]: 类型
+                  - generic [ref=e424]: topic
+                - generic [ref=e425]:
+                  - generic [ref=e426]: 置信度
+                  - generic [ref=e427]: "0.90"
+              - generic [ref=e428]:
+                - generic [ref=e429]:
+                  - generic [ref=e430]: 分类
+                  - generic [ref=e431]: "-"
+                - generic [ref=e432]:
+                  - generic [ref=e433]: 状态
+                  - generic [ref=e434]: draft
+              - generic [ref=e435]:
+                - generic [ref=e436]: 关键词
+                - generic [ref=e437]:
+                  - generic [ref=e441]: MVL-IV
+                  - generic [ref=e470]: 实验
+                  - generic [ref=e471]: 图像修复
+                  - generic [ref=e472]: 聚类
+                  - generic [ref=e473]: 分类
+              - generic [ref=e443]:
+                - heading "CKP 层级关系" [level=3] [ref=e444]
+                - generic [ref=e445]:
+                  - generic [ref=e474]:
+                    - generic [ref=e475]:
+                      - img [ref=e476]
+                      - text: about
+                    - generic [ref=e478]: 实验中MVL-IV算法与MCSL、FLSSS、shared Gaussian Process Latent Variable Model和CCA进行比较。
+                    - generic [ref=e479]: topic_member
+                  - generic [ref=e480]:
+                    - generic [ref=e481]:
+                      - img [ref=e482]
+                      - text: about
+                    - generic [ref=e484]: 在FG-Net年龄估计数据集上，缺失变量比例从10%增至40%时，CCA算法MAE增加24.92%，而MVL-IV仅增加3%
+                    - generic [ref=e485]: topic_member
+                  - generic [ref=e486]:
+                    - generic [ref=e487]:
+                      - img [ref=e488]
+                      - text: about
+                    - generic [ref=e490]: MVL-IV-MKL算法在不同缺失比例下始终优于AVE-MKL算法。
+                    - generic [ref=e491]: topic_member
+                  - generic [ref=e492]:
+                    - generic [ref=e493]:
+                      - img [ref=e494]
+                      - text: about
+                    - generic [ref=e496]: 对于缺失视图，对比算法使用观测视图的平均特征进行填充后再进行多视图学习。
+                    - generic [ref=e497]: topic_member
+                  - generic [ref=e498]:
+                    - generic [ref=e499]:
+                      - img [ref=e500]
+                      - text: about
+                    - generic [ref=e502]: MVL-IV算法在TRECVID2003数据集上的分类精度一致优于CCA、sGPLVM、MCSL和FLSSS等对比算法
+                    - generic [ref=e503]: topic_member
+                  - generic [ref=e504]:
+                    - generic [ref=e505]:
+                      - img [ref=e506]
+                      - text: about
+                    - generic [ref=e508]: 对于每个视频镜头，使用1894维文本特征和165维HSV颜色直方图特征
+                    - generic [ref=e509]: topic_member
+                  - generic [ref=e510]:
+                    - generic [ref=e511]:
+                      - img [ref=e512]
+                      - text: about
+                    - generic [ref=e514]: TRECVID2003数据集包含1078个手动标记的视频片段，分属5个类别，均匀分为训练集和测试集
+                    - generic [ref=e515]: topic_member
+                  - generic [ref=e516]:
+                    - generic [ref=e517]:
+                      - img [ref=e518]
+                      - text: about
+                    - generic [ref=e520]: MVL-IV算法能够同时处理缺失变量和多视图学习，而对比算法需先填补缺失变量再学习
+                    - generic [ref=e521]: topic_member
+                  - generic [ref=e522]:
+                    - generic [ref=e523]:
+                      - img [ref=e524]
+                      - text: about
+                    - generic [ref=e526]: 在SensIT Vehicle数据集上，MVL-IV算法在不同缺失视图比例下均优于对比算法。
+                    - generic [ref=e527]: topic_member
+                  - generic [ref=e528]:
+                    - generic [ref=e529]:
+                      - img [ref=e530]
+                      - text: about
+                    - generic [ref=e532]: MVL-IV算法在缺失视图设置下，随着缺失视图数量的增加，其相对于对比算法的性能优势更加明显。
+                    - generic [ref=e533]: topic_member
+                  - generic [ref=e534]:
+                    - generic [ref=e535]:
+                      - img [ref=e536]
+                      - text: about
+                    - generic [ref=e538]: MVL-IV能够有效处理缺失视图和缺失变量共存的复杂不完整视图设置
+                    - generic [ref=e539]: topic_member
+                  - generic [ref=e540]:
+                    - generic [ref=e541]:
+                      - img [ref=e542]
+                      - text: about
+                    - generic [ref=e544]: MVL-IV恢复的信息比ad-hoc恢复策略更准确和具有判别性。
+                    - generic [ref=e545]: topic_member
+                  - generic [ref=e546]:
+                    - generic [ref=e547]:
+                      - img [ref=e548]
+                      - text: about
+                    - generic [ref=e550]: MVL-IV算法在缺失视图设置下能有效恢复受损图像，利用视图间的互补性和一致性。
+                    - generic [ref=e551]: topic_member
+                  - generic [ref=e552]:
+                    - generic [ref=e553]:
+                      - img [ref=e554]
+                      - text: about
+                    - generic [ref=e556]: MVL-IV算法能够利用视图间的互补性和一致性有效恢复受损图像。
+                    - generic [ref=e557]: topic_member
+                  - generic [ref=e558]:
+                    - generic [ref=e559]:
+                      - img [ref=e560]
+                      - text: about
+                    - generic [ref=e562]: 在Hotel Review数据集评级预测中，MVL-IV在不同子空间维度与缺失变量比例下均取得更高的R2分数，优于对比算法
+                    - generic [ref=e563]: topic_member
+                  - generic [ref=e564]:
+                    - generic [ref=e565]:
+                      - img [ref=e566]
+                      - text: about
+                    - generic [ref=e568]: 在玩具数据和真实数据集上的实验结果表明，研究多视图学习中的不完整视图问题是重要的，且所提算法能有效处理不同应用中的不完整视图。
+                    - generic [ref=e569]: topic_member
+                  - generic [ref=e452]:
+                    - generic [ref=e453]:
+                      - img [ref=e454]
+                      - text: subtopic_of
+                    - generic [ref=e456]: MVL-IV算法的优化与实验验证
+                    - generic [ref=e457]: 子主题3和4分别从优化方法和实验应用两个角度支撑MVL-IV算法的完整实现与评估，合并后形成算法实现与验证的上层主题。

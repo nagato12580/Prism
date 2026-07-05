@@ -1,4 +1,5 @@
 # prism/backend/app/api/upload.py
+import hashlib
 import threading
 import uuid
 from pathlib import Path
@@ -8,7 +9,7 @@ import httpx
 
 from ..database import get_db
 from ..config import settings
-from ..models.knowledge_item import KnowledgeItem, KnowledgeFile
+from ..models.knowledge_item import KnowledgeItem, KnowledgeFile, KnowledgeTopic
 from ..utils.file_parser import extract_text, extract_url
 from ..schemas.knowledge import KnowledgeItemOut
 
@@ -16,14 +17,32 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+DEFAULT_USER_ID = "default-user"
+
+
+def _get_topic_or_404(topic_id: str | None, db: Session) -> KnowledgeTopic | None:
+    if not topic_id:
+        return None
+    topic = db.query(KnowledgeTopic).filter(
+        KnowledgeTopic.id == topic_id,
+        KnowledgeTopic.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not topic:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "topic_not_found", "message": "Topic not found"},
+        )
+    return topic
 
 
 @router.post("/file", response_model=KnowledgeItemOut)
 async def upload_file(
     file: UploadFile = File(...),
     category: str = Form(None),
+    topic_id: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
+    topic = _get_topic_or_404(topic_id, db)
     # 保存文件
     ext = Path(file.filename).suffix
     ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".md", ".txt", ".markdown"}
@@ -32,6 +51,7 @@ async def upload_file(
     saved_name = f"{uuid.uuid4().hex}{ext}"
     saved_path = UPLOAD_DIR / saved_name
     content_bytes = await file.read()
+    md5 = hashlib.md5(content_bytes).hexdigest()
     saved_path.write_bytes(content_bytes)
 
     # 解析
@@ -48,20 +68,28 @@ async def upload_file(
         source_type="file",
         source_ref=str(saved_path),
         tags=[],
-        category=category,
-        user_id="default-user",
+        category=category or (topic.name if topic else None),
+        user_id=DEFAULT_USER_ID,
     )
     db.add(item)
-    db.commit()
+    db.flush()
 
     # 记录文件
     kfile = KnowledgeFile(
-        original_name=file.filename,
-        file_path=str(saved_path),
-        file_type=ext.lstrip("."),
-        file_size=len(content_bytes),
-        parse_status="done",
+        user_id=DEFAULT_USER_ID,
+        topic_id=topic.id if topic else None,
         item_id=item.id,
+        title=title,
+        original_filename=file.filename,
+        media_type="document",
+        mime_type=file.content_type,
+        file_ext=ext.lower(),
+        file_size=len(content_bytes),
+        md5=md5,
+        storage_path=str(saved_path),
+        processing_status="done",
+        source_type="upload",
+        content_text=text,
     )
     db.add(kfile)
     db.commit()

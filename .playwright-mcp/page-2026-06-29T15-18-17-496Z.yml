@@ -1,0 +1,371 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+      - generic [ref=e41]: 用户记忆
+      - generic [ref=e42]:
+        - link "记忆审核 24" [ref=e108] [cursor=pointer]:
+          - /url: /memory/inbox
+          - img [ref=e44]
+          - generic [ref=e47]: 记忆审核
+          - generic [ref=e109]: "24"
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e91]: 知识治理图谱
+            - heading "CKP 与 PKU 治理网络" [level=1] [ref=e92]
+          - generic [ref=e432]:
+            - generic [ref=e433]:
+              - img
+              - textbox "搜索 CKP 或 PKU" [ref=e434]
+            - button "重排" [ref=e435] [cursor=pointer]:
+              - img [ref=e436]
+              - text: 重排
+            - button "刷新" [ref=e439] [cursor=pointer]:
+              - img [ref=e694]
+              - text: 刷新
+        - generic [ref=e93]:
+          - button "CKP Workbench" [ref=e94] [cursor=pointer]
+          - button "全局网络" [active] [ref=e95] [cursor=pointer]
+        - generic [ref=e445]:
+          - generic [ref=e446]:
+            - generic [ref=e447]:
+              - generic [ref=e448]:
+                - button "返回 CKP 网络" [ref=e699] [cursor=pointer]:
+                  - img [ref=e700]
+                - generic [ref=e454]:
+                  - generic [ref=e455]: 实验验证与应用
+                  - generic [ref=e456]: 上级：MVL-IV算法的优化与实验验证
+              - generic [ref=e457]:
+                - img [ref=e458]
+                - generic [ref=e460]: CKP
+                - generic [ref=e461]: "1"
+              - generic [ref=e462]:
+                - img [ref=e463]
+                - generic [ref=e473]: PKU
+                - generic [ref=e474]: "19"
+              - generic [ref=e702]:
+                - img [ref=e703]
+                - generic [ref=e706]: 来源
+                - generic [ref=e707]: "7"
+            - generic [ref=e475]:
+              - generic [ref=e476]:
+                - button "缩小画布" [ref=e477] [cursor=pointer]:
+                  - img [ref=e478]
+                - generic [ref=e481]: 100%
+                - button "放大画布" [ref=e482] [cursor=pointer]:
+                  - img [ref=e483]
+                - button "重置画布缩放" [ref=e486] [cursor=pointer]:
+                  - img [ref=e487]
+              - img "CKP 与 PKU 局部网络" [ref=e708]:
+                - generic [ref=e493]:
+                  - generic [ref=e495]: 子 CKP
+                  - generic [ref=e709]: PKU
+                  - generic [ref=e710]: 来源单元
+                - generic [ref=e497]:
+                  - generic [ref=e502]:
+                    - generic: 实验验证与应用
+                    - generic: CKP
+                  - generic [ref=e711]:
+                    - generic: 实验中MVL-IV算法与MCS...
+                    - generic: PKU
+                  - generic [ref=e713]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e715]:
+                    - generic: 在FG-Net年龄估计数据集上...
+                    - generic: PKU
+                  - generic [ref=e717]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e719]:
+                    - generic: MVL-IV-MKL算法在不同...
+                    - generic: PKU
+                  - generic [ref=e721]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e723]:
+                    - generic: 对于缺失视图，对比算法使用观测...
+                    - generic: PKU
+                  - generic [ref=e725]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e727]:
+                    - generic: MVL-IV算法在TRECVI...
+                    - generic: PKU
+                  - generic [ref=e729]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e731]:
+                    - generic: 对于每个视频镜头，使用1894...
+                    - generic: PKU
+                  - generic [ref=e733]:
+                    - generic: TRECVID2003数据集包...
+                    - generic: PKU
+                  - generic [ref=e735]:
+                    - generic: MVL-IV算法能够同时处理缺...
+                    - generic: PKU
+                  - generic [ref=e737]:
+                    - generic: 在SensIT Vehicle...
+                    - generic: PKU
+                  - generic [ref=e739]:
+                    - generic: MVL-IV算法在缺失视图设置...
+                    - generic: PKU
+                  - generic [ref=e741]:
+                    - generic: MVL-IV能够有效处理缺失视...
+                    - generic: PKU
+                  - generic [ref=e743]:
+                    - generic: MVL-IV恢复的信息比ad-...
+                    - generic: PKU
+                  - generic [ref=e745]:
+                    - generic: MVL-IV算法在缺失视图设置...
+                    - generic: PKU
+                  - generic [ref=e747]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e749]:
+                    - generic: MVL-IV算法能够利用视图间...
+                    - generic: PKU
+                  - generic [ref=e751]:
+                    - generic: 在Hotel Review数据...
+                    - generic: PKU
+                  - generic [ref=e753]:
+                    - generic: 在玩具数据和真实数据集上的实验...
+                    - generic: PKU
+                  - generic [ref=e755]:
+                    - generic: Multi-View_Lear...
+                    - generic: 文档块
+                  - generic [ref=e757]:
+                    - generic: 在无缺失视图时，MVL-IV与...
+                    - generic: PKU
+                  - generic [ref=e759]:
+                    - generic: 在同时缺失变量和缺失视图的混合...
+                    - generic: PKU
+                  - generic [ref=e761]:
+                    - generic: 在无缺失视图的情况下，MVL-...
+                    - generic: PKU
+          - complementary [ref=e638]:
+            - generic [ref=e639]:
+              - generic [ref=e640]:
+                - img [ref=e642]
+                - generic [ref=e644]:
+                  - generic [ref=e645]: CKP
+                  - heading "实验验证与应用" [level=2] [ref=e763]
+              - button "编辑节点" [ref=e647] [cursor=pointer]:
+                - img [ref=e648]
+            - generic [ref=e651]:
+              - button "返回 CKP 网络" [ref=e764] [cursor=pointer]:
+                - img [ref=e765]
+                - text: 返回 CKP 网络
+              - generic [ref=e652]:
+                - generic [ref=e653]: 内容
+                - paragraph [ref=e654]: 通过图像修复、聚类、分类等实验验证MVL-IV算法在不完整视图下的有效性，相比基线方法性能优越。
+              - generic [ref=e655]:
+                - generic [ref=e656]:
+                  - generic [ref=e657]: 类型
+                  - generic [ref=e658]: topic
+                - generic [ref=e659]:
+                  - generic [ref=e660]: 置信度
+                  - generic [ref=e661]: "0.90"
+              - generic [ref=e662]:
+                - generic [ref=e663]:
+                  - generic [ref=e664]: 分类
+                  - generic [ref=e665]: "-"
+                - generic [ref=e666]:
+                  - generic [ref=e667]: 状态
+                  - generic [ref=e668]: draft
+              - generic [ref=e669]:
+                - generic [ref=e670]: 关键词
+                - generic [ref=e671]:
+                  - generic [ref=e675]: MVL-IV
+                  - generic [ref=e767]: 实验
+                  - generic [ref=e768]: 图像修复
+                  - generic [ref=e769]: 聚类
+                  - generic [ref=e770]: 分类
+              - generic [ref=e677]:
+                - heading "CKP-PKU 关系" [level=3] [ref=e771]
+                - generic [ref=e679]:
+                  - generic [ref=e772]:
+                    - generic [ref=e773]:
+                      - img [ref=e774]
+                      - text: about
+                    - generic [ref=e776]: 实验中MVL-IV算法与MCSL、FLSSS、shared Gaussian Process Latent Variable Model和CCA进行比较。
+                    - generic [ref=e777]: topic_member
+                    - generic [ref=e778]: Settlement from document-level topic grouping.
+                  - generic [ref=e779]:
+                    - generic [ref=e780]:
+                      - img [ref=e781]
+                      - text: about
+                    - generic [ref=e783]: 在FG-Net年龄估计数据集上，缺失变量比例从10%增至40%时，CCA算法MAE增加24.92%，而MVL-IV仅增加3%
+                    - generic [ref=e784]: topic_member
+                    - generic [ref=e785]: Settlement from document-level topic grouping.
+                  - generic [ref=e786]:
+                    - generic [ref=e787]:
+                      - img [ref=e788]
+                      - text: about
+                    - generic [ref=e790]: MVL-IV-MKL算法在不同缺失比例下始终优于AVE-MKL算法。
+                    - generic [ref=e791]: topic_member
+                    - generic [ref=e792]: Settlement from document-level topic grouping.
+                  - generic [ref=e793]:
+                    - generic [ref=e794]:
+                      - img [ref=e795]
+                      - text: about
+                    - generic [ref=e797]: 对于缺失视图，对比算法使用观测视图的平均特征进行填充后再进行多视图学习。
+                    - generic [ref=e798]: topic_member
+                    - generic [ref=e799]: Settlement from document-level topic grouping.
+                  - generic [ref=e800]:
+                    - generic [ref=e801]:
+                      - img [ref=e802]
+                      - text: about
+                    - generic [ref=e804]: MVL-IV算法在TRECVID2003数据集上的分类精度一致优于CCA、sGPLVM、MCSL和FLSSS等对比算法
+                    - generic [ref=e805]: topic_member
+                    - generic [ref=e806]: Settlement from document-level topic grouping.
+                  - generic [ref=e807]:
+                    - generic [ref=e808]:
+                      - img [ref=e809]
+                      - text: about
+                    - generic [ref=e811]: 对于每个视频镜头，使用1894维文本特征和165维HSV颜色直方图特征
+                    - generic [ref=e812]: topic_member
+                    - generic [ref=e813]: Settlement from document-level topic grouping.
+                  - generic [ref=e814]:
+                    - generic [ref=e815]:
+                      - img [ref=e816]
+                      - text: about
+                    - generic [ref=e818]: TRECVID2003数据集包含1078个手动标记的视频片段，分属5个类别，均匀分为训练集和测试集
+                    - generic [ref=e819]: topic_member
+                    - generic [ref=e820]: Settlement from document-level topic grouping.
+                  - generic [ref=e821]:
+                    - generic [ref=e822]:
+                      - img [ref=e823]
+                      - text: about
+                    - generic [ref=e825]: MVL-IV算法能够同时处理缺失变量和多视图学习，而对比算法需先填补缺失变量再学习
+                    - generic [ref=e826]: topic_member
+                    - generic [ref=e827]: Settlement from document-level topic grouping.
+                  - generic [ref=e828]:
+                    - generic [ref=e829]:
+                      - img [ref=e830]
+                      - text: about
+                    - generic [ref=e832]: 在SensIT Vehicle数据集上，MVL-IV算法在不同缺失视图比例下均优于对比算法。
+                    - generic [ref=e833]: topic_member
+                    - generic [ref=e834]: Settlement from document-level topic grouping.
+                  - generic [ref=e835]:
+                    - generic [ref=e836]:
+                      - img [ref=e837]
+                      - text: about
+                    - generic [ref=e839]: MVL-IV算法在缺失视图设置下，随着缺失视图数量的增加，其相对于对比算法的性能优势更加明显。
+                    - generic [ref=e840]: topic_member
+                    - generic [ref=e841]: Settlement from document-level topic grouping.
+                  - generic [ref=e842]:
+                    - generic [ref=e843]:
+                      - img [ref=e844]
+                      - text: about
+                    - generic [ref=e846]: MVL-IV能够有效处理缺失视图和缺失变量共存的复杂不完整视图设置
+                    - generic [ref=e847]: topic_member
+                    - generic [ref=e848]: Settlement from document-level topic grouping.
+                  - generic [ref=e849]:
+                    - generic [ref=e850]:
+                      - img [ref=e851]
+                      - text: about
+                    - generic [ref=e853]: MVL-IV恢复的信息比ad-hoc恢复策略更准确和具有判别性。
+                    - generic [ref=e854]: topic_member
+                    - generic [ref=e855]: Settlement from document-level topic grouping.
+                  - generic [ref=e856]:
+                    - generic [ref=e857]:
+                      - img [ref=e858]
+                      - text: about
+                    - generic [ref=e860]: MVL-IV算法在缺失视图设置下能有效恢复受损图像，利用视图间的互补性和一致性。
+                    - generic [ref=e861]: topic_member
+                    - generic [ref=e862]: Settlement from document-level topic grouping.
+                  - generic [ref=e863]:
+                    - generic [ref=e864]:
+                      - img [ref=e865]
+                      - text: about
+                    - generic [ref=e867]: MVL-IV算法能够利用视图间的互补性和一致性有效恢复受损图像。
+                    - generic [ref=e868]: topic_member
+                    - generic [ref=e869]: Settlement from document-level topic grouping.
+                  - generic [ref=e870]:
+                    - generic [ref=e871]:
+                      - img [ref=e872]
+                      - text: about
+                    - generic [ref=e874]: 在Hotel Review数据集评级预测中，MVL-IV在不同子空间维度与缺失变量比例下均取得更高的R2分数，优于对比算法
+                    - generic [ref=e875]: topic_member
+                    - generic [ref=e876]: Settlement from document-level topic grouping.
+                  - generic [ref=e877]:
+                    - generic [ref=e878]:
+                      - img [ref=e879]
+                      - text: about
+                    - generic [ref=e881]: 在玩具数据和真实数据集上的实验结果表明，研究多视图学习中的不完整视图问题是重要的，且所提算法能有效处理不同应用中的不完整视图。
+                    - generic [ref=e882]: topic_member
+                    - generic [ref=e883]: Settlement from document-level topic grouping.
+                  - generic [ref=e884]:
+                    - generic [ref=e885]:
+                      - img [ref=e886]
+                      - text: about
+                    - generic [ref=e888]: 在无缺失视图时，MVL-IV与竞争者性能相当；但在缺失视图时，MVL-IV优势明显，且随缺失比例增加而更显著。
+                    - generic [ref=e889]: topic_member
+                    - generic [ref=e890]: Settlement from document-level topic grouping.
+                  - generic [ref=e891]:
+                    - generic [ref=e892]:
+                      - img [ref=e893]
+                      - text: about
+                    - generic [ref=e895]: 在同时缺失变量和缺失视图的混合设置下，MVL-IV算法仍能处理并恢复不完整视图。
+                    - generic [ref=e896]: topic_member
+                    - generic [ref=e897]: Settlement from document-level topic grouping.
+                  - generic [ref=e898]:
+                    - generic [ref=e899]:
+                      - img [ref=e900]
+                      - text: about
+                    - generic [ref=e902]: 在无缺失视图的情况下，MVL-IV算法与对比算法性能相当。
+                    - generic [ref=e903]: topic_member
+                    - generic [ref=e904]: Settlement from document-level topic grouping.

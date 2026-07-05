@@ -152,8 +152,10 @@ def _build_knowledge_topic_search(ctx: ToolContext) -> StructuredTool:
         func=run,
         name="knowledge_topic_search",
         description=(
-            "Search CKP topic hubs and governed knowledge themes. Use when the user asks what topics, "
-            "knowledge points, structures, relationships, or stable themes exist about a subject."
+            "List and filter CKP topic hubs by theme, ckp_type, or topic_level. "
+            "Use when the user asks what topics, knowledge points, structures, or stable themes exist about a subject. "
+            "Do NOT use to read evidence content (viewpoints/facts/rules) — use knowledge_evidence_search. "
+            "Do NOT use for multi-hop entity or source relationships — use entity_graph_search."
         ),
         args_schema=KnowledgeTopicSearchInput,
     )
@@ -220,8 +222,12 @@ def _build_knowledge_evidence_search(ctx: ToolContext) -> StructuredTool:
         func=run,
         name="knowledge_evidence_search",
         description=(
-            "Search PKU evidence across uploaded documents and personal knowledge units. Use when the "
-            "user asks for concrete opinions, facts, rules, claims, methods, or evidence about a subject."
+            "Search PKU evidence across uploaded documents and personal knowledge units, filtered by unit_type "
+            "and source_kind. Use when the user asks for concrete opinions, facts, rules, claims, methods, or "
+            "evidence about a subject. "
+            "Do NOT use to list CKP topics — use knowledge_topic_search. "
+            "Do NOT use for raw document passages alone — use raw_document_search. "
+            "Do NOT use for entity relationships — use entity_graph_search."
         ),
         args_schema=KnowledgeEvidenceSearchInput,
     )
@@ -290,7 +296,9 @@ def _build_knowledge_material_search(ctx: ToolContext) -> StructuredTool:
         description=(
             "Find source materials by first searching PKU/CKP, then backtracking to raw document chunks "
             "and personal knowledge sources. Use for questions like 'what did my previous materials say "
-            "about X' or 'what opinions are in my materials about X'."
+            "about X' or 'what opinions are in my materials about X' (set intent=opinions for viewpoints). "
+            "Do NOT use to list CKP topics — use knowledge_topic_search. "
+            "Do NOT use for raw chunk passages alone — use raw_document_search."
         ),
         args_schema=KnowledgeMaterialSearchInput,
     )
@@ -493,8 +501,10 @@ def _build_raw_document_search(ctx: ToolContext) -> StructuredTool:
         func=run,
         name="raw_document_search",
         description=(
-            "Search raw uploaded document chunks and original passages. Use only when the user needs "
-            "exact document wording, paragraph-level details, parameters, or when governed PKU/CKP evidence is insufficient."
+            "Search raw uploaded document chunks and original passages. Use ONLY when the user needs "
+            "exact document wording, paragraph-level details, parameters, or when governed PKU/CKP evidence is insufficient. "
+            "Do NOT use as the first choice for governed knowledge — try knowledge_evidence_search or "
+            "knowledge_material_search first."
         ),
         args_schema=RawDocumentSearchInput,
     )
@@ -504,7 +514,13 @@ register_tool(
     ToolSpec(
         key="knowledge_topic_search",
         name="knowledge_topic_search",
-        description="Search CKP topic hubs and governed knowledge themes.",
+        description=(
+            "List and filter CKP topic hubs by theme, ckp_type, or topic_level. "
+            "Use when the user asks 'what topics/knowledge points do I have about X' or wants the structure "
+            "and relationships among their canonical knowledge points. "
+            "Do NOT use to read evidence content (viewpoints/facts/rules) — use knowledge_evidence_search. "
+            "Do NOT use for multi-hop entity or source relationships — use entity_graph_search."
+        ),
         builder=_build_knowledge_topic_search,
         default_enabled=True,
     )
@@ -514,7 +530,14 @@ register_tool(
     ToolSpec(
         key="knowledge_evidence_search",
         name="knowledge_evidence_search",
-        description="Search PKU evidence across documents and personal knowledge units.",
+        description=(
+            "Search PKU evidence units (claims, definitions, rules, opinions, methods) across uploaded "
+            "documents and personal knowledge units, filtered by unit_type and source_kind. "
+            "Use when the user asks 'what viewpoints/facts/rules/evidence do I have about X'. "
+            "Do NOT use to list CKP topics — use knowledge_topic_search. "
+            "Do NOT use for raw document passages alone — use raw_document_search. "
+            "Do NOT use for entity relationships — use entity_graph_search."
+        ),
         builder=_build_knowledge_evidence_search,
         default_enabled=True,
     )
@@ -524,7 +547,13 @@ register_tool(
     ToolSpec(
         key="knowledge_material_search",
         name="knowledge_material_search",
-        description="Find source materials through CKP/PKU backtracking.",
+        description=(
+            "Backtrack from PKU/CKP to original source materials and return material-level evidence packages. "
+            "Use when the user asks 'what do my saved materials about X say / what viewpoints are in my "
+            "documents about X' (set intent=opinions for viewpoint questions). "
+            "Do NOT use to list CKP topics — use knowledge_topic_search. "
+            "Do NOT use for raw chunk passages alone — use raw_document_search."
+        ),
         builder=_build_knowledge_material_search,
         default_enabled=True,
     )
@@ -534,7 +563,13 @@ register_tool(
     ToolSpec(
         key="raw_document_search",
         name="raw_document_search",
-        description="Search raw uploaded document chunks and original passages.",
+        description=(
+            "Keyword-search raw uploaded document chunks and return original passages. "
+            "Use ONLY when the user explicitly needs file original text/paragraphs/parameters/context detail, "
+            "or when governed-layer evidence is insufficient. "
+            "Do NOT use as the first choice for governed knowledge — try knowledge_evidence_search or "
+            "knowledge_material_search first."
+        ),
         builder=_build_raw_document_search,
         default_enabled=True,
     )

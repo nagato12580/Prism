@@ -18,7 +18,7 @@ from backend.app.models.knowledge_governance import (
 from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem
 from backend.app.services.ckp_vectors import search_ckp_vectors
 from backend.app.services.pku_vectors import search_pku_vectors
-from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
+from engine.app.agent.tools.base import ToolContext
 from engine.app.config import settings
 
 
@@ -806,14 +806,3 @@ def _build_governed_knowledge_search(ctx: ToolContext) -> StructuredTool:
         ),
         args_schema=GovernedKnowledgeSearchInput,
     )
-
-
-register_tool(
-    ToolSpec(
-        key=KEY,
-        name=KEY,
-        description="Search governed canonical knowledge with PKU and source backtracking.",
-        builder=_build_governed_knowledge_search,
-        default_enabled=False,
-    )
-)

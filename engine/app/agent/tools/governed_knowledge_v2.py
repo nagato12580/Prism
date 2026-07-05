@@ -32,7 +32,6 @@ from engine.app.agent.tools.governed_knowledge import (
     _personal_asset_unit_result,
     _query_terms,
     _score_fields,
-    _source_for_pku,
 )
 from engine.app.config import settings
 from engine.app.ingestion.vectorizer import embed_query
@@ -302,12 +301,13 @@ def _build_governed_knowledge_v2(ctx: ToolContext) -> StructuredTool:
         func=run,
         name=KEY,
         description=(
-            "Search Prism's governed personal knowledge layer using vector-first retrieval. "
-            "It retrieves relevant document chunks via vector similarity, then traces back through "
-            "personal knowledge units (PKU) to aggregate canonical knowledge points (CKP) with full "
-            "evidence chains. Use when the user asks for stable conclusions, relationships between "
-            "their saved knowledge and documents, evidence-backed personal knowledge, or cross-source "
-            "synthesis. This tool provides semantic matching (not just keyword matching)."
+            "Semantic vector-first search over Prism's governed personal knowledge: chunk vector recall → "
+            "PKU backtracking → CKP aggregation with full evidence chains. Use for natural-language questions "
+            "over personal knowledge that need semantic matching (not just keywords), stable conclusions, or "
+            "cross-source synthesis. "
+            "Do NOT use for multi-hop entity or source relationships — use entity_graph_search. "
+            "Do NOT use for multi-step deep synthesis with judge/completeness checks — use deep_knowledge_search. "
+            "Do NOT use to list CKP topics by type — use knowledge_topic_search."
         ),
         args_schema=GovernedKnowledgeV2Input,
     )

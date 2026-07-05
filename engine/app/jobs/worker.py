@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app.models import KnowledgeFile, KnowledgeJob
 from backend.app.services.document_text_quality import assess_document_text
+from backend.app.services.graph_sync import project_governance_graph_if_enabled
 from backend.app.services.knowledge_governance import settle_document_item_to_governance
 from backend.app.utils.time import local_now
 from engine.app.config import settings
@@ -400,6 +401,13 @@ def run_governance_job(job_id, *, worker_id):
             resource.governance_finished_at = local_now()
             resource.governance_error_message = None
             mark_done(db, job)
+            project_governance_graph_if_enabled(
+                db,
+                user_id=getattr(resource, "user_id", None) or "default-user",
+                pku_ids=set(result.pku_ids) if result else None,
+                ckp_ids=set(result.ckp_ids) if result else None,
+                entity_ids=set(result.entity_ids) if result else None,
+            )
             return result
         except HardJobFailure as exc:
             db.rollback()

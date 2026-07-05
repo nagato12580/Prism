@@ -20,6 +20,32 @@ KEY = "entity_graph_search"
 _ENTITY_KEY_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
 _TWO_LATIN_WORDS_RE = re.compile(r"^([A-Za-z]+)\s+([A-Za-z]+)$")
 _CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
+_STOP_TERMS = {
+    "什么",
+    "哪些",
+    "哪个",
+    "多少",
+    "如何",
+    "怎么",
+    "相关",
+    "资料",
+    "知识点",
+    "出处",
+    "出现",
+    "提到",
+    "关联",
+    "里",
+    "的",
+    "与",
+    "和",
+    "or",
+    "and",
+    "the",
+    "what",
+    "which",
+    "where",
+    "related",
+}
 
 
 class EntityGraphSearchInput(BaseModel):
@@ -65,6 +91,32 @@ def _alias_keys(query: str) -> list[str]:
     return deduped
 
 
+def _query_terms(query: str) -> list[str]:
+    stripped = query.strip()
+    if not stripped:
+        return []
+    terms: list[str] = []
+    lowered = stripped.lower()
+    for token in re.findall(r"[A-Za-z0-9._%+-@]+|[\u4e00-\u9fff]{2,}", lowered):
+        token = token.strip()
+        if not token or token in _STOP_TERMS:
+            continue
+        if len(token) == 1:
+            continue
+        terms.append(token)
+    # Also add normalized compact key for mixed/scripted entity names.
+    normalized = _normalize_entity_key(stripped)
+    if normalized and normalized not in terms and normalized not in _STOP_TERMS:
+        terms.append(normalized)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        if term not in seen:
+            deduped.append(term)
+            seen.add(term)
+    return deduped
+
+
 def _plain_dict(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -81,6 +133,148 @@ def _source_dict(value: Any) -> dict[str, Any]:
     if data and not data.get("snippet") and data.get("evidence_span"):
         data["snippet"] = data["evidence_span"]
     return data
+
+
+def _dedupe_dicts(items: list[dict[str, Any]], key_fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    seen: set[tuple[Any, ...]] = set()
+    deduped: list[dict[str, Any]] = []
+    for item in items:
+        key_values: list[Any] = []
+        for field in key_fields:
+            value = item.get(field)
+            if isinstance(value, list):
+                value = tuple(value)
+            elif isinstance(value, dict):
+                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            key_values.append(value)
+        key = tuple(key_values)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _text_term_hits(text: str, query_terms: list[str]) -> int:
+    lowered = (text or "").lower()
+    return sum(1 for term in query_terms if term and term in lowered)
+
+
+def _score_governed_path(path: dict[str, Any], query_terms: list[str]) -> tuple[int, float, float, float, str]:
+    title_hits = _text_term_hits(str(path.get("ckp_title") or ""), query_terms)
+    support = float(path.get("support_confidence") or 0.0)
+    ckp_conf = float(path.get("ckp_confidence") or 0.0)
+    pku_conf = float(path.get("pku_confidence") or 0.0)
+    title = str(path.get("ckp_title") or "")
+    return (title_hits, support, ckp_conf, pku_conf, title)
+
+
+def _score_source(source: dict[str, Any], governed_paths: list[dict[str, Any]], query_terms: list[str]) -> tuple[int, int, float, float, str]:
+    source_kind = source.get("source_kind")
+    source_id = source.get("source_id")
+    matching_paths = [
+        path
+        for path in governed_paths
+        if path.get("source_kind") == source_kind and path.get("source_id") == source_id
+    ]
+    governed_count = len(matching_paths)
+    text_hits = _text_term_hits(str(source.get("title") or source.get("snippet") or ""), query_terms)
+    best_support = max((float(path.get("support_confidence") or 0.0) for path in matching_paths), default=0.0)
+    source_conf = float(source.get("confidence") or 0.0)
+    title = str(source.get("title") or source.get("snippet") or "")
+    return (governed_count, text_hits, best_support, source_conf, title)
+
+
+def _score_entity_path(path: dict[str, Any], governed_paths: list[dict[str, Any]]) -> tuple[int, str, str]:
+    path_nodes = path.get("path") or []
+    entity_name = str(path_nodes[0] if path_nodes else "")
+    governed_count = sum(1 for item in governed_paths if item.get("entity_name") == entity_name)
+    relation_type = str(path.get("relation_type") or "")
+    display = " ".join(str(part) for part in path_nodes)
+    return (governed_count, relation_type, display)
+
+
+def _rank_governed_paths(governed_paths: list[dict[str, Any]], query_terms: list[str], limit: int) -> list[dict[str, Any]]:
+    ranked = sorted(governed_paths, key=lambda item: _score_governed_path(item, query_terms), reverse=True)
+    return _dedupe_dicts(ranked, ("entity_name", "pku_id", "ckp_id", "source_kind", "source_id"))[:limit]
+
+
+def _rank_sources(sources: list[dict[str, Any]], governed_paths: list[dict[str, Any]], query_terms: list[str], limit: int) -> list[dict[str, Any]]:
+    ranked = sorted(sources, key=lambda item: _score_source(item, governed_paths, query_terms), reverse=True)
+    return _dedupe_dicts(ranked, ("source_kind", "source_id", "snippet"))[:limit]
+
+
+def _rank_entity_paths(paths: list[dict[str, Any]], governed_paths: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    ranked = sorted(paths, key=lambda item: _score_entity_path(item, governed_paths), reverse=True)
+    return _dedupe_dicts(ranked, ("relation_type", "path"))[:limit]
+
+
+def _unique_non_empty(values: list[str], limit: int) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        value = value.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _query_aware_summary(
+    status: str,
+    query: str,
+    entities: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    paths: list[dict[str, Any]],
+    governed_paths: list[dict[str, Any]],
+) -> str:
+    if status != "success":
+        return "No entity graph context found for the normalized query keys."
+
+    entity_names = _unique_non_empty(
+        [str(entity.get("canonical_name") or entity.get("name") or "") for entity in entities],
+        limit=2,
+    )
+    ckp_titles = _unique_non_empty(
+        [str(item.get("ckp_title") or "") for item in governed_paths],
+        limit=3,
+    )
+    source_titles = _unique_non_empty(
+        [str(source.get("title") or source.get("snippet") or "") for source in sources],
+        limit=2,
+    )
+
+    entity_part = ", ".join(entity_names) if entity_names else query.strip()
+    ckp_part = ", ".join(ckp_titles)
+    source_part = ", ".join(source_titles)
+
+    if governed_paths:
+        summary = (
+            f"Found entity context for {entity_part}. "
+            f"Most relevant knowledge points: {ckp_part}."
+        )
+        if source_part:
+            summary += f" Source-backed evidence appears in: {source_part}."
+        summary += (
+            f" Returned {len(governed_paths)} CKP/PKU path(s), {len(sources)} source(s), "
+            f"and {len(paths)} entity path(s)."
+        )
+        return summary
+
+    if sources:
+        summary = f"Found entity context for {entity_part}."
+        if source_part:
+            summary += f" Source-backed evidence appears in: {source_part}."
+        summary += f" Returned {len(sources)} source(s) and {len(paths)} entity path(s)."
+        return summary
+
+    return (
+        f"Found entity context for {entity_part}. "
+        f"Returned {len(paths)} entity path(s), but no source-backed or CKP/PKU evidence was found."
+    )
 
 
 class Neo4jEntityQueryClient:
@@ -127,7 +321,23 @@ class Neo4jEntityQueryClient:
             relation_type: type(rel),
             to: coalesce(neighbor.canonical_name, neighbor.name)
         })[..$limit] AS paths
-        RETURN entities, sources, paths
+        UNWIND entities AS e3
+        OPTIONAL MATCH (e3)<-[bridge:MENTIONS_ENTITY]-(pku:PKU)<-[support:SUPPORTED_BY]-(ckp:CKP)
+        WITH entities, sources, paths,
+             collect(DISTINCT {
+                 entity_name: coalesce(e3.canonical_name, e3.name),
+                 pku_id: pku.id,
+                 pku_unit_type: pku.unit_type,
+                 ckp_id: ckp.id,
+                 ckp_title: ckp.title,
+                 source_kind: bridge.source_kind,
+                 source_id: bridge.source_id,
+                 pku_confidence: pku.confidence,
+                 ckp_confidence: ckp.confidence,
+                 support_role: support.role,
+                 support_confidence: support.confidence
+             })[..$limit] AS governed_paths
+        RETURN entities, sources, paths, governed_paths
         """
         params = {"keys": normalized_keys, "limit": limit}
         with self.driver.session(database=self.database) as session:
@@ -136,6 +346,7 @@ class Neo4jEntityQueryClient:
         entities: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         paths: list[dict[str, Any]] = []
+        governed_paths: list[dict[str, Any]] = []
         for record in records:
             for entity in record.get("entities", []) or []:
                 data = _plain_dict(entity)
@@ -157,7 +368,16 @@ class Neo4jEntityQueryClient:
                             "relation_type": rel_type,
                         }
                     )
-        return {"entities": entities, "sources": sources, "paths": paths}
+            for governed_path in record.get("governed_paths", []) or []:
+                data = _plain_dict(governed_path)
+                if data.get("pku_id") and data.get("ckp_id"):
+                    governed_paths.append(data)
+        return {
+            "entities": entities,
+            "sources": sources,
+            "paths": paths,
+            "governed_paths": governed_paths,
+        }
 
     def close(self) -> None:
         close = getattr(self.driver, "close", None)
@@ -171,6 +391,7 @@ class EntityGraphSearchService:
 
     def search_entity_context(self, query: str, limit: int = 8) -> dict[str, Any]:
         normalized_keys = _alias_keys(query)
+        query_terms = _query_terms(query)
         if not normalized_keys:
             return {
                 "status": "insufficient",
@@ -178,7 +399,9 @@ class EntityGraphSearchService:
                 "entities": [],
                 "sources": [],
                 "paths": [],
+                "governed_paths": [],
                 "normalized_keys": normalized_keys,
+                "query_terms": query_terms,
             }
         try:
             payload = self.client.query_entity_context(normalized_keys, limit)
@@ -189,19 +412,25 @@ class EntityGraphSearchService:
                 "entities": [],
                 "sources": [],
                 "paths": [],
+                "governed_paths": [],
                 "normalized_keys": normalized_keys,
+                "query_terms": query_terms,
             }
         entities = list(payload.get("entities", []))
-        sources = list(payload.get("sources", []))
-        paths = list(payload.get("paths", []))
-        status = "success" if entities or sources else "insufficient"
+        governed_paths = _rank_governed_paths(list(payload.get("governed_paths", [])), query_terms, limit)
+        sources = _rank_sources(list(payload.get("sources", [])), governed_paths, query_terms, limit)
+        paths = _rank_entity_paths(list(payload.get("paths", [])), governed_paths, limit)
+        status = "success" if entities or sources or governed_paths else "insufficient"
+        summary = _query_aware_summary(status, query, entities, sources, paths, governed_paths)
         return {
             "status": status,
-            "summary": payload.get("summary") or _summary(status, entities, sources, paths),
+            "summary": summary,
             "entities": entities,
             "sources": sources,
             "paths": paths,
+            "governed_paths": governed_paths,
             "normalized_keys": normalized_keys,
+            "query_terms": query_terms,
         }
 
 
@@ -210,11 +439,29 @@ def _summary(
     entities: list[dict[str, Any]],
     sources: list[dict[str, Any]],
     paths: list[dict[str, Any]],
+    governed_paths: list[dict[str, Any]],
 ) -> str:
     if status == "success":
+        if governed_paths:
+            ckp_titles = [str(item.get("ckp_title") or "") for item in governed_paths if item.get("ckp_title")]
+            unique_titles: list[str] = []
+            seen_titles: set[str] = set()
+            for title in ckp_titles:
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                unique_titles.append(title)
+            preview = ", ".join(unique_titles[:3])
+            more = len(unique_titles) - min(len(unique_titles), 3)
+            suffix = f" (+{more} more)" if more > 0 else ""
+            return (
+                f"Found {len(entities)} entity result(s), {len(governed_paths)} CKP/PKU path(s), "
+                f"and {len(sources)} source(s). Related knowledge points: {preview}{suffix}."
+            )
         return (
             f"Found {len(entities)} entity result(s), "
-            f"{len(sources)} source(s), and {len(paths)} path(s)."
+            f"{len(sources)} source(s), {len(paths)} entity path(s), "
+            f"and {len(governed_paths)} CKP/PKU path(s)."
         )
     return "No entity graph context found for the normalized query keys."
 
@@ -234,6 +481,15 @@ def build(ctx: ToolContext, graph_search: Any | None = None) -> StructuredTool:
 
     def run(query: str, limit: int = 8) -> str:
         payload = service.search_entity_context(query, limit=limit)
+        if not payload.get("summary"):
+            payload["summary"] = _query_aware_summary(
+                payload.get("status", "insufficient"),
+                query,
+                list(payload.get("entities", [])),
+                list(payload.get("sources", [])),
+                list(payload.get("paths", [])),
+                list(payload.get("governed_paths", [])),
+            )
         sources = list(payload.get("sources", []))
         citation_keys = {_citation_key(source) for source in ctx.citations}
         for source in sources:
@@ -245,6 +501,7 @@ def build(ctx: ToolContext, graph_search: Any | None = None) -> StructuredTool:
             "entity_count": len(payload.get("entities", [])),
             "source_count": len(sources),
             "path_count": len(payload.get("paths", [])),
+            "governed_path_count": len(payload.get("governed_paths", [])),
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -252,8 +509,11 @@ def build(ctx: ToolContext, graph_search: Any | None = None) -> StructuredTool:
         func=run,
         name=KEY,
         description=(
-            "Search the entity graph for people, organizations, papers, aliases, "
-            "and source-backed paths. Use before declaring a named entity absent."
+            "Search the entity graph (Neo4j) for people, organizations, papers, aliases, and source-backed "
+            "multi-hop paths. Use when the user asks whether a named entity exists, who/what it relates to, "
+            "or which sources mention it — and ALWAYS use it before declaring a named entity absent. "
+            "Do NOT use to filter CKP topics by type — use knowledge_topic_search. "
+            "Do NOT use for semantic evidence recall — use knowledge_evidence_search or governed_knowledge_v2."
         ),
         args_schema=EntityGraphSearchInput,
     )
@@ -264,8 +524,11 @@ register_tool(
         key=KEY,
         name=KEY,
         description=(
-            "Search the entity graph for people, organizations, papers, aliases, "
-            "and source-backed paths. Use before declaring a named entity absent."
+            "Search the entity graph (Neo4j) for people, organizations, papers, aliases, and source-backed "
+            "multi-hop paths. Use when the user asks whether a named entity exists, who/what it relates to, "
+            "or which sources mention it — and ALWAYS use it before declaring a named entity absent. "
+            "Do NOT use to filter CKP topics by type — use knowledge_topic_search. "
+            "Do NOT use for semantic evidence recall — use knowledge_evidence_search or governed_knowledge_v2."
         ),
         builder=build,
         default_enabled=True,

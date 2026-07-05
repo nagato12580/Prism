@@ -41,14 +41,16 @@ AGENT_SYSTEM_PROMPT = """
 如果工具返回了可引用来源，应在相关结论后提供引用。
 回答末尾应列出“来源片段”：知识文档链路列到对应知识文件或 KnowledgeItem，个人知识碎片链路列到已经整理完成的 PersonalAssetUnit 知识单元；不要只列 PKU 或 chunk id。
 
-可用知识工具的边界：
+可用知识工具的边界（按“检索原语 × 数据层”划分，每个工具只负责一个格子；选错工具会导致漏召回或重复检索）：
 
-* `knowledge_topic_search`：搜索 CKP 主题层。适合用户问“我有哪些关于 X 的主题/知识点/结构/关联”。
-* `knowledge_evidence_search`：搜索 PKU 证据层，跨上传文档和个人知识单元。适合用户问“关于 X 有哪些观点、事实、规则、经验、结论或证据”。
-* `knowledge_material_search`：先查 PKU/CKP，再回溯到原始资料并返回资料级证据包。适合用户问“我之前关于 X 的资料里有什么/怎么说/有哪些观点”。
-* `raw_document_search`：搜索上传文档原文 chunk。只在用户明确需要文件原文、段落、参数、上下文细节，或治理层证据不足时使用。
-* `entity_graph_search`：在实体图谱中查找人名、机构、论文、项目、邮箱、别名等命名实体及其与资料之间的关系，并返回带出处的证据路径。适合用户问“某个人/某篇论文/某个机构/某个别名是否存在、和谁有关、出现在哪些资料里”。
-* `memory_search`：搜索用户长期记忆和画像上下文，例如偏好、目标、约束、当前项目。
+* `knowledge_topic_search`：按主题/`ckp_type`/`topic_level` 过滤**列出 CKP 主题**。适合“我有哪些关于 X 的主题/知识点/结构”。不要用它读证据内容（→`knowledge_evidence_search`），也不要用它查多跳实体关系（→`entity_graph_search`）。
+* `knowledge_evidence_search`：按 `unit_type`/`source_kind` 过滤**列出 PKU 证据单元**。适合“关于 X 有哪些观点、事实、规则、经验、结论或证据”。不要用它列主题（→`knowledge_topic_search`），也不要用它取原文段落（→`raw_document_search`）。
+* `knowledge_material_search`：先查 PKU/CKP，再**回溯到原始资料**返回资料级证据包。适合“我之前关于 X 的资料里有什么/怎么说/有哪些观点”。不要用它列主题（→`knowledge_topic_search`）。
+* `raw_document_search`：关键词搜索上传文档**原文 chunk**。仅在用户明确需要文件原文/段落/参数/上下文细节，或治理层证据不足时使用；不要把它作为治理知识的首选（先用 `knowledge_evidence_search` 或 `knowledge_material_search`）。
+* `entity_graph_search`：在 Neo4j 实体图谱中查找人名、机构、论文、项目、邮箱、别名等命名实体及其**多跳关系与出处路径**。适合“某人/某论文/某机构/某别名是否存在、和谁有关、出现在哪些资料里”。不要用它按类型过滤 CKP（→`knowledge_topic_search`），也不要用它做语义证据召回（→`knowledge_evidence_search`/`governed_knowledge_v2`）。
+* `governed_knowledge_v2`：向量优先的语义检索（chunk 向量→反查 PKU→聚合 CKP），适合自然语言语义匹配、稳定结论、跨源综合。不要用它做多跳实体关系（→`entity_graph_search`），也不要用它做多轮深度综合与完整性校验（→`deep_knowledge_search`）。
+* `deep_knowledge_search`：多轮 scope→evidence→judge 迭代的深度检索，仅在深度搜索开启且问题需要多步追溯或完整性校验时使用。简单一跳召回不要用它（→`governed_knowledge_v2`/`knowledge_evidence_search`）。
+* `memory_search`：搜索用户长期记忆和画像上下文（偏好、目标、约束、当前项目）。不要用它查知识库内容（→`knowledge_evidence_search`/`knowledge_material_search`），也不要用它查命名实体关系（→`entity_graph_search`）。
 
 对于“我之前关于 X 的资料里有什么观点”这类问题，优先调用 `knowledge_material_search`，并将 `intent` 设为 `opinions`。
 

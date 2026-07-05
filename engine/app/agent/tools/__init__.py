@@ -11,6 +11,7 @@ import engine.app.agent.tools.datetime  # noqa: F401
 import engine.app.agent.tools.entity_graph_search  # noqa: F401
 import engine.app.agent.tools.assets  # noqa: F401
 import engine.app.agent.tools.governed_knowledge  # noqa: F401
+import engine.app.agent.tools.governed_knowledge_v2  # noqa: F401
 import engine.app.agent.tools.deep_knowledge_search  # noqa: F401
 import engine.app.agent.tools.knowledge_governance  # noqa: F401
 import engine.app.agent.tools.knowledge  # noqa: F401

@@ -53,9 +53,12 @@ def _build_deep_knowledge_search(ctx: ToolContext) -> StructuredTool:
         func=run,
         name=KEY,
         description=(
-            "Deep governed knowledge search. Use when deep search is enabled and the user asks a knowledge-base "
-            "question that needs CKP/PKU scope discovery, source-backed evidence, multi-step follow-up search, "
-            "or completeness checking."
+            "Deep governed knowledge search with multi-round scope discovery, source-backed evidence "
+            "expansion, and judge-directed completeness checks. Use ONLY when deep search is enabled and the "
+            "user asks a knowledge-base question that needs CKP/PKU scope discovery, multi-step follow-up "
+            "search, or completeness verification. "
+            "Do NOT use for simple one-hop recall — use governed_knowledge_v2 or knowledge_evidence_search. "
+            "Do NOT use for entity relationships — use entity_graph_search."
         ),
         args_schema=DeepKnowledgeSearchInput,
     )
