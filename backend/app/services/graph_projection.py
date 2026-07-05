@@ -329,3 +329,59 @@ def _source_node_for_mention(db, mention: EntityMention, user_id: str) -> dict:
 
 def _relation_props(model, names):
     return {name: getattr(model, name) for name in names}
+
+
+def project_item_entities(db, graph, item_id: str, user_id: str = "default-user") -> int:
+    """Incrementally project one item's entities + mentions to Neo4j.
+
+    Upserts the Source node per chunk, the Entity nodes, and MENTIONED_IN edges.
+    Returns the number of edges projected. Scoped to one item (no full reproject).
+    """
+    edges = 0
+    mentions = (
+        db.query(EntityMention)
+        .join(KnowledgeEntity, EntityMention.entity_id == KnowledgeEntity.id)
+        .filter(EntityMention.item_id == item_id, KnowledgeEntity.status != "deprecated")
+        .all()
+    )
+    if not mentions:
+        return 0
+
+    entity_cache: dict[str, KnowledgeEntity] = {}
+    source_cache: set[str] = set()
+    for mention in mentions:
+        entity = entity_cache.get(mention.entity_id)
+        if entity is None:
+            entity = db.query(KnowledgeEntity).filter_by(id=mention.entity_id).one_or_none()
+            if entity is None:
+                continue
+            entity_cache[mention.entity_id] = entity
+            graph.upsert_entity(
+                {
+                    "id": entity.id,
+                    "user_id": entity.user_id,
+                    "entity_type": entity.entity_type,
+                    "canonical_name": entity.canonical_name,
+                    "normalized_key": entity.normalized_key,
+                    "status": entity.status,
+                    "confidence": entity.confidence,
+                }
+            )
+
+        source_node = _source_node_for_mention(db, mention, user_id)
+        if source_node["id"] not in source_cache:
+            graph.upsert_source(source_node)
+            source_cache.add(source_node["id"])
+        graph.relate(
+            "Entity",
+            mention.entity_id,
+            "MENTIONED_IN",
+            "Source",
+            source_node["id"],
+            _relation_props(
+                mention,
+                ["confidence", "evidence_span", "extraction_method", "source_kind", "source_id"],
+            ),
+        )
+        edges += 1
+    return edges

@@ -94,3 +94,88 @@ def test_extract_stage_a_parallel_isolates_chunk_failure(mock_extract):
     result = extract_stage_a_parallel([("bad", "x"), ("good", "y")], max_workers=2)
     assert result["good"] and result["good"][0].surface_text == "good"
     assert result.get("bad", []) == []  # failed chunk does not crash the batch
+
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from backend.app.database import Base
+from backend.app.models import EntityMention, KnowledgeChunk, KnowledgeEntity, KnowledgeItem
+from backend.app.services.graph_projection import project_item_entities
+
+
+class FakeGraph:
+    def __init__(self):
+        self.upserted_sources = []
+        self.upserted_entities = []
+        self.relations = []
+
+    def upsert_source(self, data):
+        self.upserted_sources.append(data)
+
+    def upsert_entity(self, data):
+        self.upserted_entities.append(data)
+
+    def relate(self, start_label, start_id, rel_type, end_label, end_id, props=None):
+        self.relations.append((start_label, start_id, rel_type, end_label, end_id))
+
+
+def _sqlite_session():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+
+
+def test_project_item_entities_upserts_source_entity_and_mentioned_in():
+    db = _sqlite_session()
+    try:
+        db.add(KnowledgeItem(id="i1", user_id="default-user", title="doc"))
+        db.add(
+            KnowledgeChunk(
+                id="c1",
+                item_id="i1",
+                chunk_text="x",
+                chunk_index=0,
+                chunk_type="child",
+            )
+        )
+        db.add(
+            KnowledgeEntity(
+                id="e1",
+                user_id="default-user",
+                entity_type="concept",
+                canonical_name="混合检索",
+                normalized_key="x",
+                status="active",
+            )
+        )
+        db.add(
+            EntityMention(
+                id="m1",
+                entity_id="e1",
+                source_kind="document_chunk",
+                source_id="c1",
+                item_id="i1",
+                chunk_id="c1",
+                surface_text="混合检索",
+                normalized_key="x",
+                confidence=0.85,
+                extraction_method="llm_stage_a:INFERRED",
+            )
+        )
+        db.commit()
+
+        fake = FakeGraph()
+        edges = project_item_entities(db, fake, item_id="i1", user_id="default-user")
+
+        assert any(s["item_id"] == "i1" for s in fake.upserted_sources)
+        assert any(e["id"] == "e1" for e in fake.upserted_entities)
+        assert ("Entity", "e1", "MENTIONED_IN", "Source", "document_chunk:c1") in fake.relations
+        assert edges == 1
+    finally:
+        db.close()
