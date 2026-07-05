@@ -70,3 +70,27 @@ def test_extract_entities_for_chunk_returns_candidates(mock_chat):
 def test_extract_entities_for_chunk_llm_failure_returns_empty(mock_chat):
     mock_chat.side_effect = RuntimeError("llm down")
     assert extract_entities_for_chunk("text", chunk_id="c1") == []
+
+
+from engine.app.extraction.stage_a import extract_stage_a_parallel
+
+
+@patch("engine.app.extraction.stage_a.extract_entities_for_chunk")
+def test_extract_stage_a_parallel_collects_all_chunks(mock_extract):
+    mock_extract.side_effect = lambda text, chunk_id: [EntityCandidate(kind="entity", entity_type="concept", surface_text=chunk_id, confidence=1.0)]
+    chunks = [(f"chunk-{i}", f"text {i}") for i in range(5)]
+    result = extract_stage_a_parallel(chunks, max_workers=3)
+    assert set(result.keys()) == {f"chunk-{i}" for i in range(5)}
+    assert mock_extract.call_count == 5
+
+
+@patch("engine.app.extraction.stage_a.extract_entities_for_chunk")
+def test_extract_stage_a_parallel_isolates_chunk_failure(mock_extract):
+    def fake(text, chunk_id):
+        if chunk_id == "bad":
+            raise RuntimeError("boom")
+        return [EntityCandidate(kind="entity", entity_type="concept", surface_text=chunk_id, confidence=1.0)]
+    mock_extract.side_effect = fake
+    result = extract_stage_a_parallel([("bad", "x"), ("good", "y")], max_workers=2)
+    assert result["good"] and result["good"][0].surface_text == "good"
+    assert result.get("bad", []) == []  # failed chunk does not crash the batch
