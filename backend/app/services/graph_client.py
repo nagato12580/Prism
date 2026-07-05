@@ -174,6 +174,18 @@ class GraphClient:
             return rows[0]["cid"]
         return None
 
+    def are_gods(self, entity_ids: list[str]) -> dict[str, bool]:
+        """Return {entity_id: bool} for the given ids; absent ids -> False."""
+        if not entity_ids:
+            return {}
+        query = """
+        MATCH (e:Entity) WHERE e.id IN $ids
+        RETURN e.id AS id, coalesce(e.is_god, false) AS is_god
+        """
+        rows = self._execute_read(query, {"ids": entity_ids})
+        found = {r["id"]: bool(r.get("is_god")) for r in rows if r.get("id")}
+        return {eid: found.get(eid, False) for eid in entity_ids}
+
     def surprising_endpoints(self, entity_id: str) -> list[str]:
         """Return ids of entities connected to entity_id via a surprising edge."""
         query = """
