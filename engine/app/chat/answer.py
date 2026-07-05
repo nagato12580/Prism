@@ -14,6 +14,7 @@ from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
 from ..retrieval.hybrid import hybrid_search
+from ..retrieval.unified import make_unified_search
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
@@ -197,14 +198,13 @@ def build_agent_runner(
     allowed_item_ids = _resolve_allowed_item_ids(topic_id)
     topic_ids = [topic_id] if topic_id else None
 
-    def _scoped_search(query: str, top_k: int) -> list[dict]:
-        return hybrid_search(
-            query,
-            top_k=top_k,
-            topic_ids=topic_ids,
-            source_types=source_types,
-            allowed_item_ids=allowed_item_ids,
-        )
+    mode = "deep" if deep_search_enabled else "fast"
+    _scoped_search = make_unified_search(
+        mode=mode,
+        topic_ids=topic_ids,
+        source_types=source_types,
+        allowed_item_ids=allowed_item_ids,
+    )
 
     rag_runner = AgenticRagRunner(
         search=_scoped_search,

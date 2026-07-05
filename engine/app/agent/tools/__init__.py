@@ -8,9 +8,9 @@ from engine.app.agent.tools.base import (
 
 import engine.app.agent.tools.clarify  # noqa: F401
 import engine.app.agent.tools.datetime  # noqa: F401
-import engine.app.agent.tools.entity_graph_search  # noqa: F401
+# import engine.app.agent.tools.entity_graph_search  # noqa: F401   # P3: demoted, logic reused internally
 import engine.app.agent.tools.assets  # noqa: F401
-import engine.app.agent.tools.governed_knowledge  # noqa: F401
+# import engine.app.agent.tools.governed_knowledge   # noqa: F401   # P3: demoted
 import engine.app.agent.tools.deep_knowledge_search  # noqa: F401
 import engine.app.agent.tools.knowledge_governance  # noqa: F401
 import engine.app.agent.tools.knowledge  # noqa: F401

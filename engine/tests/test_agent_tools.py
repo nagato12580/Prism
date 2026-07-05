@@ -3,7 +3,7 @@ import json
 from engine.app.agent.rag.agentic import AgenticRagResult
 from engine.app.agent.tools.base import BUILTIN_REGISTRY, ToolContext, build_enabled_tools
 import engine.app.agent.tools.assets as asset_tools
-import engine.app.agent.tools.governed_knowledge  # noqa: F401
+# import engine.app.agent.tools.governed_knowledge  # noqa: F401  # P3: demoted
 import engine.app.agent.tools.knowledge  # noqa: F401
 import engine.app.agent.tools.page_index  # noqa: F401
 import engine.app.agent.tools.memory as memory_tools
@@ -33,7 +33,6 @@ def test_builtin_registry_contains_initial_tools():
         "page_index_get_document",
         "page_index_get_document_structure",
         "page_index_get_page_content",
-        "governed_knowledge_search",
         "knowledge_search",
         "asset_search",
         "asset_overview",
@@ -46,6 +45,10 @@ def test_builtin_registry_contains_initial_tools():
         BUILTIN_REGISTRY
     )
     assert BUILTIN_REGISTRY["web_search"].default_enabled is False
+    # P3: entity_graph_search and governed_knowledge_search are demoted
+    # (logic reused internally via unified GraphRAG, no longer agent-visible).
+    # They may still be in the registry (transitive imports) but default_enabled=False.
+    assert BUILTIN_REGISTRY["governed_knowledge_search"].default_enabled is False
 
 
 def test_build_enabled_tools_skips_disabled_web_search():
@@ -421,10 +424,10 @@ def test_agent_prompt_requires_entity_graph_before_named_entity_not_found():
     from engine.app.agent.prompts import AGENT_SYSTEM_PROMPT
 
     prompt = AGENT_SYSTEM_PROMPT
-    # The tool must be documented in the prompt's knowledge-tool boundary.
-    assert "entity_graph_search" in prompt
+    # P3: entity_graph_search is demoted (logic reused internally via unified GraphRAG).
+    # The prompt should guide the agent to use knowledge_search for entity lookups instead.
     lowered = prompt.lower()
-    # Named-entity (person/org/paper/alias) lookup rule must be present, in Chinese.
+    # Named-entity (person/org/paper/alias) lookup guidance must be present, in Chinese.
     assert "命名实体" in prompt or "人名" in prompt or "人、机构" in prompt
-    # The rule must instruct calling entity_graph_search before declaring absence.
+    # The rule must instruct proper lookup before declaring absence.
     assert "未找到" in prompt or "不存在" in prompt or "查无此人" in lowered or "缺失" in prompt

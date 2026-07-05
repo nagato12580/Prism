@@ -42,3 +42,22 @@ def test_make_unified_search_returns_scoped_search_fn():
     scoped = make_unified_search(mode="fast", topic_ids=["t1"], source_types=None, allowed_item_ids=None)
     out = scoped("q", 5)
     assert isinstance(out, list) and out and "chunk_id" in out[0]
+
+
+def test_build_agent_runner_uses_unified_search_with_mode(monkeypatch):
+    import engine.app.chat.answer as ans
+    captured = {}
+    def _fake_make(mode, **kw):
+        captured["mode"] = mode
+        def _scoped(query, top_k): return [{"chunk_id": "c1", "item_id": "i1", "score": 1.0}]
+        return _scoped
+    monkeypatch.setattr(ans, "make_unified_search", _fake_make)
+    # avoid real model/tools
+    monkeypatch.setattr(ans, "AgenticRagRunner", lambda **kw: type("R", (), {"run": lambda self, q: None})())
+    monkeypatch.setattr(ans, "build_enabled_tools", lambda ctx, overrides=None: [])
+    monkeypatch.setattr(ans, "create_chat_model", lambda s: object())
+
+    ans.build_agent_runner(topic_id=None, source_types=None, deep_search_enabled=False, clarify_depth=0)
+    assert captured["mode"] == "fast"
+    ans.build_agent_runner(topic_id=None, source_types=None, deep_search_enabled=True, clarify_depth=0)
+    assert captured["mode"] == "deep"
