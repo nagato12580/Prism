@@ -58,6 +58,10 @@ class Settings:
     GRAPH_INSIGHTS_MAX_QUESTIONS: int = int(os.getenv("GRAPH_INSIGHTS_MAX_QUESTIONS", "2"))
     COMMUNITY_LABEL_MODEL: str = os.getenv("COMMUNITY_LABEL_MODEL", "")
 
+    # ---- P4 graph-driven CKP governance ----
+    GRAPH_GOV_ENABLED: bool = os.getenv("GRAPH_GOV_ENABLED", "1") not in ("0", "false", "False")
+    GRAPH_GOV_COHESION_THRESHOLD: float = float(os.getenv("GRAPH_GOV_COHESION_THRESHOLD", "0.3"))
+
     # ---- P3 unified GraphRAG retrieval ----
     RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "1") not in ("0", "false", "False")
     RERANK_API_BASE: str = os.getenv("RERANK_API_BASE", "")
