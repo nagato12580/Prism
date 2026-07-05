@@ -111,6 +111,9 @@ class FakeGraph:
         self.upserted_entities = []
         self.relations = []
 
+    def delete_item_sources(self, item_id):
+        pass
+
     def upsert_source(self, data):
         self.upserted_sources.append(data)
 
@@ -177,5 +180,56 @@ def test_project_item_entities_upserts_source_entity_and_mentioned_in():
         assert any(e["id"] == "e1" for e in fake.upserted_entities)
         assert ("Entity", "e1", "MENTIONED_IN", "Source", "document_chunk:c1") in fake.relations
         assert edges == 1
+    finally:
+        db.close()
+
+
+class FakeGraphWithDelete:
+    def __init__(self):
+        self.upserted_sources = []
+        self.upserted_entities = []
+        self.relations = []
+        self.deleted_item_ids = []
+
+    def delete_item_sources(self, item_id):
+        self.deleted_item_ids.append(item_id)
+
+    def upsert_source(self, data):
+        self.upserted_sources.append(data)
+
+    def upsert_entity(self, data):
+        self.upserted_entities.append(data)
+
+    def relate(self, start_label, start_id, rel_type, end_label, end_id, props=None):
+        self.relations.append((start_label, start_id, rel_type, end_label, end_id))
+
+
+def test_project_item_entities_deletes_old_sources_before_projecting():
+    from backend.app.database import Base, engine as _engine
+    from backend.app.models import KnowledgeItem, KnowledgeChunk, KnowledgeEntity, EntityMention
+    from sqlalchemy.orm import sessionmaker
+    Base.metadata.create_all(_engine)
+    db = sessionmaker(bind=_engine)()
+    try:
+        # clean any previous test data with the same keys
+        db.query(EntityMention).delete()
+        db.query(KnowledgeEntity).delete()
+        db.query(KnowledgeChunk).delete()
+        db.query(KnowledgeItem).delete()
+        db.commit()
+        db.add(KnowledgeItem(id="i1", user_id="default-user", title="doc"))
+        db.add(KnowledgeChunk(id="c1", item_id="i1", chunk_text="x", chunk_index=0, chunk_type="child"))
+        ent = KnowledgeEntity(id="e1", user_id="default-user", entity_type="concept", canonical_name="K", normalized_key="k", status="active")
+        db.add(ent); db.flush()
+        db.add(EntityMention(id="m1", entity_id="e1", source_kind="document_chunk", source_id="c1", item_id="i1", chunk_id="c1", surface_text="K", normalized_key="k", confidence=0.85, extraction_method="llm_stage_a:INFERRED"))
+        db.commit()
+
+        fake = FakeGraphWithDelete()
+        project_item_entities(db, fake, item_id="i1", user_id="default-user")
+
+        # cleanup MUST run first, scoped to this item_id
+        assert fake.deleted_item_ids == ["i1"]
+        # and then re-projected
+        assert any(e["id"] == "e1" for e in fake.upserted_entities)
     finally:
         db.close()

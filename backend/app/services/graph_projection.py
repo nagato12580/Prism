@@ -338,6 +338,11 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
     Returns the number of edges projected. Scoped to one item (no full reproject).
     """
     edges = 0
+
+    # Clean this item's previous Source nodes/edges so re-ingest (fresh chunk
+    # UUIDs) leaves no zombie Sources. Idempotent: delete then re-project.
+    graph.delete_item_sources(item_id)
+
     mentions = (
         db.query(EntityMention)
         .join(KnowledgeEntity, EntityMention.entity_id == KnowledgeEntity.id)

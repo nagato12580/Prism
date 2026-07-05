@@ -111,6 +111,14 @@ class GraphClient:
             {"start_id": start_id, "end_id": end_id, "props": props or {}},
         )
 
+    def delete_item_sources(self, item_id: str) -> None:
+        """Delete all :Source nodes (and their edges) for one item. Idempotent."""
+        query = """
+        MATCH (s:Source {item_id: $item_id})
+        DETACH DELETE s
+        """
+        self._execute_write(query, {"item_id": item_id})
+
     def _upsert_node(self, label: str, data: dict[str, Any], fields: list[str]) -> None:
         self._validate_label(label)
         assignments = ", ".join(f"{field}: ${field}" for field in fields)
