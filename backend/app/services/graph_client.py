@@ -131,6 +131,46 @@ class GraphClient:
         )
         return {r["id"]: r["cid"] for r in rows if r.get("id") is not None}
 
+    def neighbors(self, entity_id: str, hops: int = 1, limit: int = 8) -> list[dict]:
+        """Return [{id, kind}] for nodes within `hops` of entity_id (Entity/Source)."""
+        query = """
+        // neighbors
+        MATCH (e:Entity {id: $entity_id})-[:MENTIONED_IN|RELATED_TO*1..%d]-(n)
+        WHERE n.id IS NOT NULL AND n.id <> $entity_id
+        RETURN DISTINCT n.id AS id,
+               CASE WHEN 'Entity' IN labels(n) THEN 'Entity'
+                    WHEN 'Source'  IN labels(n) THEN 'Source'
+                    ELSE head(labels(n)) END AS kind
+        LIMIT $limit
+        """ % max(1, int(hops))
+        return self._execute_read(query, {"entity_id": entity_id, "limit": limit})
+
+    def community_members(self, community_id: int, limit: int = 10) -> list[dict]:
+        query = """
+        // community_members
+        MATCH (e:Entity {community_id: $cid})
+        RETURN e.id AS id LIMIT $limit
+        """
+        return self._execute_read(query, {"cid": int(community_id), "limit": limit})
+
+    def god_neighbors(self, entity_id: str, limit: int = 10) -> list[str]:
+        """Return ids of god entities adjacent to entity_id."""
+        query = """
+        // god_neighbors
+        MATCH (e:Entity {id: $entity_id})-[:RELATED_TO|MENTIONED_IN]-(g:Entity {is_god: true})
+        RETURN DISTINCT g.id AS id LIMIT $limit
+        """
+        return [r["id"] for r in self._execute_read(query, {"entity_id": entity_id, "limit": limit}) if r.get("id")]
+
+    def surprising_endpoints(self, entity_id: str) -> list[str]:
+        """Return ids of entities connected to entity_id via a surprising edge."""
+        query = """
+        // surprising
+        MATCH (e:Entity {id: $entity_id})-[r:RELATED_TO {surprising: true}]-(o:Entity)
+        RETURN DISTINCT o.id AS id
+        """
+        return [r["id"] for r in self._execute_read(query, {"entity_id": entity_id}) if r.get("id")]
+
     def set_entity_analysis(self, entity_id: str, community_id: int, is_god: bool, cohesion: float) -> None:
         query = """
         MATCH (e:Entity {id: $entity_id})
