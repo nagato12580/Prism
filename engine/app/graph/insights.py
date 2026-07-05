@@ -81,3 +81,105 @@ def compute_suggested_questions(
         return []
     kept = [q for q in raw if isinstance(q, dict) and q.get("type") in _KEEP_QUESTION_TYPES]
     return kept[:top_n]
+
+
+def graph_insights_context(
+    query: str,
+    user_id: str = "default-user",
+    *,
+    db=None,
+    graph_client=None,
+    enabled: bool | None = None,
+) -> str:
+    """Return a short graph-insight background block for the query, or "".
+
+    Mirrors active_recall: signal-gated, never raises, never delays first token.
+    Caller may pass db/graph_client for testing; production path builds them.
+    """
+    if enabled is None:
+        enabled = settings.GRAPH_INSIGHTS_ENABLED
+    if not enabled or not has_insight_signal(query):
+        return ""
+
+    own_db = db is None
+    own_graph = graph_client is None
+    if own_db:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        db = sessionmaker(bind=create_engine(settings.DATABASE_URL, pool_pre_ping=True))()
+    if own_graph:
+        try:
+            from backend.app.services.graph_client import GraphClient
+            graph_client = GraphClient()
+        except Exception as exc:
+            logger.warning("[insights] graph_client_unavailable err=%s", exc)
+            graph_client = None
+
+    try:
+        from backend.app.models import GraphCommunity, GraphInsightSummary, KnowledgeEntity
+        from engine.app.retrieval.graph_expand import match_seed_entities
+
+        seeds = match_seed_entities(db, query, limit=settings.GRAPH_INSIGHTS_SEED_ENTITIES)
+        if not seeds or graph_client is None:
+            return ""
+
+        # communities touched by seeds
+        cids: set[int] = set()
+        for sid in seeds:
+            cid = graph_client.entity_community(sid)
+            if cid is not None:
+                cids.add(int(cid))
+        if not cids:
+            return ""
+
+        gc_rows = db.query(GraphCommunity).filter(GraphCommunity.community_id.in_(cids)).all()
+        label_by_cid = {gc.community_id: gc.label for gc in gc_rows}
+
+        # surprising endpoints of seeds -> other entities (render names)
+        surprising_pairs: list[tuple[str, str]] = []
+        for sid in seeds:
+            for other in graph_client.surprising_endpoints(sid):
+                surprising_pairs.append((sid, other))
+        surprising_pairs = surprising_pairs[: settings.GRAPH_INSIGHTS_MAX_SURPRISING]
+
+        # god entities in touched communities (read via Neo4j neighbors of seeds)
+        god_ids: list[str] = []
+        for sid in seeds:
+            god_ids.extend(graph_client.god_neighbors(sid, limit=settings.GRAPH_INSIGHTS_MAX_GOD))
+        god_ids = list(dict.fromkeys(god_ids))[: settings.GRAPH_INSIGHTS_MAX_GOD]
+
+        # global suggested questions (top-N)
+        summ = db.query(GraphInsightSummary).filter_by(user_id=user_id).one_or_none()
+        questions = (summ.suggested_questions if summ else [])[: settings.GRAPH_INSIGHTS_MAX_QUESTIONS]
+
+        # resolve names
+        name_ids = set(seeds) | {o for _, o in surprising_pairs} | set(god_ids)
+        name_map = {e.id: e.canonical_name for e in db.query(KnowledgeEntity).filter(KnowledgeEntity.id.in_(name_ids)).all()}
+
+        lines = ["【图谱洞察】"]
+        for a, b in surprising_pairs:
+            lines.append(f"- 隐藏联系：{name_map.get(a, a)} 与 {name_map.get(b, b)} 存在跨主题关联")
+        if god_ids:
+            lines.append("- 枢纽节点：" + "、".join(name_map.get(g, g) for g in god_ids))
+        if cids and any(label_by_cid.get(c) for c in cids):
+            lines.append("- 当前主题：" + "、".join(label_by_cid[c] for c in cids if label_by_cid.get(c)))
+        if questions:
+            lines.append("- 可追问：" + "；".join(q.get("question", "") for q in questions))
+        if len(lines) == 1:
+            return ""
+        lines.append("回答时可参考这些联系，并在合适时主动提示用户。")
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("[insights] graph_insights_context_failed err=%s", exc)
+        return ""
+    finally:
+        if own_db:
+            try:
+                db.close()
+            except Exception:
+                pass
+        if own_graph and graph_client is not None:
+            try:
+                graph_client.close()
+            except Exception:
+                pass

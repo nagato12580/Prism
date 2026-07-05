@@ -71,3 +71,75 @@ def test_compute_suggested_questions_returns_empty_on_failure():
         raise RuntimeError("graphify")
     out = compute_suggested_questions(_questions_fn=_boom, top_n=5)
     assert out == []
+
+
+from engine.app.graph.insights import graph_insights_context
+
+
+class _FakeGraph:
+    def __init__(self, communities, surprising, gods_in_comm):
+        self._communities = communities; self._surprising = surprising; self._gods_in_comm = gods_in_comm
+    def entity_community(self, entity_id):
+        return self._communities.get(entity_id)
+    def surprising_endpoints(self, entity_id):
+        return self._surprising.get(entity_id, [])
+    def god_neighbors(self, entity_id, limit=10):
+        return []  # not used here
+
+
+def _db_with(entities, community_rows, summary_questions):
+    from backend.app.database import Base, engine as _engine
+    from backend.app.models import KnowledgeEntity, EntityAlias, GraphCommunity, GraphInsightSummary
+    from sqlalchemy.orm import sessionmaker
+    Base.metadata.drop_all(_engine)
+    Base.metadata.create_all(_engine)
+    db = sessionmaker(bind=_engine)()
+    for eid, name in entities:
+        db.add(KnowledgeEntity(id=eid, user_id="default-user", entity_type="concept", canonical_name=name, normalized_key=name, status="active"))
+        db.add(EntityAlias(id="al_" + eid, entity_id=eid, alias=name, normalized_key=name))
+    for cid, label in community_rows:
+        db.add(GraphCommunity(id=f"gc{cid}", user_id="default-user", community_id=cid, label=label, cohesion=0.4))
+    db.add(GraphInsightSummary(id="gs1", user_id="default-user", suggested_questions=summary_questions))
+    db.commit()
+    return db
+
+
+def test_graph_insights_context_composes_block_when_seeds_hit():
+    from backend.app.models import KnowledgeEntity
+    db = _db_with([("e1", "混合检索")], [(0, "混合检索优化")],
+                  [{"type": "god", "question": "X 真的中心吗?", "why": "w"}])
+    g = _FakeGraph(communities={"e1": 0}, surprising={"e1": ["e2"]}, gods_in_comm={0: ["eGOD"]})
+    # add e2 name + a god entity to db so rendering has names
+    db.add(KnowledgeEntity(id="e2", user_id="default-user", entity_type="concept", canonical_name="RRF融合", normalized_key="rrf", status="active"))
+    db.add(KnowledgeEntity(id="eGOD", user_id="default-user", entity_type="concept", canonical_name="枢纽概念", normalized_key="hub", status="active"))
+    db.commit()
+    try:
+        block = graph_insights_context("混合检索和别的有什么关系", user_id="default-user", db=db, graph_client=g)
+        assert "隐藏联系" in block or "surprising" in block or "RRF融合" in block
+        assert "混合检索优化" in block            # community label rendered
+        assert "可追问" in block or "追问" in block  # question rendered
+    finally:
+        db.close()
+
+
+def test_graph_insights_context_empty_when_no_signal():
+    assert graph_insights_context("你好", user_id="default-user", db=None, graph_client=None) == ""
+
+
+def test_graph_insights_context_empty_when_seeds_miss():
+    db = _db_with([("e1", "混合检索")], [(0, "主题0")], [])
+    g = _FakeGraph(communities={"e1": 0}, surprising={}, gods_in_comm={})
+    try:
+        # query talks about something unrelated -> no seed -> ""
+        assert graph_insights_context("xyzabc 不存在的概念", user_id="default-user", db=db, graph_client=g) == ""
+    finally:
+        db.close()
+
+
+def test_graph_insights_context_disabled_returns_empty():
+    db = _db_with([("e1", "混合检索")], [(0, "主题0")], [])
+    g = _FakeGraph(communities={"e1": 0}, surprising={"e1": ["e2"]}, gods_in_comm={})
+    try:
+        assert graph_insights_context("混合检索的关系", user_id="default-user", db=db, graph_client=g, enabled=False) == ""
+    finally:
+        db.close()
