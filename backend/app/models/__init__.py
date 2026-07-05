@@ -23,6 +23,8 @@ from .knowledge_governance import (
     PersonalKnowledgeUnit,
 )
 from .entity import KnowledgeEntity, EntityAlias, EntityMention, EntityRelation
+from .graph_community import GraphCommunity
+from .graph_insight_summary import GraphInsightSummary
 
 __all__ = [
     "KnowledgeTopic",
@@ -64,4 +66,6 @@ __all__ = [
     "EntityAlias",
     "EntityMention",
     "EntityRelation",
+    "GraphCommunity",
+    "GraphInsightSummary",
 ]
