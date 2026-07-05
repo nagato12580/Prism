@@ -133,3 +133,40 @@ def test_run_analysis_writes_community_and_does_not_crash_on_small_graph():
         assert result["node_count"] == 5
     finally:
         db.close()
+
+
+def test_run_analysis_persists_community_labels_and_questions(monkeypatch):
+    from backend.app.database import Base, engine as _engine
+    from backend.app.models import KnowledgeEntity, EntityRelation, GraphCommunity, GraphInsightSummary
+    from sqlalchemy.orm import sessionmaker
+    from engine.app.graph.analyzer import run_analysis
+    from engine.app.graph import insights as ins
+
+    Base.metadata.create_all(_engine)
+    db = sessionmaker(bind=_engine)()
+    try:
+        for i, name in enumerate(["混合检索", "RRF融合", "重排", "metadata filter", "向量召回"], start=21):
+            db.add(KnowledgeEntity(id=f"e{i}", user_id="default-user", entity_type="concept",
+                                   canonical_name=name, normalized_key=name + "_p5bis", status="active"))
+        db.flush()
+        db.add(EntityRelation(id="r1_p5b", subject_entity_id="e21", predicate="uses", object_entity_id="e22", relation_key="k1p5b", source_kind="document_chunk", source_id="c1", confidence=0.85))
+        db.add(EntityRelation(id="r2_p5b", subject_entity_id="e21", predicate="uses", object_entity_id="e23", relation_key="k2p5b", source_kind="document_chunk", source_id="c1", confidence=0.85))
+        db.commit()
+
+        # stub the LLM label call + graph (read/write analysis) so run_analysis stays deterministic
+        # patch on analyzer module since it imported the functions locally
+        monkeypatch.setattr("engine.app.graph.analyzer.generate_community_labels", lambda c, **kw: {cid: f"主题{cid}" for cid in c})
+        monkeypatch.setattr("engine.app.graph.analyzer.compute_suggested_questions", lambda **kw: [{"type": "god", "question": "Q?", "why": "w"}])
+
+        class _G:
+            def read_entity_communities(self): return {}
+            def set_entity_analysis(self, *a, **kw): pass
+            def relate(self, *a, **kw): pass
+        run_analysis(db, _G(), user_id="default-user")
+
+        gcs = db.query(GraphCommunity).filter_by(user_id="default-user").all()
+        assert len(gcs) >= 1 and all(gc.label.startswith("主题") for gc in gcs)
+        summ = db.query(GraphInsightSummary).filter_by(user_id="default-user").one()
+        assert summ.suggested_questions[0]["question"] == "Q?"
+    finally:
+        db.close()

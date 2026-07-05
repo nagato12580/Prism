@@ -9,6 +9,7 @@ from collections import defaultdict
 from itertools import combinations
 
 from backend.app.models import EntityMention, EntityRelation, KnowledgeEntity
+from .insights import compute_suggested_questions, generate_community_labels
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -182,6 +183,46 @@ def run_analysis(db, graph, user_id: str = "default-user", top_god: int = 20, to
                 logger.warning("[analyzer] diagnostics dangling_endpoint_edges=%s", dangling)
         except Exception:
             pass
+
+        # ---- P5: persist community labels + suggested questions ----
+        try:
+            from backend.app.models import GraphCommunity, GraphInsightSummary
+
+            label_by_id = {n["id"]: n.get("label", n["id"]) for n in exported["nodes"]}
+            members_by_cid: dict[int, list[str]] = defaultdict(list)
+            for node_id, cid in final.items():
+                members_by_cid[int(cid)].append(label_by_id.get(node_id, node_id))
+
+            labels = generate_community_labels(dict(members_by_cid), user_id=user_id)
+
+            # upsert per-community label + cohesion
+            existing = {gc.community_id: gc for gc in db.query(GraphCommunity).filter_by(user_id=user_id).all()}
+            for cid, members in members_by_cid.items():
+                gc = existing.get(cid)
+                if gc is None:
+                    gc = GraphCommunity(user_id=user_id, community_id=cid)
+                    db.add(gc)
+                gc.label = labels.get(cid, "")
+                gc.cohesion = float(cohesion_by_cid.get(_new_cid_for_node(communities, members[0]) if members else -1, 0.0))
+            db.flush()
+
+            questions = compute_suggested_questions(
+                _graph=G, communities=communities,
+                community_labels={cid: labels.get(cid, "") for cid in members_by_cid},
+                top_n=7,
+            )
+            summ = db.query(GraphInsightSummary).filter_by(user_id=user_id).one_or_none()
+            if summ is None:
+                summ = GraphInsightSummary(user_id=user_id)
+                db.add(summ)
+            summ.suggested_questions = questions
+            db.commit()
+        except Exception as exc:
+            logger.warning("[analyzer] insights_persist_failed err=%s", exc)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
         return {"node_count": node_count, "communities": len(communities),
                 "god_nodes": len(god_ids), "surprising": len(surprising)}
