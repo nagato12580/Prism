@@ -166,7 +166,31 @@ def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
     if not settings.ENTITY_EXTRACT_ENABLED:
         return
     try:
+        from backend.app.models import EntityMention, EntityRelation
         from backend.app.models.knowledge_item import KnowledgeChunk
+
+        # Clean mentions/relations from any previous ingest of this item so
+        # re-ingest (which creates fresh chunk UUIDs) doesn't leave orphans.
+        # EntityRelation.source_id and EntityMention.source_id share the same
+        # value space (the chunk id), so delete relations by chunk id first.
+        stale_chunk_ids = [
+            cid
+            for (cid,) in (
+                db.query(EntityMention.source_id)
+                .filter(EntityMention.item_id == item_id, EntityMention.source_kind == "document_chunk")
+                .all()
+            )
+        ]
+        if stale_chunk_ids:
+            db.query(EntityRelation).filter(
+                EntityRelation.source_kind == "document_chunk",
+                EntityRelation.source_id.in_(stale_chunk_ids),
+            ).delete(synchronize_session=False)
+            db.query(EntityMention).filter(
+                EntityMention.item_id == item_id,
+                EntityMention.source_kind == "document_chunk",
+            ).delete(synchronize_session=False)
+            db.flush()
 
         chunks = (
             db.query(KnowledgeChunk)
