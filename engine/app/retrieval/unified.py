@@ -64,7 +64,15 @@ def unified_search(
     for rank, h in enumerate(graph_hits):
         cid = h["chunk_id"]
         scores[cid] = scores.get(cid, 0.0) + GRAPH_WEIGHT / (RRF_K + rank + 1)
-        meta.setdefault(cid, {**h, "score": 0.0})
+        if cid in meta:
+            # Merge source_marker so graph contribution is visible even when
+            # the same chunk appeared in hybrid results.
+            gm = h.get("source_marker")
+            if gm:
+                existing = meta[cid].get("source_marker")
+                meta[cid]["source_marker"] = f"{existing}+{gm}" if existing else gm
+        else:
+            meta[cid] = {**h, "score": 0.0}
     merged = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     candidates = [{**meta[cid], "chunk_id": cid, "score": sc} for cid, sc in merged]
 

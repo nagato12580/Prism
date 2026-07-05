@@ -61,3 +61,32 @@ def test_build_agent_runner_uses_unified_search_with_mode(monkeypatch):
     assert captured["mode"] == "fast"
     ans.build_agent_runner(topic_id=None, source_types=None, deep_search_enabled=True, clarify_depth=0)
     assert captured["mode"] == "deep"
+
+
+def _hybrid_overlap(query, top_k, **kw):
+    # same chunk appears in both hybrid and graph
+    return [{"chunk_id": "c_shared", "item_id": "i1", "score": 0.8},
+            {"chunk_id": "c_only",  "item_id": "i1", "score": 0.5}]
+
+
+def _expand_overlap(db, graph, seeds, mode, hops, max_candidates, **kw):
+    return [{"chunk_id": "c_shared", "item_id": "i1", "source_marker": "graph_1hop"},
+            {"chunk_id": "c_graph", "item_id": "i2", "source_marker": "graph_1hop"}]
+
+
+@patch("engine.app.retrieval.unified.expand_candidates", _expand_overlap)
+@patch("engine.app.retrieval.unified.rerank", lambda q, c, **kw: c)  # no-op rerank
+@patch("engine.app.retrieval.unified.hybrid_search", _hybrid_overlap)
+@patch("engine.app.retrieval.unified.match_seed_entities", lambda db, q, **k: ["e1"])
+def test_unified_search_merges_markers_when_chunk_overlaps():
+    """When a chunk appears in both hybrid and graph results, source_marker is merged."""
+    out = unified_search("q", top_k=10, mode="fast", db=object(), graph_client=object())
+    by_id = {o["chunk_id"]: o for o in out}
+    # c_shared: appears in both → marker should show graph contribution
+    assert "c_shared" in by_id
+    shared = by_id["c_shared"]
+    assert shared["source_marker"] and "graph_1hop" in shared["source_marker"]
+    # c_graph: only in graph → marker unchanged
+    assert by_id["c_graph"]["source_marker"] == "graph_1hop"
+    # c_only: only in hybrid → no marker
+    assert by_id["c_only"].get("source_marker") is None
