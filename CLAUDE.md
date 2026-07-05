@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Prism (棱镜)** is a personal knowledge management and RAG chat application. Users ingest documents/URLs into a personal knowledge base, then chat with an LLM agent that searches that knowledge base to answer questions.
 
+> **重要（2026-07 图谱治理大改造后）**：本文件描述的是改造前的基础架构。图谱治理链路（全覆盖抽取 / graphify 分析 / 统一 GraphRAG 检索 / 洞察注入 / 图驱动 CKP 治理）的完整现状见 **`docs/GRAPH_CHAIN_ARCHITECTURE.md`** —— 改动 retrieval / graph / extraction / agent tools / ingestion 前，先读那份文档。
+
 ## Commands
 
 ### Backend
