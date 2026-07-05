@@ -24,6 +24,7 @@ from .events import (
 )
 from .prompts import AGENT_SYSTEM_PROMPT
 from .active_recall import recall_memory_context
+from ..graph.insights import graph_insights_context
 from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
@@ -481,6 +482,13 @@ class LangChainAgentRunner:
                 logger.info("[agent] active_recall injected chars=%s", len(recall_block))
         except Exception as exc:
             logger.warning("[agent] active_recall failed (ignored): %s", quoted(str(exc), limit=200))
+        try:
+            insights_block = graph_insights_context(query)
+            if insights_block:
+                messages.append(SystemMessage(content=insights_block))
+                logger.info("[agent] graph_insights injected chars=%s", len(insights_block))
+        except Exception as exc:
+            logger.warning("[agent] graph_insights failed (ignored): %s", quoted(str(exc), limit=200))
         for item in history:
             role = item.get("role")
             content = item.get("content", "")

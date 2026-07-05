@@ -143,3 +143,26 @@ def test_graph_insights_context_disabled_returns_empty():
         assert graph_insights_context("混合检索的关系", user_id="default-user", db=db, graph_client=g, enabled=False) == ""
     finally:
         db.close()
+
+
+def test_build_messages_injects_graph_insights(monkeypatch):
+    monkeypatch.setattr("engine.app.agent.runner.graph_insights_context", lambda q, **kw: "【图谱洞察】stub")
+    # also neutralize memory recall to isolate
+    monkeypatch.setattr("engine.app.agent.runner.recall_memory_context", lambda q, **kw: "")
+    from engine.app.agent.runner import LangChainAgentRunner
+    from langchain_core.messages import SystemMessage
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    msgs = runner._build_messages("混合检索的关系", history=[])
+    sys_texts = [m.content for m in msgs if isinstance(m, SystemMessage)]
+    assert any("图谱洞察" in t for t in sys_texts)
+
+
+def test_build_messages_without_insights_when_disabled(monkeypatch):
+    monkeypatch.setattr("engine.app.graph.insights.graph_insights_context", lambda q, **kw: "")
+    monkeypatch.setattr("engine.app.agent.runner.recall_memory_context", lambda q, **kw: "")
+    from engine.app.agent.runner import LangChainAgentRunner
+    from langchain_core.messages import SystemMessage
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    msgs = runner._build_messages("你好", history=[])
+    sys_texts = [m.content for m in msgs if isinstance(m, SystemMessage)]
+    assert all("图谱洞察" not in t for t in sys_texts)
