@@ -162,6 +162,18 @@ class GraphClient:
         """
         return [r["id"] for r in self._execute_read(query, {"entity_id": entity_id, "limit": limit}) if r.get("id")]
 
+    def entity_community(self, entity_id: str) -> int | None:
+        """Return the community_id of a single Entity, or None."""
+        query = """
+        // entity_community
+        MATCH (e:Entity {id: $entity_id})
+        RETURN e.community_id AS cid
+        """
+        rows = self._execute_read(query, {"entity_id": entity_id})
+        if rows and rows[0].get("cid") is not None:
+            return rows[0]["cid"]
+        return None
+
     def surprising_endpoints(self, entity_id: str) -> list[str]:
         """Return ids of entities connected to entity_id via a surprising edge."""
         query = """
