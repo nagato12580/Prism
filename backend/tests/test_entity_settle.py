@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app.database import Base
-from backend.app.models import EntityMention, KnowledgeEntity
+from backend.app.models import EntityMention, EntityRelation, KnowledgeEntity
 from backend.app.services.entity_extraction import EntityCandidate, settle_entity_candidates
 
 
@@ -91,6 +91,10 @@ def test_settle_entity_candidates_persists_concept_relation():
     Base.metadata.create_all(_engine)
     db = sessionmaker(bind=_engine)()
     try:
+        db.query(EntityRelation).delete()
+        db.query(EntityMention).delete()
+        db.query(KnowledgeEntity).delete()
+        db.commit()
         candidates = [
             EntityCandidate(kind="entity", entity_type="concept", surface_text="混合检索",
                             normalized_key="混合检索", aliases=["混合检索"], confidence=1.0,

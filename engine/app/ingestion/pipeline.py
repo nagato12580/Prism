@@ -19,6 +19,7 @@ from ..extraction.stage_a import extract_stage_a_parallel
 from backend.app.services.entity_extraction import settle_entity_candidates
 from backend.app.services.graph_projection import project_item_entities
 from backend.app.services.graph_client import GraphClient
+from ..graph.analyzer import run_analysis
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 _Session = sessionmaker(bind=_engine)
@@ -219,7 +220,7 @@ def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
         db.commit()
         _log_stage(item_id, "stage_a_settled")
 
-        _project_item_entities_to_graph(db, item_id, user_id)
+        _project_and_analyze(db, item_id, user_id)
     except Exception as exc:
         logger.warning("[ingest.pipeline] stage_a_failed item_id=%s error=%s", item_id, exc)
 
@@ -233,6 +234,24 @@ def _project_item_entities_to_graph(db, item_id: str, user_id: str) -> None:
             client.close()
     except Exception as exc:
         logger.warning("[ingest.pipeline] graph_projection_failed item_id=%s error=%s", item_id, exc)
+
+
+def _project_and_analyze(db, item_id: str, user_id: str) -> None:
+    """Project this item's entities to Neo4j, then run full-graph graphify analysis.
+
+    Both steps are best-effort: failures are logged and never break ingestion.
+    """
+    _project_item_entities_to_graph(db, item_id, user_id)
+    if not settings.GRAPH_ANALYSIS_ENABLED:
+        return
+    try:
+        client = GraphClient()
+        try:
+            run_analysis(db, client, user_id=user_id)
+        finally:
+            client.close()
+    except Exception as exc:
+        logger.warning("[ingest.pipeline] graph_analysis_failed item_id=%s error=%s", item_id, exc)
 
 
 def ingest_item(item_id: str, progress=None) -> int:

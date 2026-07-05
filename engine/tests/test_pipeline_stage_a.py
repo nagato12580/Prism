@@ -78,7 +78,7 @@ def test_ingest_item_writes_stage_a_entities_and_mentions(monkeypatch):
         return result
 
     monkeypatch.setattr(pl, "extract_stage_a_parallel", fake_extract_stage_a_parallel)
-    monkeypatch.setattr(pl, "_project_item_entities_to_graph", lambda db, item_id, user_id: None)
+    monkeypatch.setattr(pl, "_project_and_analyze", lambda db, item_id, user_id: None)
 
     count = pl.ingest_item(item_id)
 
@@ -141,7 +141,7 @@ def test_reingest_does_not_orphan_mentions(monkeypatch):
         return result
 
     monkeypatch.setattr(pl, "extract_stage_a_parallel", fake_extract_stage_a_parallel)
-    monkeypatch.setattr(pl, "_project_item_entities_to_graph", lambda db, item_id, user_id: None)
+    monkeypatch.setattr(pl, "_project_and_analyze", lambda db, item_id, user_id: None)
 
     # First ingest.
     pl.ingest_item(item_id)
@@ -190,3 +190,54 @@ def test_reingest_does_not_orphan_mentions(monkeypatch):
             )
     finally:
         session.close()
+
+
+def test_pipeline_invokes_graph_analysis_after_stage_a(monkeypatch):
+    content = "混合检索是一种结合向量检索与关键词检索的方法。"
+    Session = _sqlite_session_factory()
+    item_id = _seed_item(Session, content)
+
+    monkeypatch.setattr(pl, "_Session", Session)
+    monkeypatch.setattr(pl, "embed_texts", lambda texts: [[0.0] * 8 for _ in texts])
+    monkeypatch.setattr(pl, "insert_vectors_batch", lambda rows: None)
+    monkeypatch.setattr(pl, "delete_vectors_by_ids", lambda ids: None)
+    monkeypatch.setattr(pl, "_delete_es_chunks_by_item", lambda item_id: None)
+    monkeypatch.setattr(pl, "_bulk_index_chunks_es", lambda **kw: 0)
+    monkeypatch.setattr(pl, "extract_stage_a_parallel",
+                        lambda chunks, **kw: {cid: [EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x", confidence=1.0)] for cid, _ in chunks})
+    monkeypatch.setattr(pl, "_project_item_entities_to_graph", lambda db, item_id, user_id: None)
+
+    calls = {"n": 0}
+    def _fake_run_analysis(db, graph, user_id, **kw):
+        calls["n"] += 1
+        return {"node_count": 0}
+    monkeypatch.setattr(pl, "run_analysis", _fake_run_analysis)
+
+    # Ensure GRAPH_ANALYSIS_ENABLED is True for this test
+    monkeypatch.setattr(pl.settings, "GRAPH_ANALYSIS_ENABLED", True)
+
+    pl.ingest_item(item_id)
+    assert calls["n"] == 1
+
+
+def test_pipeline_graph_analysis_failure_does_not_break_ingestion(monkeypatch):
+    content = "混合检索是一种结合向量检索与关键词检索的方法。"
+    Session = _sqlite_session_factory()
+    item_id = _seed_item(Session, content)
+
+    monkeypatch.setattr(pl, "_Session", Session)
+    monkeypatch.setattr(pl, "embed_texts", lambda texts: [[0.0] * 8 for _ in texts])
+    monkeypatch.setattr(pl, "insert_vectors_batch", lambda rows: None)
+    monkeypatch.setattr(pl, "delete_vectors_by_ids", lambda ids: None)
+    monkeypatch.setattr(pl, "_delete_es_chunks_by_item", lambda item_id: None)
+    monkeypatch.setattr(pl, "_bulk_index_chunks_es", lambda **kw: 0)
+    monkeypatch.setattr(pl, "extract_stage_a_parallel",
+                        lambda chunks, **kw: {cid: [EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x", confidence=1.0)] for cid, _ in chunks})
+    monkeypatch.setattr(pl, "_project_item_entities_to_graph", lambda db, item_id, user_id: None)
+    def _boom(*a, **kw):
+        raise RuntimeError("graphify boom")
+    monkeypatch.setattr(pl, "run_analysis", _boom)
+    monkeypatch.setattr(pl.settings, "GRAPH_ANALYSIS_ENABLED", True)
+
+    count = pl.ingest_item(item_id)
+    assert count >= 1
