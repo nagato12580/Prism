@@ -28,7 +28,7 @@ class EntityCandidate:
     surface_text: str = ""
     normalized_key: str = ""
     aliases: list[str] = field(default_factory=list)
-    confidence: float = 0.5
+    confidence: float = 0.0
     evidence_span: str = ""
     extraction_method: str = ""
     subject_surface: str = ""

@@ -77,3 +77,8 @@ def test_settle_entity_candidates_persists_entity_and_mention_from_prebuilt_cand
         assert mention.surface_text == "混合检索"
     finally:
         db.close()
+
+
+def test_entity_candidate_default_confidence_is_zero():
+    c = EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x")
+    assert c.confidence == 0.0
