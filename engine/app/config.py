@@ -47,6 +47,7 @@ class Settings:
     ENTITY_EXTRACT_WORKERS: int = int(os.getenv("ENTITY_EXTRACT_WORKERS", "4"))
     ENTITY_EXTRACT_TIMEOUT_SECONDS: float = float(os.getenv("ENTITY_EXTRACT_TIMEOUT_SECONDS", "30"))
     ENTITY_EXTRACT_ENABLED: bool = os.getenv("ENTITY_EXTRACT_ENABLED", "1") not in ("0", "false", "False")
+    GRAPH_ANALYSIS_ENABLED: bool = os.getenv("GRAPH_ANALYSIS_ENABLED", "1") not in ("0", "false", "False")
     AGENT_TOOL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "12"))
     DEEP_SEARCH_JUDGE_API_BASE: str = os.getenv("DEEP_SEARCH_JUDGE_API_BASE", "")
     DEEP_SEARCH_JUDGE_API_KEY: str = os.getenv("DEEP_SEARCH_JUDGE_API_KEY", "")
