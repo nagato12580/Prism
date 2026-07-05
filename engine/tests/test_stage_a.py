@@ -36,3 +36,37 @@ def test_parse_stage_a_json_rejects_score_out_of_range():
 def test_prompt_contains_required_fields():
     for token in ["entity_type", "surface", "tier", "score", "evidence", "EXTRACTED", "INFERRED", "AMBIGUOUS"]:
         assert token in STAGE_A_EXTRACTION_PROMPT
+
+
+from unittest.mock import patch
+
+from backend.app.services.entity_extraction import EntityCandidate
+from engine.app.extraction.stage_a import extract_entities_for_chunk
+
+
+_FAKE_LLM_OUTPUT = (
+    '{"entities": ['
+    '{"entity_type":"concept","surface":"混合检索","tier":"INFERRED","score":0.85,"evidence":"结合向量与关键词"},'
+    '{"entity_type":"method","surface":"RRF融合","tier":"EXTRACTED","score":1.0,"evidence":"RRF"}'
+    ']}'
+)
+
+
+@patch("engine.app.extraction.stage_a.chat")
+def test_extract_entities_for_chunk_returns_candidates(mock_chat):
+    mock_chat.return_value = _FAKE_LLM_OUTPUT
+    candidates = extract_entities_for_chunk("some chunk text", chunk_id="c1")
+    assert len(candidates) == 2
+    assert all(c.kind == "entity" for c in candidates)
+    types = {c.entity_type for c in candidates}
+    assert types == {"concept", "method"}
+    concept = next(c for c in candidates if c.entity_type == "concept")
+    assert concept.surface_text == "混合检索"
+    assert concept.confidence == 0.85
+    assert concept.extraction_method.startswith("llm_stage_a:INFERRED")
+
+
+@patch("engine.app.extraction.stage_a.chat")
+def test_extract_entities_for_chunk_llm_failure_returns_empty(mock_chat):
+    mock_chat.side_effect = RuntimeError("llm down")
+    assert extract_entities_for_chunk("text", chunk_id="c1") == []
