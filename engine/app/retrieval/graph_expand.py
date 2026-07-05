@@ -85,14 +85,26 @@ def expand_candidates(
     """
     candidates: list[dict] = []
     seen_chunks: set[str] = set()
+    # Track candidate index per chunk_id so we can merge markers when the same
+    # chunk is reached via multiple expansion paths (e.g. neighbour + community).
+    _chunk_index: dict[str, int] = {}
 
     def _add_source(node_id: str, marker: str):
         if not node_id or not node_id.startswith("document_chunk:"):
             return
         chunk_id = node_id.split("document_chunk:", 1)[1]
         if chunk_id in seen_chunks:
+            # Same chunk reached via a different expansion path — merge the marker
+            # so it's visible that community / god / surprising contributed too.
+            idx = _chunk_index.get(chunk_id)
+            if idx is not None:
+                existing = candidates[idx].get("source_marker")
+                if existing and marker not in existing:
+                    candidates[idx]["source_marker"] = f"{existing}+{marker}"
             return
         seen_chunks.add(chunk_id)
+        idx = len(candidates)
+        _chunk_index[chunk_id] = idx
         candidates.append({"chunk_id": chunk_id, "item_id": None, "source_marker": marker})
 
     def _walk(entity_id: str, marker: str, hop_limit: int):
