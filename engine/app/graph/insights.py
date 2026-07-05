@@ -49,3 +49,35 @@ def generate_community_labels(communities_by_cid: dict[int, list[str]], user_id:
         except Exception as exc:
             logger.warning("[insights] community_label_failed cid=%s err=%s", cid, exc)
     return labels
+
+
+# graphify's bridge-node questions are filtered out for concept nodes (same as
+# god_nodes); keep god / ambiguous_edge / surprising-derived questions only.
+_KEEP_QUESTION_TYPES = {"god", "ambiguous_edge", "verification", "isolated"}
+
+
+def compute_suggested_questions(
+    _graph=None,
+    communities: dict | None = None,
+    community_labels: dict | None = None,
+    top_n: int = 7,
+    _questions_override: list[dict] | None = None,
+    _questions_fn=None,
+) -> list[dict]:
+    """Structural question mining via graphify.suggest_questions (no LLM).
+
+    Drops bridge_node (concept-filtered) and other unhelpful types.
+    Returns [{type, question, why}]. Empty on any failure (non-fatal).
+    """
+    try:
+        if _questions_override is not None:
+            raw = _questions_override
+        else:
+            from graphify.analyze import suggest_questions
+            fn = _questions_fn or suggest_questions
+            raw = fn(_graph, communities or {}, community_labels or {}, top_n=top_n)
+    except Exception as exc:
+        logger.warning("[insights] suggest_questions_failed err=%s", exc)
+        return []
+    kept = [q for q in raw if isinstance(q, dict) and q.get("type") in _KEEP_QUESTION_TYPES]
+    return kept[:top_n]

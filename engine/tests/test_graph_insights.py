@@ -48,3 +48,26 @@ def test_generate_community_labels_uses_llm_and_returns_mapping(mock_chat):
 def test_generate_community_labels_llm_failure_returns_empty(mock_chat):
     mock_chat.side_effect = RuntimeError("llm down")
     assert generate_community_labels({0: ["a", "b"]}) == {}
+
+
+from engine.app.graph.insights import compute_suggested_questions
+
+
+def test_compute_suggested_questions_drops_bridge_and_keeps_god_ambiguous():
+    # graphify returns questions with type tags; we drop bridge_node (concept-filtered)
+    fake_questions = [
+        {"type": "bridge_node", "question": "Why does A connect C0 to C1?", "why": "betweenness"},
+        {"type": "god", "question": "Is X really central?", "why": "high inferred degree"},
+        {"type": "ambiguous_edge", "question": "Rel between P and Q?", "why": "ambiguous"},
+    ]
+    out = compute_suggested_questions(_graph=lambda: None, _questions_override=fake_questions, top_n=5)
+    types = {q["type"] for q in out}
+    assert "bridge_node" not in types
+    assert {"god", "ambiguous_edge"} <= types
+
+
+def test_compute_suggested_questions_returns_empty_on_failure():
+    def _boom(**kw):
+        raise RuntimeError("graphify")
+    out = compute_suggested_questions(_questions_fn=_boom, top_n=5)
+    assert out == []
