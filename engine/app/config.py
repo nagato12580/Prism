@@ -48,6 +48,22 @@ class Settings:
     ENTITY_EXTRACT_TIMEOUT_SECONDS: float = float(os.getenv("ENTITY_EXTRACT_TIMEOUT_SECONDS", "30"))
     ENTITY_EXTRACT_ENABLED: bool = os.getenv("ENTITY_EXTRACT_ENABLED", "1") not in ("0", "false", "False")
     GRAPH_ANALYSIS_ENABLED: bool = os.getenv("GRAPH_ANALYSIS_ENABLED", "1") not in ("0", "false", "False")
+
+    # ---- P3 unified GraphRAG retrieval ----
+    RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "1") not in ("0", "false", "False")
+    RERANK_API_BASE: str = os.getenv("RERANK_API_BASE", "")
+    RERANK_API_KEY: str = os.getenv("RERANK_API_KEY", "")
+    RERANK_MODEL: str = os.getenv("RERANK_MODEL", "")
+    RERANK_TOP_N: int = int(os.getenv("RERANK_TOP_N", "20"))
+    RERANK_TIMEOUT_SECONDS: float = float(os.getenv("RERANK_TIMEOUT_SECONDS", "10"))
+    GRAPH_EXPAND_FAST_HOPS: int = int(os.getenv("GRAPH_EXPAND_FAST_HOPS", "1"))
+    GRAPH_EXPAND_DEEP_HOPS: int = int(os.getenv("GRAPH_EXPAND_DEEP_HOPS", "2"))
+    GRAPH_EXPAND_SEED_ENTITIES: int = int(os.getenv("GRAPH_EXPAND_SEED_ENTITIES", "10"))
+    GRAPH_EXPAND_NEIGHBORS_PER_NODE: int = int(os.getenv("GRAPH_EXPAND_NEIGHBORS_PER_NODE", "8"))
+    GRAPH_EXPAND_COMMUNITY_MEMBERS: int = int(os.getenv("GRAPH_EXPAND_COMMUNITY_MEMBERS", "10"))
+    GRAPH_EXPAND_GOD_NEIGHBORS: int = int(os.getenv("GRAPH_EXPAND_GOD_NEIGHBORS", "10"))
+    GRAPH_EXPAND_MAX_CANDIDATES: int = int(os.getenv("GRAPH_EXPAND_MAX_CANDIDATES", "60"))
+
     AGENT_TOOL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "12"))
     DEEP_SEARCH_JUDGE_API_BASE: str = os.getenv("DEEP_SEARCH_JUDGE_API_BASE", "")
     DEEP_SEARCH_JUDGE_API_KEY: str = os.getenv("DEEP_SEARCH_JUDGE_API_KEY", "")
