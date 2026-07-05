@@ -100,6 +100,25 @@ def extract_and_settle_entities(
     user_id: str = "default-user",
 ) -> list[KnowledgeEntity]:
     candidates = extract_entity_candidates_from_text(text, source_kind=source_kind)
+    return settle_entity_candidates(db, candidates, source_kind, source_id, item_id, chunk_id, user_id)
+
+
+def settle_entity_candidates(
+    db,
+    candidates: list[EntityCandidate],
+    source_kind: str,
+    source_id: str,
+    item_id: str = "",
+    chunk_id: str = "",
+    user_id: str = "default-user",
+) -> list[KnowledgeEntity]:
+    """Persist rule- or LLM-extracted ``EntityCandidate`` objects to MySQL.
+
+    This is the shared write path used by both the rule-based
+    ``extract_and_settle_entities`` helper and the LLM Stage A extractor. It
+    upserts entity rows, their aliases, mentions, and relation rows, and returns
+    the settled ``KnowledgeEntity`` rows for the ``entity``-kind candidates.
+    """
     settled_by_surface: dict[tuple[str, str], KnowledgeEntity] = {}
     settled_entities: list[KnowledgeEntity] = []
 
