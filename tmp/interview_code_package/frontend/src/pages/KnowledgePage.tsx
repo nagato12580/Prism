@@ -1,0 +1,945 @@
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import {
+  knowledgeApi,
+  type KnowledgeResource,
+  type KnowledgeTopic,
+  type ResourceFilterType,
+  type ResourceMediaType,
+} from '@/app/api'
+import {
+  Check,
+  FileAudio,
+  FileImage,
+  FileText,
+  FileVideo,
+  Folder,
+  FolderPlus,
+  Loader2,
+  Pencil,
+  Trash2,
+  Upload,
+  X,
+  Zap,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+const ACCEPTED_RESOURCE_EXTENSIONS =
+  '.pdf,.doc,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp,.gif,.mp3,.wav,.m4a,.aac,.flac,.ogg,.mp4,.mov,.avi,.mkv,.webm'
+
+const FILTERS: Array<{ value: ResourceFilterType; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'document', label: '文档' },
+  { value: 'image', label: '图片' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+]
+
+const MEDIA_LABEL: Record<ResourceMediaType, string> = {
+  document: '文档',
+  image: '图片',
+  audio: '音频',
+  video: '视频',
+}
+
+type ResourcePrimaryStatus =
+  | 'text-invalid'
+  | 'queued'
+  | 'vectorizing'
+  | 'vectorization-failed'
+  | 'ready'
+  | 'complete'
+  | 'governance-running'
+  | 'partial-complete'
+  | 'vectorized'
+  | string
+
+const RESOURCE_STATUS_LABELS: Record<string, string> = {
+  'text-invalid': '文本异常',
+  queued: '排队中',
+  vectorizing: '向量化中',
+  'vectorization-failed': '向量化失败',
+  ready: '待向量化',
+  complete: '已完成',
+  'governance-running': '整理中',
+  'partial-complete': '部分完成',
+  vectorized: '已向量化',
+  metadata_only: '仅元数据',
+}
+
+function resourcePrimaryStatus(resource: KnowledgeResource): ResourcePrimaryStatus {
+  if (resource.processing_status === 'text_invalid') return 'text-invalid'
+  if (resource.processing_status === 'queued') return 'queued'
+  if (resource.processing_status === 'processing') return 'vectorizing'
+  if (resource.processing_status === 'failed') return 'vectorization-failed'
+  if (resource.processing_status === 'completed') return 'ready'
+
+  if (resource.processing_status === 'done') {
+    if (resource.governance_status === 'done') return 'complete'
+    if (resource.governance_status === 'queued' || resource.governance_status === 'processing') {
+      return 'governance-running'
+    }
+    if (resource.governance_status === 'failed') return 'partial-complete'
+    return 'vectorized'
+  }
+
+  return resource.processing_status
+}
+
+function resourceNeedsPolling(resource: KnowledgeResource) {
+  const status = resourcePrimaryStatus(resource)
+  return status === 'queued' || status === 'vectorizing' || status === 'governance-running'
+}
+
+function formatDate(value: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(date)
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function readApiError(error: unknown, fallback: string) {
+  const raw = getErrorMessage(error)
+  try {
+    const parsed = JSON.parse(raw)
+    const detail = parsed.detail
+    if (detail?.code === 'duplicate_resource_in_topic') return '这个文件已经上传到当前主题了。'
+    if (detail?.code === 'duplicate_topic_name') return '这个主题名称已经存在。'
+    if (detail?.code === 'topic_not_empty') return '请先删除目录里的资源，再删除目录。'
+    if (detail?.code === 'invalid_resource_title') return '资源名称不能为空。'
+    if (detail?.message) return `${fallback}：${detail.message}`
+  } catch {
+    return `${fallback}：${raw}`
+  }
+  return `${fallback}：${raw}`
+}
+
+export function KnowledgePage() {
+  const [topics, setTopics] = useState<KnowledgeTopic[]>([])
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null)
+  const [resources, setResources] = useState<KnowledgeResource[]>([])
+  const [filter, setFilter] = useState<ResourceFilterType>('all')
+  const [loadingTopics, setLoadingTopics] = useState(false)
+  const [loadingResources, setLoadingResources] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [showTopicForm, setShowTopicForm] = useState(false)
+  const [newTopicName, setNewTopicName] = useState('')
+  const [newTopicDescription, setNewTopicDescription] = useState('')
+  const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
+  const [editingTopicName, setEditingTopicName] = useState('')
+  const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
+  const [editingResourceTitle, setEditingResourceTitle] = useState('')
+  const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set())
+  const [retryingGovernanceIds, setRetryingGovernanceIds] = useState<Set<string>>(new Set())
+  const [ingestingTopic, setIngestingTopic] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const activeTopicIdRef = useRef<string | null>(activeTopicId)
+
+  const selectTopic = (topicId: string | null) => {
+    activeTopicIdRef.current = topicId
+    setActiveTopicId(topicId)
+  }
+
+  const activeTopic = topics.find((topic) => topic.id === activeTopicId) || null
+  const hasProcessingResources = resources.some(resourceNeedsPolling)
+
+  useEffect(() => {
+    activeTopicIdRef.current = activeTopicId
+  }, [activeTopicId])
+
+  const loadTopics = async () => {
+    setLoadingTopics(true)
+    try {
+      const loaded = await knowledgeApi.listTopics()
+      setTopics(loaded)
+      if (!activeTopicIdRef.current) {
+        selectTopic(loaded[0]?.id || null)
+      }
+    } catch (err) {
+      setError(`知识库主题加载失败：${getErrorMessage(err)}`)
+    } finally {
+      setLoadingTopics(false)
+    }
+  }
+
+  const loadResourcesForTopic = async (topicId: string, nextFilter = filter, options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingResources(true)
+    try {
+      const params = nextFilter === 'all' ? undefined : { media_type: nextFilter }
+      const loaded = await knowledgeApi.listResources(topicId, params)
+      if (activeTopicIdRef.current === topicId) {
+        setResources(loaded)
+      }
+    } catch (err) {
+      if (activeTopicIdRef.current !== topicId) return
+      setError(`资源加载失败：${getErrorMessage(err)}`)
+    } finally {
+      if (!options?.silent && activeTopicIdRef.current === topicId) setLoadingResources(false)
+    }
+  }
+
+  useEffect(() => {
+    loadTopics()
+  }, [])
+
+  useEffect(() => {
+    if (activeTopicId) {
+      loadResourcesForTopic(activeTopicId)
+    } else {
+      setResources([])
+    }
+  }, [activeTopicId, filter])
+
+  useEffect(() => {
+    if (!activeTopicId || !hasProcessingResources) return
+
+    const timer = window.setInterval(() => {
+      void loadResourcesForTopic(activeTopicId, filter, { silent: true })
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [activeTopicId, filter, hasProcessingResources])
+
+  const createTopic = async () => {
+    const name = newTopicName.trim()
+    if (!name || busy) {
+      setError('请先填写主题名称。')
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      const topic = await knowledgeApi.createTopic({
+        name,
+        description: newTopicDescription.trim() || undefined,
+      })
+      setTopics((current) => [topic, ...current])
+      selectTopic(topic.id)
+      setNewTopicName('')
+      setNewTopicDescription('')
+      setShowTopicForm(false)
+    } catch (err) {
+      setError(readApiError(err, '主题创建失败'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startTopicEdit = (topic: KnowledgeTopic) => {
+    setEditingTopicId(topic.id)
+    setEditingTopicName(topic.name)
+  }
+
+  const saveTopicName = async () => {
+    if (!editingTopicId || busy) return
+    const name = editingTopicName.trim()
+    if (!name) {
+      setError('主题名称不能为空。')
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      const topic = await knowledgeApi.updateTopic(editingTopicId, { name })
+      setTopics((current) => current.map((item) => (item.id === topic.id ? topic : item)))
+      setEditingTopicId(null)
+      setEditingTopicName('')
+    } catch (err) {
+      setError(readApiError(err, '主题改名失败'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteTopic = async (topic: KnowledgeTopic) => {
+    if (busy || !confirm(`确认删除目录「${topic.name}」吗？`)) return
+
+    setBusy(true)
+    setError(null)
+    try {
+      await knowledgeApi.deleteTopic(topic.id)
+      setTopics((current) => current.filter((item) => item.id !== topic.id))
+      if (activeTopicIdRef.current === topic.id) {
+        selectTopic(topics.find((item) => item.id !== topic.id)?.id || null)
+      }
+    } catch (err) {
+      setError(readApiError(err, '目录删除失败'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0 || busy || !activeTopicId) return
+
+    setBusy(true)
+    setError(null)
+    let success = 0
+    let failed = 0
+    try {
+      await Promise.all(
+        files.map(async (file) => {
+          try {
+            await knowledgeApi.uploadResource(activeTopicId, file)
+            success++
+          } catch {
+            failed++
+          }
+        }),
+      )
+      await Promise.all([loadTopics(), loadResourcesForTopic(activeTopicId)])
+      if (failed > 0) {
+        setError(`${success} 个上传成功，${failed} 个失败`)
+      }
+    } catch (err) {
+      setError(readApiError(err, '资源上传失败'))
+    } finally {
+      setBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const startResourceEdit = (resource: KnowledgeResource) => {
+    setEditingResourceId(resource.id)
+    setEditingResourceTitle(resource.title || resource.original_filename)
+  }
+
+  const saveResourceTitle = async () => {
+    if (!editingResourceId || busy) return
+    const title = editingResourceTitle.trim()
+    if (!title) {
+      setError('资源名称不能为空。')
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      const resource = await knowledgeApi.updateResource(editingResourceId, { title })
+      setResources((current) => current.map((item) => (item.id === resource.id ? resource : item)))
+      setEditingResourceId(null)
+      setEditingResourceTitle('')
+    } catch (err) {
+      setError(readApiError(err, '资源改名失败'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleIngest = async (resourceId: string) => {
+    const resource = resources.find((item) => item.id === resourceId)
+    const status = resource ? resourcePrimaryStatus(resource) : null
+    if (
+      busy ||
+      ingestingIds.has(resourceId) ||
+      !activeTopicId ||
+      (status !== 'ready' && status !== 'vectorization-failed')
+    ) {
+      return
+    }
+
+    setIngestingIds((current) => new Set(current).add(resourceId))
+    setError(null)
+    try {
+      const updated = await knowledgeApi.ingestResource(resourceId)
+      setResources((current) =>
+        current.map((r) => (r.id === resourceId ? updated : r)),
+      )
+    } catch (err) {
+      setError(readApiError(err, '向量化失败'))
+    } finally {
+      setIngestingIds((current) => {
+        const next = new Set(current)
+        next.delete(resourceId)
+        return next
+      })
+    }
+  }
+
+  const handleRetryGovernance = async (resourceId: string) => {
+    const topicId = activeTopicId
+    const resource = resources.find((item) => item.id === resourceId)
+    const status = resource ? resourcePrimaryStatus(resource) : null
+    if (!topicId || busy || retryingGovernanceIds.has(resourceId) || status !== 'partial-complete') {
+      return
+    }
+
+    setRetryingGovernanceIds((current) => new Set(current).add(resourceId))
+    setError(null)
+    try {
+      const updated = await knowledgeApi.retryGovernance(resourceId)
+      if (activeTopicIdRef.current !== topicId) return
+      setResources((current) =>
+        current.map((r) => (r.id === resourceId ? updated : r)),
+      )
+    } catch (err) {
+      if (activeTopicIdRef.current !== topicId) return
+      setError(readApiError(err, '知识整理重试失败'))
+    } finally {
+      setRetryingGovernanceIds((current) => {
+        const next = new Set(current)
+        next.delete(resourceId)
+        return next
+      })
+    }
+  }
+
+  const handleIngestTopic = async () => {
+    if (busy || ingestingTopic || !activeTopicId) return
+    const topicId = activeTopicId
+
+    setIngestingTopic(true)
+    setError(null)
+    try {
+      const result = await knowledgeApi.ingestTopicResources(topicId)
+      await loadResourcesForTopic(topicId)
+      if (activeTopicIdRef.current !== topicId) return
+      if (result.failed > 0 || result.messages.length > 0) {
+        setError(
+          `批量向量化已排队 ${result.queued} 个，跳过 ${result.skipped} 个，失败 ${result.failed} 个。${result.messages.join('；')}`,
+        )
+      }
+    } catch (err) {
+      if (activeTopicIdRef.current !== topicId) return
+      setError(readApiError(err, '批量向量化失败'))
+    } finally {
+      setIngestingTopic(false)
+    }
+  }
+
+  const handleDeleteResource = async (resourceId: string) => {
+    if (busy || !activeTopicId || !confirm('确认删除这个资源吗？')) return
+
+    setBusy(true)
+    setError(null)
+    try {
+      await knowledgeApi.deleteResource(resourceId)
+      await Promise.all([loadTopics(), loadResourcesForTopic(activeTopicId)])
+    } catch (err) {
+      setError(readApiError(err, '资源删除失败'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="grid h-[calc(100vh-8rem)] min-h-[34rem] gap-4 overflow-hidden lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside data-testid="knowledge-topic-sidebar" className="prism-panel flex min-h-0 flex-col rounded-lg p-3">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h1 className="text-lg font-semibold text-slate-950">知识库</h1>
+          <button
+            type="button"
+            onClick={() => setShowTopicForm((value) => !value)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--prism-blue)] text-white transition hover:brightness-95"
+            aria-label="新建主题"
+            title="新建主题"
+          >
+            <FolderPlus size={17} />
+          </button>
+        </div>
+
+        {showTopicForm && (
+          <div className="mb-3 space-y-2">
+            <input
+              value={newTopicName}
+              onChange={(event) => setNewTopicName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') createTopic()
+              }}
+              placeholder="主题名称"
+              className="min-h-10 w-full rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2 text-sm outline-none transition focus:border-[var(--prism-blue)] focus:ring-2 focus:ring-blue-100"
+            />
+            <textarea
+              value={newTopicDescription}
+              onChange={(event) => setNewTopicDescription(event.target.value)}
+              placeholder="描述"
+              rows={2}
+              className="w-full resize-none rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2 text-sm outline-none transition focus:border-[var(--prism-blue)] focus:ring-2 focus:ring-blue-100"
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={createTopic}
+              className="inline-flex min-h-9 w-full items-center justify-center rounded-lg bg-[var(--prism-blue)] px-3 text-sm font-medium text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              创建主题
+            </button>
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {loadingTopics ? (
+            <LoadingState text="正在加载主题..." compact />
+          ) : topics.length === 0 ? (
+            <EmptyState icon={<FolderPlus size={26} />} title="还没有主题" description="先新建一个主题，再上传资源。" compact />
+          ) : (
+            <div className="space-y-2">
+              {topics.map((topic) => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  active={activeTopicId === topic.id}
+                  busy={busy}
+                  editing={editingTopicId === topic.id}
+                  editingName={editingTopicName}
+                  onSelect={() => selectTopic(topic.id)}
+                  onStartEdit={() => startTopicEdit(topic)}
+                  onChangeEdit={setEditingTopicName}
+                  onSaveEdit={saveTopicName}
+                  onCancelEdit={() => setEditingTopicId(null)}
+                  onDelete={() => deleteTopic(topic)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <main className="min-h-0 min-w-0 overflow-y-auto pr-1">
+        <div className="space-y-4">
+          <ErrorMessage error={error} onClose={() => setError(null)} />
+          {!activeTopic ? (
+            <EmptyState icon={<FolderPlus size={28} />} title="请选择主题" description="主题里的资源会在这里显示。" />
+          ) : (
+            <>
+              <section className="prism-panel rounded-lg p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <h2 className="break-words text-xl font-semibold text-slate-950">{activeTopic.name}</h2>
+                    {activeTopic.description && <p className="mt-2 text-sm leading-6 text-slate-500">{activeTopic.description}</p>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <input ref={fileRef} type="file" className="hidden" accept={ACCEPTED_RESOURCE_EXTENSIONS} onChange={handleUpload} multiple />
+                    <button
+                      type="button"
+                      disabled={busy || ingestingTopic}
+                      onClick={handleIngestTopic}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-55"
+                      title="批量向量化当前主题文档"
+                    >
+                      {ingestingTopic ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                      批量向量化
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => fileRef.current?.click()}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[var(--prism-blue)] px-4 py-2 text-sm font-medium text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      {busy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                      上传资源
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="prism-panel rounded-lg p-3">
+                <div data-testid="knowledge-resource-filter" className="flex flex-wrap gap-2">
+                  {FILTERS.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setFilter(item.value)}
+                      className={cn(
+                        'min-h-9 rounded-lg px-3 text-sm font-medium transition',
+                        filter === item.value ? 'bg-[var(--prism-blue)] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {loadingResources ? (
+                <LoadingState text="正在加载资源..." />
+              ) : resources.length === 0 ? (
+                <EmptyState
+                  icon={<Upload size={28} />}
+                  title="当前主题还没有资源"
+                  description="点击上传资源，文档会进入问答检索，图片、音频、视频会先保存元数据。"
+                />
+              ) : (
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {resources.map((resource) => (
+                    <ResourceCard
+                      key={resource.id}
+                      resource={resource}
+                      busy={busy}
+                      ingesting={ingestingIds.has(resource.id)}
+                      retryingGovernance={retryingGovernanceIds.has(resource.id)}
+                      editing={editingResourceId === resource.id}
+                      editingTitle={editingResourceTitle}
+                      onStartEdit={() => startResourceEdit(resource)}
+                      onChangeEdit={setEditingResourceTitle}
+                      onSaveEdit={saveResourceTitle}
+                      onCancelEdit={() => setEditingResourceId(null)}
+                      onIngest={() => handleIngest(resource.id)}
+                      onRetryGovernance={() => handleRetryGovernance(resource.id)}
+                      onDelete={handleDeleteResource}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+function iconButtonClass(extra = '') {
+  return cn(
+    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40',
+    extra,
+  )
+}
+
+function TopicRow({
+  topic,
+  active,
+  busy,
+  editing,
+  editingName,
+  onSelect,
+  onStartEdit,
+  onChangeEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+}: {
+  topic: KnowledgeTopic
+  active: boolean
+  busy: boolean
+  editing: boolean
+  editingName: string
+  onSelect: () => void
+  onStartEdit: () => void
+  onChangeEdit: (value: string) => void
+  onSaveEdit: () => void
+  onCancelEdit: () => void
+  onDelete: () => void
+}) {
+  const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') onSaveEdit()
+    if (event.key === 'Escape') onCancelEdit()
+  }
+
+  return (
+    <div
+      className={cn(
+        'flex w-full items-start gap-2 rounded-lg border px-3 py-3 transition',
+        active ? 'border-blue-200 bg-blue-50 text-[var(--prism-blue)]' : 'border-transparent bg-white text-slate-700 hover:border-[var(--prism-line)]',
+      )}
+    >
+      <button type="button" onClick={onSelect} className="mt-0.5 shrink-0" aria-label={`选择 ${topic.name}`}>
+        <Folder size={18} />
+      </button>
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <input
+            value={editingName}
+            onChange={(event) => onChangeEdit(event.target.value)}
+            onKeyDown={handleKey}
+            autoFocus
+            className="min-h-8 w-full rounded-md border border-blue-200 bg-white px-2 text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        ) : (
+          <button type="button" onClick={onSelect} className="block w-full break-words text-left text-sm font-semibold">
+            {topic.name}
+          </button>
+        )}
+        <span className="mt-1 block text-xs text-slate-500">{topic.resource_count} 个资源</span>
+      </div>
+      <div className="flex shrink-0 gap-1">
+        {editing ? (
+          <>
+            <button type="button" disabled={busy} onClick={onSaveEdit} className={iconButtonClass('hover:text-emerald-700')} aria-label="保存目录名称" title="保存">
+              <Check size={15} />
+            </button>
+            <button type="button" disabled={busy} onClick={onCancelEdit} className={iconButtonClass()} aria-label="取消改名" title="取消">
+              <X size={15} />
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" disabled={busy} onClick={onStartEdit} className={iconButtonClass()} aria-label={`改名 ${topic.name}`} title="改名">
+              <Pencil size={15} />
+            </button>
+            <button type="button" disabled={busy} onClick={onDelete} className={iconButtonClass('hover:bg-red-50 hover:text-red-600')} aria-label={`删除 ${topic.name}`} title="删除目录">
+              <Trash2 size={15} />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ErrorMessage({ error, onClose }: { error: string | null; onClose: () => void }) {
+  if (!error) return null
+  return (
+    <div role="alert" className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:flex-row sm:items-start sm:justify-between">
+      <p className="min-w-0 break-words">{error}</p>
+      <button type="button" onClick={onClose} className="self-start rounded-md px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-100">
+        关闭
+      </button>
+    </div>
+  )
+}
+
+function LoadingState({ text, compact = false }: { text: string; compact?: boolean }) {
+  return (
+    <div className={cn('flex items-center justify-center rounded-lg border border-dashed border-[var(--prism-line)] bg-white/70 text-sm text-slate-500', compact ? 'min-h-32 px-3' : 'min-h-44')}>
+      <Loader2 size={18} className="mr-2 animate-spin text-[var(--prism-blue)]" />
+      {text}
+    </div>
+  )
+}
+
+function EmptyState({
+  icon,
+  title,
+  description,
+  compact = false,
+}: {
+  icon: React.ReactNode
+  title: string
+  description: string
+  compact?: boolean
+}) {
+  return (
+    <div className={cn('flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--prism-line)] bg-white/70 px-6 text-center', compact ? 'min-h-32 py-6' : 'min-h-56 py-12')}>
+      <div className="mb-3 text-slate-400">{icon}</div>
+      <h2 className="text-base font-semibold text-slate-950">{title}</h2>
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">{description}</p>
+    </div>
+  )
+}
+
+function statusLabel(status: string) {
+  if (RESOURCE_STATUS_LABELS[status]) return RESOURCE_STATUS_LABELS[status]
+  const labels: Record<string, string> = {
+    pending: '待解析',
+    processing: '处理中',
+    completed: '待向量化',
+    done: '已向量化',
+    failed: '失败',
+    metadata_only: '仅元数据',
+  }
+  return labels[status] || status
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const isError = status === 'vectorization-failed' || status === 'text-invalid' || status === 'partial-complete'
+  const isDone = status === 'complete' || status === 'vectorized'
+  const isProcessing = status === 'queued' || status === 'vectorizing' || status === 'governance-running'
+
+  return (
+    <span
+      className={cn(
+        'rounded-md px-2 py-1 font-medium',
+        isError && 'bg-red-50 text-red-700',
+        isDone && 'bg-emerald-50 text-emerald-700',
+        isProcessing && 'bg-violet-50 text-violet-600',
+        !isError && !isDone && !isProcessing && 'bg-amber-50 text-amber-700',
+      )}
+    >
+      {statusLabel(status)}
+    </span>
+  )
+}
+
+function ResourceIcon({ mediaType }: { mediaType: ResourceMediaType }) {
+  if (mediaType === 'image') return <FileImage size={18} />
+  if (mediaType === 'audio') return <FileAudio size={18} />
+  if (mediaType === 'video') return <FileVideo size={18} />
+  return <FileText size={18} />
+}
+
+function formatSize(value: number) {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function ResourceCard({
+  resource,
+  busy,
+  ingesting,
+  retryingGovernance,
+  editing,
+  editingTitle,
+  onStartEdit,
+  onChangeEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onIngest,
+  onRetryGovernance,
+  onDelete,
+}: {
+  resource: KnowledgeResource
+  busy: boolean
+  ingesting: boolean
+  retryingGovernance: boolean
+  editing: boolean
+  editingTitle: string
+  onStartEdit: () => void
+  onChangeEdit: (value: string) => void
+  onSaveEdit: () => void
+  onCancelEdit: () => void
+  onIngest: () => void
+  onRetryGovernance: () => void
+  onDelete: (id: string) => void
+}) {
+  const uploadedDate = formatDate(resource.uploaded_at)
+  const displayTitle = resource.title || resource.original_filename
+  const primaryStatus = resourcePrimaryStatus(resource)
+  const canIngest = primaryStatus === 'ready' || primaryStatus === 'vectorization-failed'
+  const isActive = primaryStatus === 'queued' || primaryStatus === 'vectorizing' || primaryStatus === 'governance-running'
+  const governanceProgressTotal = resource.governance_progress_total || 0
+  const governanceProgressCurrent = resource.governance_progress_current || 0
+  const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') onSaveEdit()
+    if (event.key === 'Escape') onCancelEdit()
+  }
+
+  return (
+    <article className="prism-panel flex min-h-44 flex-col rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[var(--prism-blue)]">
+          <ResourceIcon mediaType={resource.media_type} />
+        </div>
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <input
+              value={editingTitle}
+              onChange={(event) => onChangeEdit(event.target.value)}
+              onKeyDown={handleKey}
+              autoFocus
+              className="min-h-8 w-full rounded-md border border-blue-200 bg-white px-2 text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          ) : (
+            <h3 className="break-words text-sm font-semibold leading-5 text-slate-950">{displayTitle}</h3>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{resource.file_ext.replace('.', '').toUpperCase() || MEDIA_LABEL[resource.media_type]}</span>
+            <StatusBadge status={primaryStatus} />
+            <span>{formatSize(resource.file_size)}</span>
+            {uploadedDate && <span>{uploadedDate}</span>}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-start gap-1">
+          {/* 已向量化：实心紫色闪电 */}
+          {resource.media_type === 'document' && (primaryStatus === 'complete' || primaryStatus === 'vectorized') && (
+            <span
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-500"
+              title="已向量化"
+            >
+              <Zap size={15} fill="currentColor" />
+            </span>
+          )}
+          {/* 未向量化：空心闪电，可点击触发 */}
+          {resource.media_type === 'document' && canIngest && (
+            <button
+              type="button"
+              disabled={ingesting}
+              onClick={onIngest}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-300 transition hover:bg-violet-100 hover:text-violet-600 disabled:opacity-50"
+              title="向量化此文档"
+            >
+              {ingesting ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Zap size={15} />
+              )}
+            </button>
+          )}
+          {/* 处理中：旋转 */}
+          {resource.media_type === 'document' && isActive && (
+            <span
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-400"
+              title="向量化处理中"
+            >
+              <Loader2 size={15} className="animate-spin" />
+            </span>
+          )}
+          {/* 失败：红色警告 */}
+          {resource.media_type === 'document' && primaryStatus === 'partial-complete' && (
+            <button
+              type="button"
+              disabled={busy || retryingGovernance}
+              onClick={onRetryGovernance}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-400 transition hover:bg-amber-100 hover:text-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              title="知识整理失败，后续可重试"
+            >
+              {retryingGovernance ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Zap size={15} fill="currentColor" />
+              )}
+            </button>
+          )}
+          {editing ? (
+            <>
+              <button type="button" disabled={busy} onClick={onSaveEdit} className={iconButtonClass('hover:text-emerald-700')} aria-label="保存资源名称" title="保存">
+                <Check size={16} />
+              </button>
+              <button type="button" disabled={busy} onClick={onCancelEdit} className={iconButtonClass()} aria-label="取消资源改名" title="取消">
+                <X size={16} />
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" disabled={busy} onClick={onStartEdit} className={iconButtonClass()} aria-label={`改名 ${displayTitle}`} title="改名">
+                <Pencil size={16} />
+              </button>
+              <button type="button" disabled={busy} onClick={() => onDelete(resource.id)} className={iconButtonClass('hover:bg-red-50 hover:text-red-600')} aria-label={`删除 ${displayTitle}`} title="删除资源">
+                <Trash2 size={16} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {resource.governance_status === 'processing' && governanceProgressTotal > 0 && (
+        <div className="mt-3 rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-700">
+          <div className="flex items-center justify-between gap-3">
+            <span>知识整理进度</span>
+            <span>
+              {governanceProgressCurrent}/{governanceProgressTotal}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-violet-100">
+            <div
+              className="h-full rounded-full bg-violet-500 transition-all"
+              style={{
+                width: `${Math.min(100, Math.max(0, (governanceProgressCurrent / governanceProgressTotal) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {resource.error_message && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">{resource.error_message}</p>}
+      {resource.governance_error_message && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-700">{resource.governance_error_message}</p>}
+
+      {resource.tags?.length ? (
+        <div className="mt-auto flex flex-wrap gap-2 pt-4">
+          {resource.tags.map((tag) => (
+            <span key={tag} className="rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+              #{tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  )
+}

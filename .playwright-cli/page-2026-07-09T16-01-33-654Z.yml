@@ -1,0 +1,175 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+      - generic [ref=e41]: 用户记忆
+      - generic [ref=e42]:
+        - link "记忆审核 3" [ref=e146] [cursor=pointer]:
+          - /url: /memory/inbox
+          - img [ref=e44]
+          - generic [ref=e47]: 记忆审核
+          - generic [ref=e147]: "3"
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e83]:
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - button "实体视图" [ref=e86] [cursor=pointer]
+            - button "来源视图" [ref=e87] [cursor=pointer]
+          - generic [ref=e88]:
+            - img
+            - textbox "Search entities or relationships" [ref=e89]
+          - button "刷新图谱" [ref=e90] [cursor=pointer]:
+            - img [ref=e148]
+            - text: 刷新图谱
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - img [ref=e95]
+            - generic [ref=e105]: Pending index
+          - generic [ref=e106]: Status capsule
+          - generic [ref=e107]: "7"
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - generic [ref=e110]: Nodes 67
+            - generic [ref=e111]: "|"
+            - generic [ref=e112]: Edges 82
+          - generic [ref=e113]:
+            - img [ref=e114]
+            - generic [ref=e116]: 60 entities
+            - img [ref=e117]
+            - generic [ref=e120]: 文档分块 6
+        - generic [ref=e121]:
+          - button "放大" [ref=e122] [cursor=pointer]:
+            - img [ref=e123]
+          - generic [ref=e126]: 100%
+          - button "Zoom out" [ref=e127] [cursor=pointer]:
+            - img [ref=e128]
+          - button "适应画布" [ref=e131] [cursor=pointer]:
+            - img [ref=e132]
+        - generic [ref=e138]:
+          - group "Entity graph explorer" [ref=e153]:
+            - generic [ref=e155]:
+              - generic [ref=e156]: 实体网络
+              - generic [ref=e157]: 文档证据
+              - generic [ref=e158]: 个人资产证据
+            - generic [ref=e160]:
+              - button "图节点 超限，状态：实体" [ref=e357]
+              - button "图节点 代码，状态：实体" [ref=e163]
+              - button "图节点 电话模式WebUI，状态：实体" [ref=e165]
+              - button "图节点 读取了一个大文件，状态：实体" [ref=e167]
+              - button "图节点 多模态模型，状态：实体" [ref=e169]
+              - button "图节点 非法字符，状态：实体" [ref=e171]
+              - button "图节点 工具调用保护L1，状态：实体" [ref=e173]
+              - button "图节点 技术报告，状态：实体" [ref=e175]
+              - button "图节点 近似双工交互，状态：实体" [ref=e177]
+              - button "图节点 开源，状态：实体" [ref=e179]
+              - button "图节点 流式语音生成，状态：实体" [ref=e181]
+              - button "图节点 模型主动 compact，状态：实体" [ref=e183]
+              - button "图节点 普通路径，状态：实体" [ref=e185]
+              - button "图节点 上下文压缩，状态：实体" [ref=e187]
+              - button "图节点 社区，状态：实体" [ref=e189]
+              - button "图节点 时间成本，状态：实体" [ref=e191]
+              - button "图节点 实时打断，状态：实体" [ref=e193]
+              - button "图节点 搜索返回了很多内容，状态：实体" [ref=e195]
+              - button "图节点 图像，状态：实体" [ref=e197]
+              - button "图节点 图像理解，状态：实体" [ref=e199]
+              - button "图节点 文本，状态：实体" [ref=e201]
+              - button "图节点 消费级硬件，状态：实体" [ref=e203]
+              - button "图节点 协议问题，状态：实体" [ref=e205]
+              - button "图节点 训练流程，状态：实体" [ref=e207]
+              - button "图节点 训练数据集，状态：实体" [ref=e209]
+              - button "图节点 音色克隆，状态：实体" [ref=e211]
+              - button "图节点 硬件，状态：实体" [ref=e213]
+              - button "图节点 用户界面，状态：实体" [ref=e215]
+              - button "图节点 语音，状态：实体" [ref=e217]
+              - button "图节点 语音对话，状态：实体" [ref=e219]
+              - button "图节点 预训练权重，状态：实体" [ref=e221]
+              - button "图节点 字节数，状态：实体" [ref=e223]
+              - button "图节点 arXiv，状态：实体" [ref=e225]
+              - button "图节点 assistant，状态：实体" [ref=e227]
+              - button "图节点 block.id，状态：实体" [ref=e229]
+              - button "图节点 block.input，状态：实体" [ref=e231]
+              - button "图节点 compact 工具分支，状态：实体" [ref=e233]
+              - button "图节点 compact_history，状态：实体" [ref=e235]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e237]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e239]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e241]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e243]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e245]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e247]
+              - button "图节点 for循环，状态：实体" [ref=e249]
+              - button "图节点 full数据集，状态：实体" [ref=e251]
+              - button "图节点 head_end，状态：实体" [ref=e253]
+              - button "图节点 keep_head，状态：实体" [ref=e255]
+              - button "图节点 keep_tail，状态：实体" [ref=e257]
+              - button "图节点 max_messages，状态：实体" [ref=e259]
+              - button "图节点 messages.create，状态：实体" [ref=e261]
+              - button "图节点 mini数据集，状态：实体" [ref=e263]
+              - button "图节点 MiniMind-O，状态：实体" [ref=e265]
+              - 'button "图节点 MiniMind-O: 从零训练0.1B开源Omni模型，状态：个人资产单元" [ref=e267]'
+              - button "图节点 Omni模型，状态：实体" [ref=e269]
+              - button "图节点 PreToolUse，状态：实体" [ref=e271]
+              - button "图节点 results，状态：实体" [ref=e273]
+              - button "图节点 results，状态：实体" [ref=e275]
+              - button "图节点 RTX 3090，状态：实体" [ref=e277]
+              - button "图节点 snipped，状态：实体" [ref=e279]
+              - button "图节点 stop_reason，状态：实体" [ref=e281]
+              - button "图节点 tail_start，状态：实体" [ref=e283]
+              - button "图节点 textcompact，状态：实体" [ref=e285]
+              - button "图节点 TOOL_RESULTS_DIR，状态：实体" [ref=e287]
+              - button "图节点 unknown.txt，状态：实体" [ref=e289]
+              - button "图节点 user，状态：实体" [ref=e291]
+              - button "图节点 user 消息，状态：实体" [ref=e293]
+          - generic:
+            - generic:
+              - paragraph: 选择一个节点，查看它在 unified graph 里的结构、来源证据和关联关系。
+              - generic:
+                - button "重新聚焦" [disabled]
+                - button "展开更多关联" [disabled]

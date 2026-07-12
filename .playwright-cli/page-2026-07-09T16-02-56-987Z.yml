@@ -1,0 +1,505 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: PR
+      - generic [ref=e7]:
+        - generic [ref=e8]: 棱镜 Prism
+        - generic [ref=e9]: Personal knowledge lab
+    - navigation [ref=e10]:
+      - generic [ref=e11]: 对话
+      - link "对话" [ref=e13] [cursor=pointer]:
+        - /url: /chat
+        - img [ref=e14]
+        - generic [ref=e16]: 对话
+      - generic [ref=e17]: 工作台
+      - generic [ref=e18]:
+        - link "收件箱" [ref=e19] [cursor=pointer]:
+          - /url: /inbox
+          - img [ref=e20]
+          - generic [ref=e23]: 收件箱
+        - link "资产" [ref=e24] [cursor=pointer]:
+          - /url: /assets
+          - img [ref=e25]
+          - generic [ref=e28]: 资产
+        - link "知识库" [ref=e29] [cursor=pointer]:
+          - /url: /knowledge
+          - img [ref=e30]
+          - generic [ref=e33]: 知识库
+        - link "图谱" [ref=e34] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e35]
+          - generic [ref=e40]: 图谱
+      - generic [ref=e41]: 用户记忆
+      - generic [ref=e42]:
+        - link "记忆审核 3" [ref=e146] [cursor=pointer]:
+          - /url: /memory/inbox
+          - img [ref=e44]
+          - generic [ref=e47]: 记忆审核
+          - generic [ref=e147]: "3"
+        - link "用户画像" [ref=e48] [cursor=pointer]:
+          - /url: /memory/profile
+          - img [ref=e49]
+          - generic [ref=e58]: 用户画像
+        - link "记忆图谱" [ref=e59] [cursor=pointer]:
+          - /url: /memory/graph
+          - img [ref=e60]
+          - generic [ref=e67]: 记忆图谱
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - generic [ref=e70]:
+        - img
+        - textbox "全局搜索" [ref=e71]:
+          - /placeholder: 搜索文档、知识、对话...
+      - generic [ref=e72]:
+        - button "切换为暗色主题" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+          - generic [ref=e76]: 暗色
+        - generic [ref=e77]:
+          - generic [ref=e78]: A
+          - generic [ref=e79]: admin@example.com
+    - main [ref=e80]:
+      - generic [ref=e83]:
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - button "实体视图" [ref=e86] [cursor=pointer]
+            - button "来源视图" [ref=e87] [cursor=pointer]
+          - generic [ref=e88]:
+            - img
+            - textbox "Search entities or relationships" [ref=e89]
+          - button "刷新图谱" [ref=e90] [cursor=pointer]:
+            - img [ref=e148]
+            - text: 刷新图谱
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - img [ref=e95]
+            - generic [ref=e105]: Pending index
+          - generic [ref=e106]: Status capsule
+          - generic [ref=e107]: "7"
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - generic [ref=e110]: Nodes 67
+            - generic [ref=e111]: "|"
+            - generic [ref=e112]: Edges 82
+          - generic [ref=e113]:
+            - img [ref=e114]
+            - generic [ref=e116]: 60 entities
+            - img [ref=e117]
+            - generic [ref=e120]: 文档分块 6
+        - generic [ref=e121]:
+          - button "放大" [ref=e122] [cursor=pointer]:
+            - img [ref=e123]
+          - generic [ref=e126]: 100%
+          - button "Zoom out" [ref=e127] [cursor=pointer]:
+            - img [ref=e128]
+          - button "适应画布" [ref=e131] [cursor=pointer]:
+            - img [ref=e132]
+        - generic [ref=e137]:
+          - group "Entity graph explorer" [ref=e153]:
+            - generic [ref=e155]:
+              - generic [ref=e156]: 实体网络
+              - generic [ref=e157]: 文档证据
+              - generic [ref=e158]: 个人资产证据
+            - generic [ref=e160]:
+              - button "图节点 超限，状态：实体" [ref=e357]
+              - button "图节点 读取了一个大文件，状态：实体" [ref=e167]
+              - button "图节点 非法字符，状态：实体" [ref=e171]
+              - button "图节点 工具调用保护L1，状态：实体" [ref=e173]
+              - button "图节点 模型主动 compact，状态：实体" [ref=e183]
+              - button "图节点 普通路径，状态：实体" [ref=e185]
+              - button "图节点 上下文压缩，状态：实体" [ref=e187]
+              - button "图节点 搜索返回了很多内容，状态：实体" [ref=e195]
+              - button "图节点 协议问题，状态：实体" [ref=e205]
+              - button "图节点 字节数，状态：实体" [ref=e223]
+              - button "图节点 assistant，状态：实体" [ref=e227]
+              - button "图节点 block.id，状态：实体" [ref=e229]
+              - button "图节点 block.input，状态：实体" [ref=e231]
+              - button "图节点 compact 工具分支，状态：实体" [ref=e233]
+              - button "图节点 compact_history，状态：实体" [ref=e235]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e237]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e239]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e241]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e243]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e245]
+              - button "图节点 context_compact_agent_loop_explanation，状态：文档分块" [ref=e247]
+              - button "图节点 for循环，状态：实体" [ref=e249]
+              - button "图节点 head_end，状态：实体" [ref=e253]
+              - button "图节点 keep_head，状态：实体" [ref=e255]
+              - button "图节点 keep_tail，状态：实体" [ref=e257]
+              - button "图节点 max_messages，状态：实体" [ref=e259]
+              - button "图节点 messages.create，状态：实体" [ref=e261]
+              - button "图节点 PreToolUse，状态：实体" [ref=e271]
+              - button "图节点 results，状态：实体" [ref=e273]
+              - button "图节点 results，状态：实体" [ref=e275]
+              - button "图节点 snipped，状态：实体" [ref=e279]
+              - button "图节点 stop_reason，状态：实体" [ref=e281]
+              - button "图节点 tail_start，状态：实体" [ref=e283]
+              - button "图节点 textcompact，状态：实体" [ref=e285]
+              - button "图节点 TOOL_RESULTS_DIR，状态：实体" [ref=e287]
+              - button "图节点 unknown.txt，状态：实体" [ref=e289]
+              - button "图节点 user，状态：实体" [ref=e291]
+              - button "图节点 user 消息，状态：实体" [ref=e293]
+              - button "图节点 代码，状态：实体" [ref=e163]:
+                - generic: 代码
+                - generic: 实体
+              - button "图节点 电话模式WebUI，状态：实体" [ref=e165]:
+                - generic: 电话模式WebUI
+                - generic: 实体
+              - button "图节点 多模态模型，状态：实体" [ref=e169]:
+                - generic: 多模态模型
+                - generic: 实体
+              - button "图节点 技术报告，状态：实体" [ref=e175]:
+                - generic: 技术报告
+                - generic: 实体
+              - button "图节点 近似双工交互，状态：实体" [ref=e177]:
+                - generic: 近似双工交互
+                - generic: 实体
+              - button "图节点 开源，状态：实体" [ref=e179]:
+                - generic: 开源
+                - generic: 实体
+              - button "图节点 流式语音生成，状态：实体" [ref=e181]:
+                - generic: 流式语音生成
+                - generic: 实体
+              - button "图节点 社区，状态：实体" [ref=e189]:
+                - generic: 社区
+                - generic: 实体
+              - button "图节点 时间成本，状态：实体" [ref=e191]:
+                - generic: 时间成本
+                - generic: 实体
+              - button "图节点 实时打断，状态：实体" [ref=e193]:
+                - generic: 实时打断
+                - generic: 实体
+              - button "图节点 图像，状态：实体" [ref=e197]:
+                - generic: 图像
+                - generic: 实体
+              - button "图节点 图像理解，状态：实体" [ref=e199]:
+                - generic: 图像理解
+                - generic: 实体
+              - button "图节点 文本，状态：实体" [ref=e201]:
+                - generic: 文本
+                - generic: 实体
+              - button "图节点 消费级硬件，状态：实体" [ref=e203]:
+                - generic: 消费级硬件
+                - generic: 实体
+              - button "图节点 训练流程，状态：实体" [ref=e207]:
+                - generic: 训练流程
+                - generic: 实体
+              - button "图节点 训练数据集，状态：实体" [ref=e209]:
+                - generic: 训练数据集
+                - generic: 实体
+              - button "图节点 音色克隆，状态：实体" [ref=e211]:
+                - generic: 音色克隆
+                - generic: 实体
+              - button "图节点 硬件，状态：实体" [ref=e213]:
+                - generic: 硬件
+                - generic: 实体
+              - button "图节点 用户界面，状态：实体" [ref=e215]:
+                - generic: 用户界面
+                - generic: 实体
+              - button "图节点 语音，状态：实体" [ref=e217]:
+                - generic: 语音
+                - generic: 实体
+              - button "图节点 语音对话，状态：实体" [ref=e219]:
+                - generic: 语音对话
+                - generic: 实体
+              - button "图节点 预训练权重，状态：实体" [ref=e221]:
+                - generic: 预训练权重
+                - generic: 实体
+              - button "图节点 arXiv，状态：实体" [ref=e225]:
+                - generic: arXiv
+                - generic: 实体
+              - button "图节点 full数据集，状态：实体" [ref=e251]:
+                - generic: full数据集
+                - generic: 实体
+              - button "图节点 mini数据集，状态：实体" [ref=e263]:
+                - generic: mini数据集
+                - generic: 实体
+              - button "图节点 MiniMind-O，状态：实体" [ref=e265]:
+                - generic: MiniMind-O
+                - generic: 实体
+              - button "图节点 Omni模型，状态：实体" [ref=e269]:
+                - generic: Omni模型
+                - generic: 实体
+              - button "图节点 RTX 3090，状态：实体" [ref=e277]:
+                - generic: RTX 3090
+                - generic: 实体
+              - 'button "图节点 MiniMind-O: 从零训练0.1B开源Omni模型，状态：个人资产单元、当前焦点、当前选中" [active] [pressed] [ref=e358]':
+                - generic: "MiniMind-O: 从零训练..."
+                - generic: 个人资产单元
+          - complementary [ref=e359]:
+            - generic [ref=e360]:
+              - img [ref=e362]
+              - generic [ref=e372]:
+                - generic [ref=e373]: 个人资产单元
+                - 'heading "MiniMind-O: 从零训练0.1B开源Omni模型" [level=2] [ref=e374]'
+                - paragraph [ref=e375]: 当前位于实体中心视图，右侧以实体与来源证据的连接为主。
+              - button "关闭检查器" [ref=e376] [cursor=pointer]:
+                - img [ref=e377]
+            - generic [ref=e380]:
+              - generic [ref=e381]:
+                - generic [ref=e382]:
+                  - generic [ref=e383]:
+                    - generic [ref=e384]: Explorer
+                    - generic [ref=e385]: 当前节点是探索中心
+                  - generic [ref=e386]: 1-hop 范围
+                - paragraph [ref=e387]: "MiniMind-O: 从零训练0.1B开源Omni模型 是当前探索中心。你正在查看它在 1-hop 范围内关联到的实体、文档证据和个人资产证据。"
+                - paragraph [ref=e388]: 重新聚焦会把当前节点设为新的中心，并重置到 1-hop 视图。
+                - generic [ref=e389]:
+                  - button "重新聚焦" [ref=e390] [cursor=pointer]
+                  - button "展开更多关联" [disabled] [ref=e391]
+                - generic [ref=e392]:
+                  - button "代码1-hop" [ref=e393] [cursor=pointer]
+                  - button "电话模式WebUI1-hop" [ref=e394] [cursor=pointer]
+                  - button "多模态模型1-hop" [ref=e395] [cursor=pointer]
+                  - button "技术报告1-hop" [ref=e396] [cursor=pointer]
+                  - button "近似双工交互1-hop" [ref=e397] [cursor=pointer]
+                  - button "开源1-hop" [ref=e398] [cursor=pointer]
+                  - button "流式语音生成1-hop" [ref=e399] [cursor=pointer]
+                  - button "社区1-hop" [ref=e400] [cursor=pointer]
+                  - button "时间成本1-hop" [ref=e401] [cursor=pointer]
+                  - button "实时打断1-hop" [ref=e402] [cursor=pointer]
+                  - button "图像1-hop" [ref=e403] [cursor=pointer]
+                  - button "图像理解1-hop" [ref=e404] [cursor=pointer]
+                  - button "文本1-hop" [ref=e405] [cursor=pointer]
+                  - button "消费级硬件1-hop" [ref=e406] [cursor=pointer]
+                  - button "训练流程1-hop" [ref=e407] [cursor=pointer]
+                  - button "训练数据集1-hop" [ref=e408] [cursor=pointer]
+                  - button "音色克隆1-hop" [ref=e409] [cursor=pointer]
+                  - button "硬件1-hop" [ref=e410] [cursor=pointer]
+                  - button "用户界面1-hop" [ref=e411] [cursor=pointer]
+                  - button "语音1-hop" [ref=e412] [cursor=pointer]
+                  - button "语音对话1-hop" [ref=e413] [cursor=pointer]
+                  - button "预训练权重1-hop" [ref=e414] [cursor=pointer]
+                  - button "arXiv1-hop" [ref=e415] [cursor=pointer]
+                  - button "full数据集1-hop" [ref=e416] [cursor=pointer]
+                  - button "mini数据集1-hop" [ref=e417] [cursor=pointer]
+                  - button "MiniMind-O1-hop" [ref=e418] [cursor=pointer]
+                  - button "Omni模型1-hop" [ref=e419] [cursor=pointer]
+                  - button "RTX 30901-hop" [ref=e420] [cursor=pointer]
+              - generic [ref=e421]:
+                - generic [ref=e422]: 内容摘要
+                - paragraph [ref=e423]: "## 项目概述 MiniMind-O是一个完全开源的多模态（Omni）模型训练项目，参数规模约0.1B。它旨在降低多模态模型的门槛，使研究者或爱好者能够在消费级硬件上从零训练一个支持文本、语音、图像输入并输出文本和流式语音的模型。 ## 训练与部署 项目提供了完整的代码、预训练权重以及两套训练数据集（mini和full）。其中mini数据集可在单张RTX 3090上约2小时完成完整的训练流程，极大地降低了硬件和时间成本。 ## 核心功能 - **语音对话**：支持与模型进行语音交互。 - **图像理解**：能够理解输入图像的内容。 - **流式语音生成**：模型能够实时生成语音输出。 - **实时打断**：在对话过程中可随时打断模型说话。 - **近似双工交互**：支持类似人类对话的双向同时交流。 - **音色克隆**：能够模仿特定人的音色进行语音输出。 - **电话模式WebUI**：提供模拟电话界面的Web用户界面。 ## 开源资源 项目完全开源，包括代码、权重、训练数据，技术报告已发布在arXiv上，方便社区复现、改进和应用。"
+              - generic [ref=e424]:
+                - generic [ref=e425]:
+                  - generic [ref=e426]: 节点类型
+                  - generic [ref=e427]: personal_asset_unit
+                - generic [ref=e428]:
+                  - generic [ref=e429]: 置信度
+                  - generic [ref=e430]: "-"
+              - generic [ref=e431]:
+                - generic [ref=e432]:
+                  - generic [ref=e433]: 分类
+                  - generic [ref=e434]: 人工智能/多模态模型
+                - generic [ref=e435]:
+                  - generic [ref=e436]: 状态
+                  - generic [ref=e437]: confirmed
+              - generic [ref=e438]:
+                - generic [ref=e439]: 标签
+                - generic [ref=e440]:
+                  - generic [ref=e441]: Omni模型
+                  - generic [ref=e442]: 多模态
+                  - generic [ref=e443]: 开源
+                  - generic [ref=e444]: 语音识别
+                  - generic [ref=e445]: 图像理解
+                  - generic [ref=e446]: DIY训练
+              - generic [ref=e447]:
+                - heading "Related nodes" [level=3] [ref=e448]
+                - generic [ref=e449]:
+                  - button "多模态模型" [ref=e450] [cursor=pointer]
+                  - button "Omni模型" [ref=e451] [cursor=pointer]
+                  - button "电话模式WebUI" [ref=e452] [cursor=pointer]
+                  - button "开源" [ref=e453] [cursor=pointer]
+                  - button "音色克隆" [ref=e454] [cursor=pointer]
+                  - button "技术报告" [ref=e455] [cursor=pointer]
+                  - button "用户界面" [ref=e456] [cursor=pointer]
+                  - button "arXiv" [ref=e457] [cursor=pointer]
+                  - button "图像理解" [ref=e458] [cursor=pointer]
+                  - button "full数据集" [ref=e459] [cursor=pointer]
+                  - button "mini数据集" [ref=e460] [cursor=pointer]
+                  - button "语音对话" [ref=e461] [cursor=pointer]
+                  - button "图像" [ref=e462] [cursor=pointer]
+                  - button "代码" [ref=e463] [cursor=pointer]
+                  - button "文本" [ref=e464] [cursor=pointer]
+                  - button "时间成本" [ref=e465] [cursor=pointer]
+                  - button "消费级硬件" [ref=e466] [cursor=pointer]
+                  - button "近似双工交互" [ref=e467] [cursor=pointer]
+                  - button "预训练权重" [ref=e468] [cursor=pointer]
+                  - button "流式语音生成" [ref=e469] [cursor=pointer]
+                  - button "训练数据集" [ref=e470] [cursor=pointer]
+                  - button "社区" [ref=e471] [cursor=pointer]
+                  - button "RTX 3090" [ref=e472] [cursor=pointer]
+                  - button "硬件" [ref=e473] [cursor=pointer]
+                  - button "训练流程" [ref=e474] [cursor=pointer]
+                  - button "实时打断" [ref=e475] [cursor=pointer]
+                  - button "MiniMind-O" [ref=e476] [cursor=pointer]
+                  - button "语音" [ref=e477] [cursor=pointer]
+              - generic [ref=e478]:
+                - heading "Related edges" [level=3] [ref=e479]
+                - generic [ref=e480]:
+                  - generic [ref=e481]:
+                    - generic [ref=e482]:
+                      - img [ref=e483]
+                      - text: mentioned_in
+                    - generic [ref=e488]: 多模态模型
+                    - generic [ref=e489]: Confidence 1.00
+                  - generic [ref=e490]:
+                    - generic [ref=e491]:
+                      - img [ref=e492]
+                      - text: mentioned_in
+                    - generic [ref=e497]: Omni模型
+                    - generic [ref=e498]: Confidence 1.00
+                  - generic [ref=e499]:
+                    - generic [ref=e500]:
+                      - img [ref=e501]
+                      - text: mentioned_in
+                    - generic [ref=e506]: 电话模式WebUI
+                    - generic [ref=e507]: Confidence 1.00
+                  - generic [ref=e508]:
+                    - generic [ref=e509]:
+                      - img [ref=e510]
+                      - text: mentioned_in
+                    - generic [ref=e515]: 开源
+                    - generic [ref=e516]: Confidence 1.00
+                  - generic [ref=e517]:
+                    - generic [ref=e518]:
+                      - img [ref=e519]
+                      - text: mentioned_in
+                    - generic [ref=e524]: 音色克隆
+                    - generic [ref=e525]: Confidence 1.00
+                  - generic [ref=e526]:
+                    - generic [ref=e527]:
+                      - img [ref=e528]
+                      - text: mentioned_in
+                    - generic [ref=e533]: 技术报告
+                    - generic [ref=e534]: Confidence 1.00
+                  - generic [ref=e535]:
+                    - generic [ref=e536]:
+                      - img [ref=e537]
+                      - text: mentioned_in
+                    - generic [ref=e542]: 用户界面
+                    - generic [ref=e543]: Confidence 1.00
+                  - generic [ref=e544]:
+                    - generic [ref=e545]:
+                      - img [ref=e546]
+                      - text: mentioned_in
+                    - generic [ref=e551]: arXiv
+                    - generic [ref=e552]: Confidence 1.00
+                  - generic [ref=e553]:
+                    - generic [ref=e554]:
+                      - img [ref=e555]
+                      - text: mentioned_in
+                    - generic [ref=e560]: 图像理解
+                    - generic [ref=e561]: Confidence 1.00
+                  - generic [ref=e562]:
+                    - generic [ref=e563]:
+                      - img [ref=e564]
+                      - text: mentioned_in
+                    - generic [ref=e569]: full数据集
+                    - generic [ref=e570]: Confidence 1.00
+                  - generic [ref=e571]:
+                    - generic [ref=e572]:
+                      - img [ref=e573]
+                      - text: mentioned_in
+                    - generic [ref=e578]: mini数据集
+                    - generic [ref=e579]: Confidence 1.00
+                  - generic [ref=e580]:
+                    - generic [ref=e581]:
+                      - img [ref=e582]
+                      - text: mentioned_in
+                    - generic [ref=e587]: 语音对话
+                    - generic [ref=e588]: Confidence 1.00
+                  - generic [ref=e589]:
+                    - generic [ref=e590]:
+                      - img [ref=e591]
+                      - text: mentioned_in
+                    - generic [ref=e596]: 图像
+                    - generic [ref=e597]: Confidence 1.00
+                  - generic [ref=e598]:
+                    - generic [ref=e599]:
+                      - img [ref=e600]
+                      - text: mentioned_in
+                    - generic [ref=e605]: 代码
+                    - generic [ref=e606]: Confidence 1.00
+                  - generic [ref=e607]:
+                    - generic [ref=e608]:
+                      - img [ref=e609]
+                      - text: mentioned_in
+                    - generic [ref=e614]: 文本
+                    - generic [ref=e615]: Confidence 1.00
+                  - generic [ref=e616]:
+                    - generic [ref=e617]:
+                      - img [ref=e618]
+                      - text: mentioned_in
+                    - generic [ref=e623]: 时间成本
+                    - generic [ref=e624]: Confidence 1.00
+                  - generic [ref=e625]:
+                    - generic [ref=e626]:
+                      - img [ref=e627]
+                      - text: mentioned_in
+                    - generic [ref=e632]: 消费级硬件
+                    - generic [ref=e633]: Confidence 1.00
+                  - generic [ref=e634]:
+                    - generic [ref=e635]:
+                      - img [ref=e636]
+                      - text: mentioned_in
+                    - generic [ref=e641]: 近似双工交互
+                    - generic [ref=e642]: Confidence 1.00
+                  - generic [ref=e643]:
+                    - generic [ref=e644]:
+                      - img [ref=e645]
+                      - text: mentioned_in
+                    - generic [ref=e650]: 预训练权重
+                    - generic [ref=e651]: Confidence 1.00
+                  - generic [ref=e652]:
+                    - generic [ref=e653]:
+                      - img [ref=e654]
+                      - text: mentioned_in
+                    - generic [ref=e659]: 流式语音生成
+                    - generic [ref=e660]: Confidence 1.00
+                  - generic [ref=e661]:
+                    - generic [ref=e662]:
+                      - img [ref=e663]
+                      - text: mentioned_in
+                    - generic [ref=e668]: 训练数据集
+                    - generic [ref=e669]: Confidence 1.00
+                  - generic [ref=e670]:
+                    - generic [ref=e671]:
+                      - img [ref=e672]
+                      - text: mentioned_in
+                    - generic [ref=e677]: 社区
+                    - generic [ref=e678]: Confidence 1.00
+                  - generic [ref=e679]:
+                    - generic [ref=e680]:
+                      - img [ref=e681]
+                      - text: mentioned_in
+                    - generic [ref=e686]: RTX 3090
+                    - generic [ref=e687]: Confidence 1.00
+                  - generic [ref=e688]:
+                    - generic [ref=e689]:
+                      - img [ref=e690]
+                      - text: mentioned_in
+                    - generic [ref=e695]: 硬件
+                    - generic [ref=e696]: Confidence 1.00
+                  - generic [ref=e697]:
+                    - generic [ref=e698]:
+                      - img [ref=e699]
+                      - text: mentioned_in
+                    - generic [ref=e704]: 训练流程
+                    - generic [ref=e705]: Confidence 1.00
+                  - generic [ref=e706]:
+                    - generic [ref=e707]:
+                      - img [ref=e708]
+                      - text: mentioned_in
+                    - generic [ref=e713]: 实时打断
+                    - generic [ref=e714]: Confidence 1.00
+                  - generic [ref=e715]:
+                    - generic [ref=e716]:
+                      - img [ref=e717]
+                      - text: mentioned_in
+                    - generic [ref=e722]: MiniMind-O
+                    - generic [ref=e723]: Confidence 1.00
+                  - generic [ref=e724]:
+                    - generic [ref=e725]:
+                      - img [ref=e726]
+                      - text: mentioned_in
+                    - generic [ref=e731]: 语音
+                    - generic [ref=e732]: Confidence 1.00

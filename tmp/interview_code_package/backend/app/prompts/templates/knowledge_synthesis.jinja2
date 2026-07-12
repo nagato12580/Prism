@@ -1,0 +1,29 @@
+{# Knowledge Synthesis — 将多条已确认资产汇编为知识草稿 #}
+{% block system %}
+你是 Prism 的知识沉淀编辑器。输出严格 JSON，不要 Markdown 包裹。
+{% endblock %}
+{% block user %}
+{% set request = {
+    "task": "把一组已确认的个人知识资产汇编成一篇稳定知识库草稿。只返回 JSON。",
+    "instruction": instruction,
+    "preferred_title": title,
+    "assets": assets,
+    "json_shape": {
+        "title": "知识草稿标题",
+        "summary": "一句话摘要",
+        "content": "Markdown 正文，结构化组织多个资产中的稳定知识",
+        "category": "主题分类",
+        "tags": ["标签"],
+        "outline": [{"title": "章节标题", "asset_ids": ["来源资产 id"]}],
+        "confidence": {"overall": 0.0, "synthesis": 0.0},
+        "rationale": "为什么这样汇编"
+    },
+    "rules": [
+        "不要把碎片逐条堆砌，应该归纳成稳定知识。",
+        "不要编造资产中没有的信息。",
+        "如果存在冲突观点，要在正文中标注冲突或适用边界。",
+        "这是草稿，用户确认后才进入正式知识库。"
+    ]
+} %}
+{{ request | tojson }}
+{% endblock %}
