@@ -287,7 +287,12 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
                     "FROM knowledge_topic WHERE id = 'legacy-topic'"
                 )
             ).mappings().one()
-            file_row = connection.execute(text("SELECT file_uid, kb_uid, tenant_id FROM knowledge_file WHERE id = 'legacy-file'" )).mappings().one()
+            file_row = connection.execute(
+                text(
+                    "SELECT file_uid, kb_uid, tenant_id, md5, content_sha256 "
+                    "FROM knowledge_file WHERE id = 'legacy-file'"
+                )
+            ).mappings().one()
             item = connection.execute(text("SELECT kb_uid, tenant_id FROM knowledge_item WHERE id = 'legacy-item'" )).mappings().one()
             chunk = connection.execute(text("SELECT chunk_uid, kb_uid, file_uid, generation FROM knowledge_chunk WHERE id = 'legacy-chunk'" )).mappings().one()
             job = connection.execute(text("SELECT kb_uid, tenant_id, file_uid, idempotency_key FROM knowledge_job WHERE id = 'legacy-job'" )).mappings().one()
@@ -300,6 +305,8 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         assert topic["active_graph_generation"] is None
         assert file_row["kb_uid"] == topic["kb_uid"]
         assert file_row["tenant_id"] == "default-user"
+        assert file_row["md5"] == "legacy-md5"
+        assert file_row["content_sha256"] is None
         assert item == {"kb_uid": topic["kb_uid"], "tenant_id": "default-user"}
         assert chunk["kb_uid"] == topic["kb_uid"]
         assert chunk["file_uid"] == file_row["file_uid"]
@@ -754,6 +761,7 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
     engine = create_engine(database_url)
     kb_uid = str(uuid.uuid4())
     file_uid = str(uuid.uuid4())
+    content_sha256 = "a" * 64
     try:
         _reset_database(engine)
         with engine.begin() as connection:
@@ -774,15 +782,16 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
                 text(
                     "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
                     "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, file_uid CHAR(36) NULL, "
-                    "tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL, content_text TEXT NULL)"
+                    "tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL, content_text TEXT NULL, "
+                    "content_sha256 CHAR(64) NULL)"
                 )
             )
             connection.execute(
                 text(
-                    "INSERT INTO knowledge_file (id, item_id, md5, file_uid, tenant_id, kb_uid, content_text) "
-                    "VALUES ('file', 'item', 'md5', :file_uid, 'tenant', :kb_uid, 'file-content')"
+                    "INSERT INTO knowledge_file (id, item_id, md5, file_uid, tenant_id, kb_uid, content_text, content_sha256) "
+                    "VALUES ('file', 'item', 'md5', :file_uid, 'tenant', :kb_uid, 'file-content', :content_sha256)"
                 ),
-                {"file_uid": file_uid, "kb_uid": kb_uid},
+                {"file_uid": file_uid, "kb_uid": kb_uid, "content_sha256": content_sha256},
             )
 
         _run_alembic("upgrade", "head")
@@ -794,6 +803,8 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
         assert isinstance(item_columns["normalized_markdown"]["type"], mysql.MEDIUMTEXT)
         assert isinstance(file_columns["content_text"]["type"], mysql.TEXT)
         assert not isinstance(file_columns["content_text"]["type"], mysql.MEDIUMTEXT)
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT content_sha256 FROM knowledge_file WHERE id = 'file'")).scalar_one() == content_sha256
 
         _run_alembic("downgrade", "base")
         restored_item = {column["name"]: column for column in inspect(engine).get_columns("knowledge_item")}
@@ -809,12 +820,14 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
             "tenant_id",
             "kb_uid",
             "content_text",
+            "content_sha256",
         }
         assert isinstance(restored_item["content"]["type"], mysql.TEXT)
         assert isinstance(restored_file["content_text"]["type"], mysql.TEXT)
         with engine.connect() as connection:
             assert connection.execute(text("SELECT content FROM knowledge_item WHERE id = 'item'")).scalar_one() == "item-content"
             assert connection.execute(text("SELECT content_text FROM knowledge_file WHERE id = 'file'")).scalar_one() == "file-content"
+            assert connection.execute(text("SELECT content_sha256 FROM knowledge_file WHERE id = 'file'")).scalar_one() == content_sha256
     finally:
         _reset_database(engine)
         engine.dispose()

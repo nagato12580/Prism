@@ -457,7 +457,6 @@ def _backfill_legacy_rows() -> None:
             "f.tenant_id = COALESCE(t.tenant_id, f.tenant_id), "
             "f.storage_uri = COALESCE(f.storage_uri, f.file_path), "
             "f.original_filename = COALESCE(f.original_filename, f.original_name), "
-            "f.content_sha256 = COALESCE(f.content_sha256, f.md5), "
             "f.size_bytes = COALESCE(f.size_bytes, f.file_size), "
             "f.parse_status = COALESCE(f.parse_status, 'pending'), "
             "f.index_status = COALESCE(f.index_status, 'pending'), "
