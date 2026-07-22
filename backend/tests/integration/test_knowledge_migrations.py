@@ -29,7 +29,7 @@ EXPECTED_COLUMNS = {
         "mindmap_generated_at", "sample_questions", "sample_questions_version",
     },
     "knowledge_file": {
-        "file_uid", "kb_uid", "tenant_id", "storage_uri", "relative_path", "original_filename", "media_type",
+        "file_uid", "kb_uid", "tenant_id", "storage_uri", "relative_path", "original_name", "media_type",
         "content_sha256", "size_bytes", "parser_config_snapshot", "chunk_config_snapshot", "parse_status",
         "index_status", "graph_status", "parsed_content_version", "active_index_generation", "parse_error",
         "index_error", "graph_error", "parse_started_at", "parse_finished_at", "index_started_at",
@@ -192,6 +192,8 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
         assert topic_columns["active_index_generation"]["type"].length == 36
         assert topic_columns["active_graph_generation"]["type"].length == 36
         file_columns = {column["name"]: column for column in inspector.get_columns("knowledge_file")}
+        assert "original_name" in file_columns
+        assert "original_filename" not in file_columns
         item_columns = {column["name"]: column for column in inspector.get_columns("knowledge_item")}
         chunk_columns = {column["name"]: column for column in inspector.get_columns("knowledge_chunk")}
         job_columns = {column["name"]: column for column in inspector.get_columns("knowledge_job")}
@@ -361,6 +363,9 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         assert "uq_knowledge_file_user_topic_md5" not in {
             constraint["name"] for constraint in inspect(engine).get_unique_constraints("knowledge_file")
         }
+        legacy_file_columns = {column["name"] for column in inspect(engine).get_columns("knowledge_file")}
+        assert "original_name" in legacy_file_columns
+        assert "original_filename" not in legacy_file_columns
         assert len(_foreign_key_semantics(inspect(engine), "knowledge_file")) == 2
         assert len(_foreign_key_semantics(inspect(engine), "knowledge_chunk")) == 2
 
@@ -828,13 +833,14 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
                     "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
                     "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, file_uid CHAR(36) NULL, "
                     "tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL, content_text TEXT NULL, "
-                    "content_sha256 CHAR(64) NULL)"
+                    "content_sha256 CHAR(64) NULL, original_filename VARCHAR(255) NULL)"
                 )
             )
             connection.execute(
                 text(
-                    "INSERT INTO knowledge_file (id, item_id, md5, file_uid, tenant_id, kb_uid, content_text, content_sha256) "
-                    "VALUES ('file', 'item', 'md5', :file_uid, 'tenant', :kb_uid, 'file-content', :content_sha256)"
+                    "INSERT INTO knowledge_file (id, item_id, md5, file_uid, tenant_id, kb_uid, content_text, "
+                    "content_sha256, original_filename) VALUES "
+                    "('file', 'item', 'md5', :file_uid, 'tenant', :kb_uid, 'file-content', :content_sha256, 'legacy-name.txt')"
                 ),
                 {"file_uid": file_uid, "kb_uid": kb_uid, "content_sha256": content_sha256},
             )
@@ -850,6 +856,7 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
         assert not isinstance(file_columns["content_text"]["type"], mysql.MEDIUMTEXT)
         with engine.connect() as connection:
             assert connection.execute(text("SELECT content_sha256 FROM knowledge_file WHERE id = 'file'")).scalar_one() == content_sha256
+            assert connection.execute(text("SELECT original_filename FROM knowledge_file WHERE id = 'file'")).scalar_one() == "legacy-name.txt"
 
         _run_alembic("downgrade", "base")
         restored_item = {column["name"]: column for column in inspect(engine).get_columns("knowledge_item")}
@@ -866,6 +873,7 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
             "kb_uid",
             "content_text",
             "content_sha256",
+            "original_filename",
         }
         assert isinstance(restored_item["content"]["type"], mysql.TEXT)
         assert isinstance(restored_file["content_text"]["type"], mysql.TEXT)
@@ -873,6 +881,7 @@ def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
             assert connection.execute(text("SELECT content FROM knowledge_item WHERE id = 'item'")).scalar_one() == "item-content"
             assert connection.execute(text("SELECT content_text FROM knowledge_file WHERE id = 'file'")).scalar_one() == "file-content"
             assert connection.execute(text("SELECT content_sha256 FROM knowledge_file WHERE id = 'file'")).scalar_one() == content_sha256
+            assert connection.execute(text("SELECT original_filename FROM knowledge_file WHERE id = 'file'")).scalar_one() == "legacy-name.txt"
     finally:
         _reset_database(engine)
         engine.dispose()

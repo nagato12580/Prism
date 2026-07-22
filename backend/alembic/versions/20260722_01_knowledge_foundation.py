@@ -85,7 +85,6 @@ def _file_columns() -> list[sa.Column]:
         sa.Column("original_name", sa.String(255), nullable=True),
         sa.Column("storage_uri", sa.String(1024), nullable=True),
         sa.Column("relative_path", sa.String(1024), nullable=True),
-        sa.Column("original_filename", sa.String(255), nullable=True),
         sa.Column("media_type", sa.String(64), nullable=True),
         sa.Column("mime_type", sa.String(100), nullable=True),
         sa.Column("file_type", sa.String(20), nullable=True),
@@ -655,7 +654,6 @@ def _backfill_legacy_rows() -> None:
             "f.kb_uid = COALESCE(t.kb_uid, f.kb_uid), "
             "f.tenant_id = COALESCE(t.tenant_id, f.tenant_id), "
             "f.storage_uri = COALESCE(f.storage_uri, f.file_path), "
-            "f.original_filename = COALESCE(f.original_filename, f.original_name), "
             "f.size_bytes = COALESCE(f.size_bytes, f.file_size), "
             "f.parse_status = COALESCE(f.parse_status, 'pending'), "
             "f.index_status = COALESCE(f.index_status, 'pending'), "
