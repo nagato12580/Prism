@@ -6,6 +6,7 @@ import uuid
 
 from alembic import context, op
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
 
 
 revision = "20260722_01"
@@ -15,6 +16,10 @@ depends_on = None
 
 STATE_TABLE = "alembic_knowledge_foundation_state"
 TABLE_ORDER = ["knowledge_topic", "knowledge_item", "knowledge_file", "knowledge_chunk", "knowledge_job"]
+
+
+def _document_text() -> sa.Text:
+    return sa.Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 
 
 def _topic_columns() -> list[sa.Column]:
@@ -52,8 +57,8 @@ def _item_columns() -> list[sa.Column]:
         sa.Column("tenant_id", sa.CHAR(36), nullable=False),
         sa.Column("kb_uid", sa.CHAR(36), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("content", sa.Text(), nullable=True),
-        sa.Column("normalized_markdown", sa.Text(), nullable=True),
+        sa.Column("content", _document_text(), nullable=True),
+        sa.Column("normalized_markdown", _document_text(), nullable=True),
         sa.Column("summary", sa.Text(), nullable=True),
         sa.Column("source_type", sa.String(32), nullable=True),
         sa.Column("source_ref", sa.String(500), nullable=True),
@@ -111,7 +116,7 @@ def _file_columns() -> list[sa.Column]:
         sa.Column("tags", sa.JSON(), nullable=True),
         sa.Column("source_type", sa.String(32), nullable=True),
         sa.Column("page_count", sa.Integer(), nullable=True),
-        sa.Column("content_text", sa.Text(), nullable=True),
+        sa.Column("content_text", _document_text(), nullable=True),
         sa.Column("uploaded_at", sa.DateTime(), nullable=True),
         sa.Column("last_modified_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=True),
@@ -206,6 +211,11 @@ UNIQUE_CONSTRAINTS = {
     "knowledge_job": [("uq_knowledge_job_idempotency_key", ["idempotency_key"])],
 }
 
+DEPRECATED_UNIQUE_CONSTRAINTS = {
+    "knowledge_topic": [("uq_knowledge_topic_user_name", ["user_id", "name"])],
+    "knowledge_file": [("uq_knowledge_file_user_topic_md5", ["user_id", "topic_id", "md5"])],
+}
+
 REQUIRED_COLUMNS = {
     "knowledge_topic": ["kb_uid", "tenant_id", "owner_user_id", "status", "version"],
     "knowledge_file": ["file_uid", "kb_uid", "tenant_id", "parse_status", "index_status", "graph_status", "parsed_content_version"],
@@ -243,7 +253,11 @@ def _require_online_connection() -> None:
 
 def _validate_preexisting_unique_constraints(existing_tables: set[str]) -> None:
     inspector = _inspector()
-    for table_name, expected_constraints in UNIQUE_CONSTRAINTS.items():
+    constraint_specs = {
+        table_name: UNIQUE_CONSTRAINTS.get(table_name, []) + DEPRECATED_UNIQUE_CONSTRAINTS.get(table_name, [])
+        for table_name in set(UNIQUE_CONSTRAINTS) | set(DEPRECATED_UNIQUE_CONSTRAINTS)
+    }
+    for table_name, expected_constraints in constraint_specs.items():
         if table_name not in existing_tables:
             continue
         existing = {
@@ -268,6 +282,7 @@ def _create_state_table(existing_tables: set[str]) -> None:
         sa.Column("existed_before", sa.Boolean(), nullable=False),
         sa.Column("added_columns", sa.JSON(), nullable=False),
         sa.Column("added_constraints", sa.JSON(), nullable=False),
+        sa.Column("dropped_constraints", sa.JSON(), nullable=False),
         sa.Column("nullability_changes", sa.JSON(), nullable=False),
     )
     state = sa.table(
@@ -276,6 +291,7 @@ def _create_state_table(existing_tables: set[str]) -> None:
         sa.column("existed_before", sa.Boolean()),
         sa.column("added_columns", sa.JSON()),
         sa.column("added_constraints", sa.JSON()),
+        sa.column("dropped_constraints", sa.JSON()),
         sa.column("nullability_changes", sa.JSON()),
     )
     rows = []
@@ -298,6 +314,11 @@ def _create_state_table(existing_tables: set[str]) -> None:
                 "added_constraints": [
                     name for name, _ in UNIQUE_CONSTRAINTS.get(table_name, []) if name not in existing_constraints
                 ],
+                "dropped_constraints": [
+                    {"name": name, "columns": columns}
+                    for name, columns in DEPRECATED_UNIQUE_CONSTRAINTS.get(table_name, [])
+                    if name in existing_constraints
+                ],
                 "nullability_changes": {
                     name: {
                         "nullable": existing_columns[name]["nullable"],
@@ -316,6 +337,17 @@ def _create_state_table(existing_tables: set[str]) -> None:
         state,
         rows,
     )
+
+
+def _drop_deprecated_unique_constraints() -> None:
+    tables = set(_inspector().get_table_names())
+    for table_name, constraints in DEPRECATED_UNIQUE_CONSTRAINTS.items():
+        if table_name not in tables:
+            continue
+        existing = {constraint["name"] for constraint in _inspector().get_unique_constraints(table_name)}
+        for name, _ in constraints:
+            if name in existing:
+                op.drop_constraint(name, table_name, type_="unique")
 
 
 def _add_missing_columns(table_name: str) -> None:
@@ -544,6 +576,7 @@ def upgrade() -> None:
     _validate_preexisting_unique_constraints(existing_tables)
     if STATE_TABLE not in existing_tables:
         _create_state_table(existing_tables)
+    _drop_deprecated_unique_constraints()
 
     for table_name in TABLE_ORDER:
         if table_name not in existing_tables:
@@ -594,5 +627,8 @@ def downgrade() -> None:
         for name in reversed(added_columns):
             if name in existing_columns:
                 op.drop_column(table_name, name)
+        dropped_constraints = json.loads(state["dropped_constraints"]) if isinstance(state["dropped_constraints"], str) else state["dropped_constraints"]
+        for constraint in dropped_constraints:
+            op.create_unique_constraint(constraint["name"], table_name, constraint["columns"])
 
     op.drop_table(STATE_TABLE)

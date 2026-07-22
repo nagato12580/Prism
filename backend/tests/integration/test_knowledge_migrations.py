@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects import mysql
 from sqlalchemy.engine import make_url
 
 
@@ -182,6 +183,9 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
         item_columns = {column["name"]: column for column in inspector.get_columns("knowledge_item")}
         chunk_columns = {column["name"]: column for column in inspector.get_columns("knowledge_chunk")}
         job_columns = {column["name"]: column for column in inspector.get_columns("knowledge_job")}
+        assert isinstance(item_columns["content"]["type"], mysql.MEDIUMTEXT)
+        assert isinstance(item_columns["normalized_markdown"]["type"], mysql.MEDIUMTEXT)
+        assert isinstance(file_columns["content_text"]["type"], mysql.MEDIUMTEXT)
         for columns, names in [
             (topic_columns, ["kb_uid", "tenant_id", "owner_user_id"]),
             (file_columns, ["file_uid", "kb_uid", "tenant_id"]),
@@ -233,7 +237,8 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
                     "CREATE TABLE knowledge_topic ("
                     "id CHAR(36) NOT NULL PRIMARY KEY, "
                     "user_id CHAR(36) NULL, "
-                    "name VARCHAR(255) NOT NULL)"
+                    "name VARCHAR(255) NOT NULL, "
+                    "CONSTRAINT uq_knowledge_topic_user_name UNIQUE (user_id, name))"
                 )
             )
             connection.execute(
@@ -247,7 +252,8 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
             connection.execute(
                 text(
                     "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
-                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL)"
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, "
+                    "CONSTRAINT uq_knowledge_file_user_topic_md5 UNIQUE (user_id, topic_id, md5))"
                 )
             )
             connection.execute(
@@ -310,6 +316,12 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         assert topic_columns["tenant_id"]["nullable"] is False
         assert topic_columns["owner_user_id"]["nullable"] is False
         assert "user_id" in topic_columns
+        assert "uq_knowledge_topic_user_name" not in {
+            constraint["name"] for constraint in inspect(engine).get_unique_constraints("knowledge_topic")
+        }
+        assert "uq_knowledge_file_user_topic_md5" not in {
+            constraint["name"] for constraint in inspect(engine).get_unique_constraints("knowledge_file")
+        }
 
         _run_alembic("downgrade", "base")
         expected_legacy_columns = {
@@ -324,6 +336,16 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         with engine.connect() as connection:
             for table_name in KNOWLEDGE_TABLES:
                 assert connection.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one() == 1
+        restored_topic_unique = {
+            constraint["name"]: constraint["column_names"]
+            for constraint in inspect(engine).get_unique_constraints("knowledge_topic")
+        }
+        restored_file_unique = {
+            constraint["name"]: constraint["column_names"]
+            for constraint in inspect(engine).get_unique_constraints("knowledge_file")
+        }
+        assert restored_topic_unique["uq_knowledge_topic_user_name"] == ["user_id", "name"]
+        assert restored_file_unique["uq_knowledge_file_user_topic_md5"] == ["user_id", "topic_id", "md5"]
     finally:
         _reset_database(engine)
         engine.dispose()
@@ -722,6 +744,114 @@ def test_partial_legacy_kb_wide_job_allows_null_file_and_restores_idempotency_nu
         assert restored["idempotency_key"]["default"] is None
         with engine.connect() as connection:
             assert connection.execute(text("SELECT idempotency_key FROM knowledge_job WHERE id = 'kb-job'")).scalar_one() == "legacy:kb-job"
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+def test_partial_legacy_preserves_existing_text_columns_and_adds_mediumtext():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    kb_uid = str(uuid.uuid4())
+    file_uid = str(uuid.uuid4())
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY, title VARCHAR(255) NOT NULL, "
+                    "user_id CHAR(36) NULL, tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL, content TEXT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_item (id, title, tenant_id, kb_uid, content) "
+                    "VALUES ('item', 'Item', 'tenant', :kb_uid, 'item-content')"
+                ),
+                {"kb_uid": kb_uid},
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, file_uid CHAR(36) NULL, "
+                    "tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL, content_text TEXT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_file (id, item_id, md5, file_uid, tenant_id, kb_uid, content_text) "
+                    "VALUES ('file', 'item', 'md5', :file_uid, 'tenant', :kb_uid, 'file-content')"
+                ),
+                {"file_uid": file_uid, "kb_uid": kb_uid},
+            )
+
+        _run_alembic("upgrade", "head")
+        inspector = inspect(engine)
+        item_columns = {column["name"]: column for column in inspector.get_columns("knowledge_item")}
+        file_columns = {column["name"]: column for column in inspector.get_columns("knowledge_file")}
+        assert isinstance(item_columns["content"]["type"], mysql.TEXT)
+        assert not isinstance(item_columns["content"]["type"], mysql.MEDIUMTEXT)
+        assert isinstance(item_columns["normalized_markdown"]["type"], mysql.MEDIUMTEXT)
+        assert isinstance(file_columns["content_text"]["type"], mysql.TEXT)
+        assert not isinstance(file_columns["content_text"]["type"], mysql.MEDIUMTEXT)
+
+        _run_alembic("downgrade", "base")
+        restored_item = {column["name"]: column for column in inspect(engine).get_columns("knowledge_item")}
+        restored_file = {column["name"]: column for column in inspect(engine).get_columns("knowledge_file")}
+        assert set(restored_item) == {"id", "title", "user_id", "tenant_id", "kb_uid", "content"}
+        assert set(restored_file) == {
+            "id",
+            "user_id",
+            "topic_id",
+            "item_id",
+            "md5",
+            "file_uid",
+            "tenant_id",
+            "kb_uid",
+            "content_text",
+        }
+        assert isinstance(restored_item["content"]["type"], mysql.TEXT)
+        assert isinstance(restored_file["content_text"]["type"], mysql.TEXT)
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT content FROM knowledge_item WHERE id = 'item'")).scalar_one() == "item-content"
+            assert connection.execute(text("SELECT content_text FROM knowledge_file WHERE id = 'file'")).scalar_one() == "file-content"
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("table_name", "create_sql", "constraint_name"),
+    [
+        (
+            "knowledge_topic",
+            "CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+            "name VARCHAR(255) NOT NULL, CONSTRAINT uq_knowledge_topic_user_name UNIQUE (name))",
+            "uq_knowledge_topic_user_name",
+        ),
+        (
+            "knowledge_file",
+            "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+            "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, "
+            "CONSTRAINT uq_knowledge_file_user_topic_md5 UNIQUE (md5))",
+            "uq_knowledge_file_user_topic_md5",
+        ),
+    ],
+)
+def test_legacy_upgrade_rejects_deprecated_unique_with_wrong_shape(table_name, create_sql, constraint_name):
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(text(create_sql))
+
+        result = _run_alembic_process("upgrade", "head")
+        assert result.returncode != 0
+        assert constraint_name in result.stderr
+        assert "expected columns" in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
+        assert set(inspect(engine).get_table_names()) == {"alembic_version", table_name}
     finally:
         _reset_database(engine)
         engine.dispose()
