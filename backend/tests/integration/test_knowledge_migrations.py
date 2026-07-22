@@ -123,6 +123,18 @@ def _default_value(column: dict) -> str | None:
     return default.strip("'") if isinstance(default, str) else default
 
 
+def _foreign_key_semantics(inspector, table_name: str) -> set[tuple]:
+    return {
+        (
+            tuple(foreign_key["constrained_columns"]),
+            foreign_key["referred_table"],
+            tuple(foreign_key["referred_columns"]),
+            foreign_key.get("options", {}).get("ondelete", "").upper(),
+        )
+        for foreign_key in inspector.get_foreign_keys(table_name)
+    }
+
+
 def test_configured_migration_database_must_be_mysql(monkeypatch):
     monkeypatch.setenv("MYSQL_TEST_DATABASE_URL", "sqlite:///prism_test")
     with pytest.raises(pytest.fail.Exception, match="must use MySQL"):
@@ -218,6 +230,26 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
         assert "uq_knowledge_file_file_uid" in unique_names["knowledge_file"]
         assert "uq_knowledge_chunk_uid_generation" in unique_names["knowledge_chunk"]
         assert "uq_knowledge_job_idempotency_key" in unique_names["knowledge_job"]
+        assert _foreign_key_semantics(inspector, "knowledge_file") == {
+            (("topic_id",), "knowledge_topic", ("id",), "CASCADE"),
+            (("item_id",), "knowledge_item", ("id",), "SET NULL"),
+        }
+        assert _foreign_key_semantics(inspector, "knowledge_chunk") == {
+            (("item_id",), "knowledge_item", ("id",), "CASCADE"),
+            (("parent_id",), "knowledge_chunk", ("id",), "SET NULL"),
+        }
+        job_indexes = {
+            index["name"]: index["column_names"] for index in inspector.get_indexes("knowledge_job")
+        }
+        assert job_indexes["ix_knowledge_job_status_available_priority_created"] == [
+            "status",
+            "available_at",
+            "priority",
+            "created_at",
+        ]
+        assert job_indexes["ix_knowledge_job_resource_type_status"] == ["resource_id", "job_type", "status"]
+        assert job_indexes["ix_knowledge_job_item_id"] == ["item_id"]
+        assert job_indexes["ix_knowledge_job_topic_id"] == ["topic_id"]
 
         _run_alembic("downgrade", "base")
         assert KNOWLEDGE_TABLES.isdisjoint(inspect(engine).get_table_names())
@@ -329,6 +361,8 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         assert "uq_knowledge_file_user_topic_md5" not in {
             constraint["name"] for constraint in inspect(engine).get_unique_constraints("knowledge_file")
         }
+        assert len(_foreign_key_semantics(inspect(engine), "knowledge_file")) == 2
+        assert len(_foreign_key_semantics(inspect(engine), "knowledge_chunk")) == 2
 
         _run_alembic("downgrade", "base")
         expected_legacy_columns = {
@@ -353,6 +387,17 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         }
         assert restored_topic_unique["uq_knowledge_topic_user_name"] == ["user_id", "name"]
         assert restored_file_unique["uq_knowledge_file_user_topic_md5"] == ["user_id", "topic_id", "md5"]
+        assert inspect(engine).get_foreign_keys("knowledge_file") == []
+        assert inspect(engine).get_foreign_keys("knowledge_chunk") == []
+        restored_job_indexes = {index["name"] for index in inspect(engine).get_indexes("knowledge_job")}
+        assert not restored_job_indexes.intersection(
+            {
+                "ix_knowledge_job_status_available_priority_created",
+                "ix_knowledge_job_resource_type_status",
+                "ix_knowledge_job_item_id",
+                "ix_knowledge_job_topic_id",
+            }
+        )
     finally:
         _reset_database(engine)
         engine.dispose()
@@ -865,6 +910,109 @@ def test_legacy_upgrade_rejects_deprecated_unique_with_wrong_shape(table_name, c
         assert "expected columns" in result.stderr
         _assert_error_has_no_database_credentials(result.stderr)
         assert set(inspect(engine).get_table_names()) == {"alembic_version", table_name}
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+def test_partial_legacy_preserves_equivalent_foreign_key_and_job_index_with_different_names():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, name VARCHAR(255) NOT NULL)"))
+            connection.execute(text("CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id CHAR(36) NULL)"))
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, "
+                    "CONSTRAINT legacy_file_topic_fk FOREIGN KEY (topic_id) "
+                    "REFERENCES knowledge_topic(id) ON DELETE CASCADE)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_job (id CHAR(36) NOT NULL PRIMARY KEY, job_type VARCHAR(32) NOT NULL, "
+                    "resource_id CHAR(36) NOT NULL, item_id CHAR(36) NULL, topic_id CHAR(36) NULL, attempts INT NULL, "
+                    "status VARCHAR(24) NULL, available_at DATETIME NULL, priority INT NULL, created_at DATETIME NULL, "
+                    "INDEX legacy_job_status_idx (status, available_at, priority, created_at))"
+                )
+            )
+
+        _run_alembic("upgrade", "head")
+        inspector = inspect(engine)
+        assert "legacy_file_topic_fk" in {
+            foreign_key["name"] for foreign_key in inspector.get_foreign_keys("knowledge_file")
+        }
+        assert "legacy_job_status_idx" in {
+            index["name"] for index in inspector.get_indexes("knowledge_job")
+        }
+        assert _foreign_key_semantics(inspector, "knowledge_file") == {
+            (("topic_id",), "knowledge_topic", ("id",), "CASCADE"),
+            (("item_id",), "knowledge_item", ("id",), "SET NULL"),
+        }
+        upgraded_job_index_columns = {
+            tuple(index["column_names"]) for index in inspector.get_indexes("knowledge_job")
+        }
+        assert {
+            ("status", "available_at", "priority", "created_at"),
+            ("resource_id", "job_type", "status"),
+            ("item_id",),
+            ("topic_id",),
+        } <= upgraded_job_index_columns
+
+        _run_alembic("downgrade", "base")
+        inspector = inspect(engine)
+        assert "legacy_file_topic_fk" in {
+            foreign_key["name"] for foreign_key in inspector.get_foreign_keys("knowledge_file")
+        }
+        assert "legacy_job_status_idx" in {
+            index["name"] for index in inspector.get_indexes("knowledge_job")
+        }
+        assert _foreign_key_semantics(inspector, "knowledge_file") == {
+            (("topic_id",), "knowledge_topic", ("id",), "CASCADE"),
+        }
+        assert {index["name"] for index in inspector.get_indexes("knowledge_job")} == {
+            "legacy_job_status_idx"
+        }
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+@pytest.mark.parametrize("wrong_shape", ["foreign_key", "index"])
+def test_legacy_upgrade_rejects_named_foreign_key_or_index_with_wrong_shape(wrong_shape):
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            if wrong_shape == "foreign_key":
+                connection.execute(text("CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY)"))
+                connection.execute(text("CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY)"))
+                connection.execute(
+                    text(
+                        "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, topic_id CHAR(36) NULL, "
+                        "CONSTRAINT fk_knowledge_file_topic_id FOREIGN KEY (topic_id) "
+                        "REFERENCES knowledge_item(id) ON DELETE CASCADE)"
+                    )
+                )
+                expected_name = "fk_knowledge_file_topic_id"
+            else:
+                connection.execute(
+                    text(
+                        "CREATE TABLE knowledge_job (id CHAR(36) NOT NULL PRIMARY KEY, status VARCHAR(24) NULL, "
+                        "INDEX ix_knowledge_job_status_available_priority_created (status))"
+                    )
+                )
+                expected_name = "ix_knowledge_job_status_available_priority_created"
+
+        result = _run_alembic_process("upgrade", "head")
+        assert result.returncode != 0
+        assert expected_name in result.stderr
+        assert "expected" in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
     finally:
         _reset_database(engine)
         engine.dispose()

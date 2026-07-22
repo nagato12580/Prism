@@ -216,6 +216,68 @@ DEPRECATED_UNIQUE_CONSTRAINTS = {
     "knowledge_file": [("uq_knowledge_file_user_topic_md5", ["user_id", "topic_id", "md5"])],
 }
 
+FOREIGN_KEYS = {
+    "knowledge_file": [
+        {
+            "name": "fk_knowledge_file_topic_id",
+            "constrained_columns": ["topic_id"],
+            "referred_table": "knowledge_topic",
+            "referred_columns": ["id"],
+            "ondelete": "CASCADE",
+        },
+        {
+            "name": "fk_knowledge_file_item_id",
+            "constrained_columns": ["item_id"],
+            "referred_table": "knowledge_item",
+            "referred_columns": ["id"],
+            "ondelete": "SET NULL",
+        },
+    ],
+    "knowledge_chunk": [
+        {
+            "name": "fk_knowledge_chunk_item_id",
+            "constrained_columns": ["item_id"],
+            "referred_table": "knowledge_item",
+            "referred_columns": ["id"],
+            "ondelete": "CASCADE",
+        },
+        {
+            "name": "fk_knowledge_chunk_parent_id",
+            "constrained_columns": ["parent_id"],
+            "referred_table": "knowledge_chunk",
+            "referred_columns": ["id"],
+            "ondelete": "SET NULL",
+        },
+    ],
+}
+
+JOB_INDEXES = [
+    {
+        "name": "ix_knowledge_job_status_available_priority_created",
+        "columns": ["status", "available_at", "priority", "created_at"],
+    },
+    {
+        "name": "ix_knowledge_job_resource_type_status",
+        "columns": ["resource_id", "job_type", "status"],
+    },
+    {"name": "ix_knowledge_job_item_id", "columns": ["item_id"]},
+    {"name": "ix_knowledge_job_topic_id", "columns": ["topic_id"]},
+]
+
+FK_SUPPORT_INDEXES = {
+    foreign_key["name"]: {
+        "name": f"ix_{table_name}_{foreign_key['constrained_columns'][0]}_fk",
+        "table_name": table_name,
+        "columns": foreign_key["constrained_columns"],
+    }
+    for table_name, foreign_keys in FOREIGN_KEYS.items()
+    for foreign_key in foreign_keys
+}
+
+INDEXES_BY_NAME = {
+    index["name"]: {**index, "table_name": "knowledge_job"} for index in JOB_INDEXES
+} | {index["name"]: index for index in FK_SUPPORT_INDEXES.values()}
+
 REQUIRED_COLUMNS = {
     "knowledge_topic": ["kb_uid", "tenant_id", "owner_user_id", "status", "version"],
     "knowledge_file": ["file_uid", "kb_uid", "tenant_id", "parse_status", "index_status", "graph_status", "parsed_content_version"],
@@ -275,6 +337,70 @@ def _validate_preexisting_unique_constraints(existing_tables: set[str]) -> None:
                 )
 
 
+def _foreign_key_matches(actual: dict, expected: dict) -> bool:
+    return (
+        actual["constrained_columns"] == expected["constrained_columns"]
+        and actual["referred_table"] == expected["referred_table"]
+        and actual["referred_columns"] == expected["referred_columns"]
+        and actual.get("options", {}).get("ondelete", "").upper() == expected["ondelete"]
+    )
+
+
+def _validate_preexisting_foreign_keys_and_indexes(existing_tables: set[str]) -> None:
+    inspector = _inspector()
+    for table_name, expected_foreign_keys in FOREIGN_KEYS.items():
+        if table_name not in existing_tables:
+            continue
+        actual_foreign_keys = inspector.get_foreign_keys(table_name)
+        for expected in expected_foreign_keys:
+            for actual in actual_foreign_keys:
+                same_name = actual["name"] == expected["name"]
+                same_columns = actual["constrained_columns"] == expected["constrained_columns"]
+                matches = _foreign_key_matches(actual, expected)
+                if same_name and not matches:
+                    raise RuntimeError(
+                        f"Foreign key {expected['name']} on {table_name} has unexpected semantics; "
+                        f"expected {expected}"
+                    )
+                if same_columns and not matches:
+                    raise RuntimeError(
+                        f"Foreign key on {table_name} columns {expected['constrained_columns']} conflicts with "
+                        f"expected {expected['name']}"
+                    )
+
+    if "knowledge_job" not in existing_tables:
+        return
+    actual_indexes = inspector.get_indexes("knowledge_job")
+    for expected in JOB_INDEXES:
+        for actual in actual_indexes:
+            same_name = actual["name"] == expected["name"]
+            same_columns = actual["column_names"] == expected["columns"]
+            matches = same_columns and not actual.get("unique", False)
+            if same_name and not matches:
+                raise RuntimeError(
+                    f"Index {expected['name']} on knowledge_job has columns {actual['column_names']}; "
+                    f"expected {expected['columns']}"
+                )
+            if same_columns and not matches:
+                raise RuntimeError(
+                    f"Index on knowledge_job columns {expected['columns']} conflicts with expected {expected['name']}"
+                )
+
+
+def _has_foreign_key(table_name: str, expected: dict) -> bool:
+    return any(
+        _foreign_key_matches(actual, expected)
+        for actual in _inspector().get_foreign_keys(table_name)
+    )
+
+
+def _has_index(table_name: str, columns: list[str]) -> bool:
+    return any(
+        index["column_names"] == columns and not index.get("unique", False)
+        for index in _inspector().get_indexes(table_name)
+    )
+
+
 def _create_state_table(existing_tables: set[str]) -> None:
     op.create_table(
         STATE_TABLE,
@@ -283,6 +409,8 @@ def _create_state_table(existing_tables: set[str]) -> None:
         sa.Column("added_columns", sa.JSON(), nullable=False),
         sa.Column("added_constraints", sa.JSON(), nullable=False),
         sa.Column("dropped_constraints", sa.JSON(), nullable=False),
+        sa.Column("added_foreign_keys", sa.JSON(), nullable=False),
+        sa.Column("added_indexes", sa.JSON(), nullable=False),
         sa.Column("nullability_changes", sa.JSON(), nullable=False),
     )
     state = sa.table(
@@ -292,6 +420,8 @@ def _create_state_table(existing_tables: set[str]) -> None:
         sa.column("added_columns", sa.JSON()),
         sa.column("added_constraints", sa.JSON()),
         sa.column("dropped_constraints", sa.JSON()),
+        sa.column("added_foreign_keys", sa.JSON()),
+        sa.column("added_indexes", sa.JSON()),
         sa.column("nullability_changes", sa.JSON()),
     )
     rows = []
@@ -319,6 +449,26 @@ def _create_state_table(existing_tables: set[str]) -> None:
                     for name, columns in DEPRECATED_UNIQUE_CONSTRAINTS.get(table_name, [])
                     if name in existing_constraints
                 ],
+                "added_foreign_keys": [
+                    foreign_key["name"]
+                    for foreign_key in FOREIGN_KEYS.get(table_name, [])
+                    if existed_before and not _has_foreign_key(table_name, foreign_key)
+                ],
+                "added_indexes": (
+                    [
+                        index["name"]
+                        for index in JOB_INDEXES
+                        if table_name == "knowledge_job"
+                        and (not existed_before or not _has_index(table_name, index["columns"]))
+                    ]
+                    + [
+                        FK_SUPPORT_INDEXES[foreign_key["name"]]["name"]
+                        for foreign_key in FOREIGN_KEYS.get(table_name, [])
+                        if existed_before
+                        and not _has_foreign_key(table_name, foreign_key)
+                        and not _has_index(table_name, foreign_key["constrained_columns"])
+                    ]
+                ),
                 "nullability_changes": {
                     name: {
                         "nullable": existing_columns[name]["nullable"],
@@ -348,6 +498,55 @@ def _drop_deprecated_unique_constraints() -> None:
         for name, _ in constraints:
             if name in existing:
                 op.drop_constraint(name, table_name, type_="unique")
+
+
+def _fresh_foreign_key_constraints(table_name: str) -> list[sa.ForeignKeyConstraint]:
+    return [
+        sa.ForeignKeyConstraint(
+            foreign_key["constrained_columns"],
+            [f"{foreign_key['referred_table']}.{column}" for column in foreign_key["referred_columns"]],
+            name=foreign_key["name"],
+            ondelete=foreign_key["ondelete"],
+        )
+        for foreign_key in FOREIGN_KEYS.get(table_name, [])
+    ]
+
+
+def _create_recorded_indexes_and_foreign_keys() -> None:
+    state_rows = op.get_bind().execute(sa.text(f"SELECT * FROM {STATE_TABLE}")).mappings().all()
+    states = {row["table_name"]: row for row in state_rows}
+    for table_name in TABLE_ORDER:
+        state = states[table_name]
+        added_indexes = json.loads(state["added_indexes"]) if isinstance(state["added_indexes"], str) else state["added_indexes"]
+        existing_indexes = {index["name"]: index for index in _inspector().get_indexes(table_name)}
+        for name in added_indexes:
+            expected = INDEXES_BY_NAME[name]
+            if name in existing_indexes:
+                actual = existing_indexes[name]
+                if actual["column_names"] != expected["columns"] or actual.get("unique", False):
+                    raise RuntimeError(
+                        f"Index {name} on {table_name} has columns {actual['column_names']}; "
+                        f"expected {expected['columns']}"
+                    )
+                continue
+            op.create_index(name, table_name, expected["columns"], unique=False)
+
+        if not state["existed_before"]:
+            continue
+        added_foreign_keys = json.loads(state["added_foreign_keys"]) if isinstance(state["added_foreign_keys"], str) else state["added_foreign_keys"]
+        expected_by_name = {foreign_key["name"]: foreign_key for foreign_key in FOREIGN_KEYS.get(table_name, [])}
+        for name in added_foreign_keys:
+            expected = expected_by_name[name]
+            if _has_foreign_key(table_name, expected):
+                continue
+            op.create_foreign_key(
+                name,
+                table_name,
+                expected["referred_table"],
+                expected["constrained_columns"],
+                expected["referred_columns"],
+                ondelete=expected["ondelete"],
+            )
 
 
 def _add_missing_columns(table_name: str) -> None:
@@ -573,6 +772,7 @@ def upgrade() -> None:
     _require_online_connection()
     existing_tables = set(_inspector().get_table_names())
     _validate_preexisting_unique_constraints(existing_tables)
+    _validate_preexisting_foreign_keys_and_indexes(existing_tables)
     if STATE_TABLE not in existing_tables:
         _create_state_table(existing_tables)
     _drop_deprecated_unique_constraints()
@@ -580,10 +780,16 @@ def upgrade() -> None:
     for table_name in TABLE_ORDER:
         if table_name not in existing_tables:
             constraints = [sa.UniqueConstraint(*columns, name=name) for name, columns in UNIQUE_CONSTRAINTS.get(table_name, [])]
-            op.create_table(table_name, *COLUMN_FACTORIES[table_name](), *constraints)
+            op.create_table(
+                table_name,
+                *COLUMN_FACTORIES[table_name](),
+                *constraints,
+                *_fresh_foreign_key_constraints(table_name),
+            )
         else:
             _add_missing_columns(table_name)
 
+    _create_recorded_indexes_and_foreign_keys()
     _backfill_legacy_rows()
     _apply_column_targets()
     _create_unique_constraints()
@@ -602,6 +808,17 @@ def downgrade() -> None:
         if not state["existed_before"]:
             op.drop_table(table_name)
             continue
+
+        added_foreign_keys = json.loads(state["added_foreign_keys"]) if isinstance(state["added_foreign_keys"], str) else state["added_foreign_keys"]
+        existing_foreign_keys = {foreign_key["name"] for foreign_key in _inspector().get_foreign_keys(table_name)}
+        for name in added_foreign_keys:
+            if name in existing_foreign_keys:
+                op.drop_constraint(name, table_name, type_="foreignkey")
+        added_indexes = json.loads(state["added_indexes"]) if isinstance(state["added_indexes"], str) else state["added_indexes"]
+        existing_indexes = {index["name"] for index in _inspector().get_indexes(table_name)}
+        for name in added_indexes:
+            if name in existing_indexes:
+                op.drop_index(name, table_name=table_name)
 
         existing_columns = {column["name"] for column in _inspector().get_columns(table_name)}
         existing_unique = {constraint["name"] for constraint in _inspector().get_unique_constraints(table_name)}
