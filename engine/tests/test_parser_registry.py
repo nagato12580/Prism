@@ -33,15 +33,13 @@ def test_registry_rejects_unsupported_extension(tmp_path: Path):
         build_default_registry().parse(path, media_type="document", config={})
 
 
-def test_registry_capabilities_returns_parsers_and_extensions():
+def test_registry_capabilities_returns_all_parsers():
     from engine.app.ingestion.parsers import build_default_registry
 
     registry = build_default_registry()
     caps = registry.capabilities()
-    assert len(caps) > 0
-    ids = {cap["parser_id"] for cap in caps}
-    assert "markdown" in ids
-    assert "text" in ids
+    parser_ids = {cap["parser_id"] for cap in caps}
+    assert parser_ids >= {"markdown", "text", "pdf", "docx", "xlsx", "pptx"}
 
 
 def test_markdown_parser_handles_markdown_extension(tmp_path: Path):
@@ -51,3 +49,48 @@ def test_markdown_parser_handles_markdown_extension(tmp_path: Path):
     path.write_text("# Title", encoding="utf-8")
     result = build_default_registry().parse(path, media_type="document", config={})
     assert result.parser_id == "markdown"
+
+
+def test_pdf_parser_is_registered():
+    from engine.app.ingestion.parsers import build_default_registry
+
+    registry = build_default_registry()
+    caps = registry.capabilities()
+    pdf_cap = next(cap for cap in caps if cap["parser_id"] == "pdf")
+    assert ".pdf" in pdf_cap["extensions"]
+
+
+def test_docx_parser_is_registered():
+    from engine.app.ingestion.parsers import build_default_registry
+
+    registry = build_default_registry()
+    caps = registry.capabilities()
+    docx_cap = next(cap for cap in caps if cap["parser_id"] == "docx")
+    assert ".docx" in docx_cap["extensions"]
+
+
+def test_xlsx_parser_is_registered():
+    from engine.app.ingestion.parsers import build_default_registry
+
+    registry = build_default_registry()
+    caps = registry.capabilities()
+    xlsx_cap = next(cap for cap in caps if cap["parser_id"] == "xlsx")
+    assert ".xlsx" in xlsx_cap["extensions"]
+
+
+def test_pptx_parser_is_registered():
+    from engine.app.ingestion.parsers import build_default_registry
+
+    registry = build_default_registry()
+    caps = registry.capabilities()
+    pptx_cap = next(cap for cap in caps if cap["parser_id"] == "pptx")
+    assert ".pptx" in pptx_cap["extensions"]
+
+
+def test_empty_markdown_raises_parser_error(tmp_path: Path):
+    from engine.app.ingestion.parsers import ParserError, build_default_registry
+
+    path = tmp_path / "empty.md"
+    path.write_text("", encoding="utf-8")
+    with pytest.raises(ParserError):
+        build_default_registry().parse(path, media_type="document", config={})

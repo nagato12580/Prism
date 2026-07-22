@@ -170,3 +170,13 @@ def delete_knowledge_base(
     db.commit()
     db.refresh(topic)
     return topic
+
+
+@router.get("/capabilities/parsers")
+def get_parser_capabilities():
+    try:
+        from engine.app.ingestion.parsers import build_default_registry
+        registry = build_default_registry()
+        return {"parsers": registry.capabilities()}
+    except ImportError:
+        return {"parsers": []}
