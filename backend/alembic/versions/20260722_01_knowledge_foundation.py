@@ -402,8 +402,8 @@ def _backfill_legacy_rows() -> None:
     op.execute(
         sa.text(
             "UPDATE knowledge_file f LEFT JOIN knowledge_topic t ON f.topic_id = t.id SET "
-            "f.kb_uid = t.kb_uid, "
-            "f.tenant_id = t.tenant_id, "
+            "f.kb_uid = COALESCE(t.kb_uid, f.kb_uid), "
+            "f.tenant_id = COALESCE(t.tenant_id, f.tenant_id), "
             "f.storage_uri = COALESCE(f.storage_uri, f.file_path), "
             "f.original_filename = COALESCE(f.original_filename, f.original_name), "
             "f.content_sha256 = COALESCE(f.content_sha256, f.md5), "
@@ -431,8 +431,8 @@ def _backfill_legacy_rows() -> None:
             "UPDATE knowledge_item i LEFT JOIN ("
             "SELECT item_id, MIN(kb_uid) kb_uid, MIN(tenant_id) tenant_id FROM knowledge_file "
             "WHERE item_id IS NOT NULL GROUP BY item_id) f ON f.item_id = i.id SET "
-            "i.kb_uid = f.kb_uid, "
-            "i.tenant_id = f.tenant_id, "
+            "i.kb_uid = COALESCE(f.kb_uid, i.kb_uid), "
+            "i.tenant_id = COALESCE(f.tenant_id, i.tenant_id), "
             "i.content_version = COALESCE(i.content_version, 1)"
         )
     )
@@ -453,7 +453,7 @@ def _backfill_legacy_rows() -> None:
             "LEFT JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file "
             "WHERE item_id IS NOT NULL GROUP BY item_id) f ON f.item_id = i.id SET "
             "c.kb_uid = i.kb_uid, "
-            "c.file_uid = f.file_uid, "
+            "c.file_uid = COALESCE(f.file_uid, c.file_uid), "
             "c.generation = COALESCE(c.generation, '0')"
         )
     )
@@ -472,9 +472,9 @@ def _backfill_legacy_rows() -> None:
             "UPDATE knowledge_job j LEFT JOIN knowledge_file f ON j.resource_id = f.id "
             "LEFT JOIN knowledge_item i ON j.item_id = i.id "
             "LEFT JOIN knowledge_topic t ON j.topic_id = t.id SET "
-            "j.tenant_id = COALESCE(f.tenant_id, i.tenant_id, t.tenant_id), "
-            "j.kb_uid = COALESCE(f.kb_uid, i.kb_uid, t.kb_uid), "
-            "j.file_uid = f.file_uid, "
+            "j.tenant_id = COALESCE(f.tenant_id, i.tenant_id, t.tenant_id, j.tenant_id), "
+            "j.kb_uid = COALESCE(f.kb_uid, i.kb_uid, t.kb_uid, j.kb_uid), "
+            "j.file_uid = COALESCE(f.file_uid, j.file_uid), "
             "j.attempt = COALESCE(j.attempt, j.attempts, 0), "
             "j.attempts = COALESCE(j.attempts, j.attempt, 0), j.max_attempts = COALESCE(j.max_attempts, 3), "
             "j.status = COALESCE(j.status, 'queued'), j.priority = COALESCE(j.priority, 100), "

@@ -517,3 +517,86 @@ def test_legacy_upgrade_rejects_preexisting_file_scope_conflict():
     finally:
         _reset_database(engine)
         engine.dispose()
+
+
+def test_partial_legacy_preserves_complete_scope_when_parent_relationships_are_missing():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    kb_uid = str(uuid.uuid4())
+    file_uid = str(uuid.uuid4())
+    chunk_uid = str(uuid.uuid4())
+    expected_scope = {"tenant_id": "preserved-tenant", "kb_uid": kb_uid, "file_uid": file_uid}
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, "
+                    "file_uid CHAR(36) NULL, kb_uid CHAR(36) NULL, tenant_id CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_file (id, topic_id, item_id, md5, file_uid, kb_uid, tenant_id) "
+                    "VALUES ('partial-file', NULL, NULL, 'md5', :file_uid, :kb_uid, 'preserved-tenant')"
+                ),
+                {"file_uid": file_uid, "kb_uid": kb_uid},
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY, title VARCHAR(255) NOT NULL, "
+                    "user_id CHAR(36) NULL, kb_uid CHAR(36) NULL, tenant_id CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_item (id, title, kb_uid, tenant_id) "
+                    "VALUES ('partial-item', 'Item', :kb_uid, 'preserved-tenant')"
+                ),
+                {"kb_uid": kb_uid},
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_chunk (id CHAR(36) NOT NULL PRIMARY KEY, item_id CHAR(36) NULL, "
+                    "chunk_text TEXT NOT NULL, chunk_uid CHAR(36) NULL, kb_uid CHAR(36) NULL, "
+                    "file_uid CHAR(36) NULL, generation CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_chunk (id, item_id, chunk_text, chunk_uid, kb_uid, file_uid, generation) "
+                    "VALUES ('partial-chunk', NULL, 'Text', :chunk_uid, :kb_uid, :file_uid, 'legacy-g')"
+                ),
+                {"chunk_uid": chunk_uid, "kb_uid": kb_uid, "file_uid": file_uid},
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_job (id CHAR(36) NOT NULL PRIMARY KEY, job_type VARCHAR(32) NOT NULL, "
+                    "resource_id CHAR(36) NOT NULL, item_id CHAR(36) NULL, topic_id CHAR(36) NULL, attempts INT NULL, "
+                    "tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL, file_uid CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_job (id, job_type, resource_id, attempts, tenant_id, kb_uid, file_uid) "
+                    "VALUES ('partial-job', 'ingest', 'missing-file', 0, 'preserved-tenant', :kb_uid, :file_uid)"
+                ),
+                {"kb_uid": kb_uid, "file_uid": file_uid},
+            )
+
+        _run_alembic("upgrade", "head")
+        with engine.connect() as connection:
+            file_scope = connection.execute(text("SELECT tenant_id, kb_uid, file_uid FROM knowledge_file WHERE id = 'partial-file'")).mappings().one()
+            item_scope = connection.execute(text("SELECT tenant_id, kb_uid FROM knowledge_item WHERE id = 'partial-item'")).mappings().one()
+            chunk_scope = connection.execute(text("SELECT kb_uid, file_uid FROM knowledge_chunk WHERE id = 'partial-chunk'")).mappings().one()
+            job_scope = connection.execute(text("SELECT tenant_id, kb_uid, file_uid FROM knowledge_job WHERE id = 'partial-job'")).mappings().one()
+            generation = connection.execute(text("SELECT generation FROM knowledge_chunk WHERE id = 'partial-chunk'")).scalar_one()
+        assert file_scope == expected_scope
+        assert item_scope == {"tenant_id": "preserved-tenant", "kb_uid": kb_uid}
+        assert chunk_scope == {"kb_uid": kb_uid, "file_uid": file_uid}
+        assert job_scope == expected_scope
+        assert generation == "legacy-g"
+    finally:
+        _reset_database(engine)
+        engine.dispose()
