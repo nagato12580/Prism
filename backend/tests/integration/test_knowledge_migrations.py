@@ -175,7 +175,7 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
         assert topic_columns["kb_uid"]["nullable"] is False
         assert topic_columns["tenant_id"]["nullable"] is False
         assert topic_columns["owner_user_id"]["nullable"] is False
-        assert topic_columns["active_index_generation"]["nullable"] is False
+        assert topic_columns["active_index_generation"]["nullable"] is True
         assert topic_columns["active_index_generation"]["type"].length == 36
         assert topic_columns["active_graph_generation"]["type"].length == 36
         file_columns = {column["name"]: column for column in inspector.get_columns("knowledge_file")}
@@ -187,15 +187,22 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
             (file_columns, ["file_uid", "kb_uid", "tenant_id"]),
             (item_columns, ["kb_uid", "tenant_id"]),
             (chunk_columns, ["chunk_uid", "kb_uid", "file_uid"]),
-            (job_columns, ["kb_uid", "tenant_id", "file_uid"]),
+            (job_columns, ["kb_uid", "tenant_id"]),
         ]:
             for name in names:
                 assert columns[name]["type"].length == 36
                 assert columns[name]["nullable"] is False
         assert file_columns["active_index_generation"]["type"].length == 36
         assert chunk_columns["generation"]["type"].length == 36
-        assert _default_value(topic_columns["active_index_generation"]) == "0"
-        assert _default_value(file_columns["active_index_generation"]) == "0"
+        assert topic_columns["active_index_generation"]["nullable"] is True
+        assert topic_columns["active_graph_generation"]["nullable"] is True
+        assert file_columns["active_index_generation"]["nullable"] is True
+        assert job_columns["file_uid"]["nullable"] is True
+        assert job_columns["idempotency_key"]["type"].length == 255
+        assert job_columns["idempotency_key"]["nullable"] is False
+        assert _default_value(topic_columns["active_index_generation"]) is None
+        assert _default_value(topic_columns["active_graph_generation"]) is None
+        assert _default_value(file_columns["active_index_generation"]) is None
         assert _default_value(item_columns["content_version"]) == "1"
         assert _default_value(chunk_columns["generation"]) == "0"
         assert _default_value(job_columns["status"]) == "queued"
@@ -270,27 +277,33 @@ def test_legacy_mysql_upgrade_backfills_all_scope_and_preserves_legacy_shape():
         with engine.connect() as connection:
             topic = connection.execute(
                 text(
-                    "SELECT kb_uid, tenant_id, owner_user_id, active_index_generation "
+                    "SELECT kb_uid, tenant_id, owner_user_id, active_index_generation, active_graph_generation "
                     "FROM knowledge_topic WHERE id = 'legacy-topic'"
                 )
             ).mappings().one()
             file_row = connection.execute(text("SELECT file_uid, kb_uid, tenant_id FROM knowledge_file WHERE id = 'legacy-file'" )).mappings().one()
             item = connection.execute(text("SELECT kb_uid, tenant_id FROM knowledge_item WHERE id = 'legacy-item'" )).mappings().one()
             chunk = connection.execute(text("SELECT chunk_uid, kb_uid, file_uid, generation FROM knowledge_chunk WHERE id = 'legacy-chunk'" )).mappings().one()
-            job = connection.execute(text("SELECT kb_uid, tenant_id, file_uid FROM knowledge_job WHERE id = 'legacy-job'" )).mappings().one()
+            job = connection.execute(text("SELECT kb_uid, tenant_id, file_uid, idempotency_key FROM knowledge_job WHERE id = 'legacy-job'" )).mappings().one()
         _assert_uuid4(topic["kb_uid"])
         _assert_uuid4(file_row["file_uid"])
         _assert_uuid4(chunk["chunk_uid"])
         assert topic["tenant_id"] == "default-user"
         assert topic["owner_user_id"] == "default-user"
-        assert topic["active_index_generation"] == "0"
+        assert topic["active_index_generation"] is None
+        assert topic["active_graph_generation"] is None
         assert file_row["kb_uid"] == topic["kb_uid"]
         assert file_row["tenant_id"] == "default-user"
         assert item == {"kb_uid": topic["kb_uid"], "tenant_id": "default-user"}
         assert chunk["kb_uid"] == topic["kb_uid"]
         assert chunk["file_uid"] == file_row["file_uid"]
         assert chunk["generation"] == "0"
-        assert job == {"kb_uid": topic["kb_uid"], "tenant_id": "default-user", "file_uid": file_row["file_uid"]}
+        assert job == {
+            "kb_uid": topic["kb_uid"],
+            "tenant_id": "default-user",
+            "file_uid": file_row["file_uid"],
+            "idempotency_key": "legacy:legacy-job",
+        }
 
         topic_columns = {column["name"]: column for column in inspect(engine).get_columns("knowledge_topic")}
         assert topic_columns["kb_uid"]["nullable"] is False
@@ -345,6 +358,7 @@ def test_partial_legacy_downgrade_preserves_preexisting_column_constraint_and_nu
                 text(
                     "CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
                     "name VARCHAR(255) NOT NULL, kb_uid VARCHAR(48) NULL, tenant_id VARCHAR(64) NULL, "
+                    "active_index_generation CHAR(36) NOT NULL DEFAULT 'legacy-g', "
                     "CONSTRAINT uq_knowledge_topic_kb_uid UNIQUE (kb_uid))"
                 )
             )
@@ -359,6 +373,8 @@ def test_partial_legacy_downgrade_preserves_preexisting_column_constraint_and_nu
         upgraded_columns = {column["name"]: column for column in inspect(engine).get_columns("knowledge_topic")}
         assert upgraded_columns["kb_uid"]["type"].length == 48
         assert upgraded_columns["tenant_id"]["type"].length == 64
+        assert upgraded_columns["active_index_generation"]["nullable"] is True
+        assert upgraded_columns["active_index_generation"]["default"] is None
         with engine.connect() as connection:
             migrated_uid = connection.execute(text("SELECT kb_uid FROM knowledge_topic WHERE id = 'partial-topic'")).scalar_one()
         _assert_uuid4(migrated_uid)
@@ -366,11 +382,20 @@ def test_partial_legacy_downgrade_preserves_preexisting_column_constraint_and_nu
         _run_alembic("downgrade", "base")
         inspector = inspect(engine)
         topic_columns = {column["name"]: column for column in inspector.get_columns("knowledge_topic")}
-        assert set(topic_columns) == {"id", "user_id", "name", "kb_uid", "tenant_id"}
+        assert set(topic_columns) == {
+            "id",
+            "user_id",
+            "name",
+            "kb_uid",
+            "tenant_id",
+            "active_index_generation",
+        }
         assert topic_columns["kb_uid"]["nullable"] is True
         assert topic_columns["tenant_id"]["nullable"] is True
         assert topic_columns["kb_uid"]["type"].length == 48
         assert topic_columns["tenant_id"]["type"].length == 64
+        assert topic_columns["active_index_generation"]["nullable"] is False
+        assert _default_value(topic_columns["active_index_generation"]) == "legacy-g"
         assert "uq_knowledge_topic_kb_uid" in {
             constraint["name"] for constraint in inspector.get_unique_constraints("knowledge_topic")
         }
@@ -647,6 +672,56 @@ def test_legacy_upgrade_rejects_chunk_kb_conflict_when_item_exists_without_file(
         assert "knowledge_chunk" in result.stderr
         assert "conflict with canonical item/file/topic scope" in result.stderr
         _assert_error_has_no_database_credentials(result.stderr)
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+def test_partial_legacy_kb_wide_job_allows_null_file_and_restores_idempotency_nullability():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, name VARCHAR(255) NOT NULL)"))
+            connection.execute(text("INSERT INTO knowledge_topic (id, user_id, name) VALUES ('topic', 'tenant', 'Topic')"))
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_job (id CHAR(36) NOT NULL PRIMARY KEY, job_type VARCHAR(32) NOT NULL, "
+                    "resource_id CHAR(36) NOT NULL, item_id CHAR(36) NULL, topic_id CHAR(36) NULL, attempts INT NULL, "
+                    "idempotency_key VARCHAR(255) NULL DEFAULT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_job (id, job_type, resource_id, topic_id, attempts, idempotency_key) "
+                    "VALUES ('kb-job', 'build', 'topic', 'topic', 0, NULL)"
+                )
+            )
+
+        _run_alembic("upgrade", "head")
+        with engine.connect() as connection:
+            topic = connection.execute(text("SELECT tenant_id, kb_uid FROM knowledge_topic WHERE id = 'topic'")).mappings().one()
+            job = connection.execute(
+                text("SELECT tenant_id, kb_uid, file_uid, idempotency_key FROM knowledge_job WHERE id = 'kb-job'")
+            ).mappings().one()
+        assert job == {
+            "tenant_id": topic["tenant_id"],
+            "kb_uid": topic["kb_uid"],
+            "file_uid": None,
+            "idempotency_key": "legacy:kb-job",
+        }
+        upgraded = {column["name"]: column for column in inspect(engine).get_columns("knowledge_job")}
+        assert upgraded["file_uid"]["nullable"] is True
+        assert upgraded["idempotency_key"]["nullable"] is False
+
+        _run_alembic("downgrade", "base")
+        restored = {column["name"]: column for column in inspect(engine).get_columns("knowledge_job")}
+        assert set(restored) == {"id", "job_type", "resource_id", "item_id", "topic_id", "attempts", "idempotency_key"}
+        assert restored["idempotency_key"]["nullable"] is True
+        assert restored["idempotency_key"]["default"] is None
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT idempotency_key FROM knowledge_job WHERE id = 'kb-job'")).scalar_one() == "legacy:kb-job"
     finally:
         _reset_database(engine)
         engine.dispose()

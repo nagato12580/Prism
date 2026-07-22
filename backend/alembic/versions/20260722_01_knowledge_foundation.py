@@ -34,8 +34,8 @@ def _topic_columns() -> list[sa.Column]:
         sa.Column("chunk_config", sa.JSON(), nullable=True),
         sa.Column("retrieval_config", sa.JSON(), nullable=True),
         sa.Column("graph_config", sa.JSON(), nullable=True),
-        sa.Column("active_index_generation", sa.CHAR(36), nullable=False, server_default="0"),
-        sa.Column("active_graph_generation", sa.CHAR(36), nullable=False, server_default="0"),
+        sa.Column("active_index_generation", sa.CHAR(36), nullable=True),
+        sa.Column("active_graph_generation", sa.CHAR(36), nullable=True),
         sa.Column("mindmap", sa.JSON(), nullable=True),
         sa.Column("mindmap_version", sa.Integer(), nullable=True),
         sa.Column("mindmap_generated_at", sa.DateTime(), nullable=True),
@@ -95,7 +95,7 @@ def _file_columns() -> list[sa.Column]:
         sa.Column("index_status", sa.String(24), nullable=False, server_default="pending"),
         sa.Column("graph_status", sa.String(24), nullable=False, server_default="pending"),
         sa.Column("parsed_content_version", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("active_index_generation", sa.CHAR(36), nullable=False, server_default="0"),
+        sa.Column("active_index_generation", sa.CHAR(36), nullable=True),
         sa.Column("parse_error", sa.JSON(), nullable=True),
         sa.Column("index_error", sa.JSON(), nullable=True),
         sa.Column("graph_error", sa.JSON(), nullable=True),
@@ -156,8 +156,8 @@ def _job_columns() -> list[sa.Column]:
         sa.Column("id", sa.CHAR(36), primary_key=True),
         sa.Column("tenant_id", sa.CHAR(36), nullable=False),
         sa.Column("kb_uid", sa.CHAR(36), nullable=False),
-        sa.Column("file_uid", sa.CHAR(36), nullable=False),
-        sa.Column("idempotency_key", sa.String(255), nullable=True),
+        sa.Column("file_uid", sa.CHAR(36), nullable=True),
+        sa.Column("idempotency_key", sa.String(255), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=True),
         sa.Column("result", sa.JSON(), nullable=True),
         sa.Column("job_type", sa.String(32), nullable=True),
@@ -207,12 +207,26 @@ UNIQUE_CONSTRAINTS = {
 }
 
 REQUIRED_COLUMNS = {
-    "knowledge_topic": ["kb_uid", "tenant_id", "owner_user_id", "status", "version", "active_index_generation", "active_graph_generation"],
-    "knowledge_file": ["file_uid", "kb_uid", "tenant_id", "parse_status", "index_status", "graph_status", "parsed_content_version", "active_index_generation"],
+    "knowledge_topic": ["kb_uid", "tenant_id", "owner_user_id", "status", "version"],
+    "knowledge_file": ["file_uid", "kb_uid", "tenant_id", "parse_status", "index_status", "graph_status", "parsed_content_version"],
     "knowledge_item": ["tenant_id", "kb_uid", "content_version"],
     "knowledge_chunk": ["chunk_uid", "kb_uid", "file_uid", "generation"],
-    "knowledge_job": ["tenant_id", "kb_uid", "file_uid", "status", "priority", "attempt", "attempts", "max_attempts", "stage", "progress_current", "progress_total", "retryable"],
+    "knowledge_job": ["tenant_id", "kb_uid", "idempotency_key", "status", "priority", "attempt", "attempts", "max_attempts", "stage", "progress_current", "progress_total", "retryable"],
 }
+
+COLUMN_TARGETS = {
+    table_name: {name: {"nullable": False} for name in names}
+    for table_name, names in REQUIRED_COLUMNS.items()
+}
+COLUMN_TARGETS["knowledge_topic"].update(
+    {
+        "active_index_generation": {"nullable": True, "default": None},
+        "active_graph_generation": {"nullable": True, "default": None},
+    }
+)
+COLUMN_TARGETS["knowledge_file"]["active_index_generation"] = {"nullable": True, "default": None}
+COLUMN_TARGETS["knowledge_job"]["file_uid"] = {"nullable": True, "default": None}
+COLUMN_TARGETS["knowledge_job"]["idempotency_key"]["default"] = None
 
 
 def _inspector() -> sa.Inspector:
@@ -285,9 +299,16 @@ def _create_state_table(existing_tables: set[str]) -> None:
                     name for name, _ in UNIQUE_CONSTRAINTS.get(table_name, []) if name not in existing_constraints
                 ],
                 "nullability_changes": {
-                    name: True
-                    for name in REQUIRED_COLUMNS[table_name]
-                    if name in existing_columns and existing_columns[name]["nullable"]
+                    name: {
+                        "nullable": existing_columns[name]["nullable"],
+                        "default": existing_columns[name]["default"],
+                    }
+                    for name, target in COLUMN_TARGETS[table_name].items()
+                    if name in existing_columns
+                    and (
+                        existing_columns[name]["nullable"] != target["nullable"]
+                        or ("default" in target and existing_columns[name]["default"] != target["default"])
+                    )
                 },
             }
         )
@@ -386,9 +407,7 @@ def _backfill_legacy_rows() -> None:
             "UPDATE knowledge_topic SET "
             "tenant_id = COALESCE(user_id, 'default-user'), "
             "owner_user_id = COALESCE(user_id, 'default-user'), "
-            "status = COALESCE(status, 'active'), version = COALESCE(version, 1), "
-            "active_index_generation = COALESCE(active_index_generation, '0'), "
-            "active_graph_generation = COALESCE(active_graph_generation, '0')"
+            "status = COALESCE(status, 'active'), version = COALESCE(version, 1)"
         )
     )
     _require_resolved("knowledge_topic", ["kb_uid", "tenant_id", "owner_user_id"])
@@ -411,8 +430,7 @@ def _backfill_legacy_rows() -> None:
             "f.parse_status = COALESCE(f.parse_status, 'pending'), "
             "f.index_status = COALESCE(f.index_status, 'pending'), "
             "f.graph_status = COALESCE(f.graph_status, 'pending'), "
-            "f.parsed_content_version = COALESCE(f.parsed_content_version, 0), "
-            "f.active_index_generation = COALESCE(f.active_index_generation, '0')"
+            "f.parsed_content_version = COALESCE(f.parsed_content_version, 0)"
         )
     )
     _require_resolved("knowledge_file", ["file_uid", "kb_uid", "tenant_id"])
@@ -475,6 +493,7 @@ def _backfill_legacy_rows() -> None:
             "j.tenant_id = COALESCE(f.tenant_id, i.tenant_id, t.tenant_id, j.tenant_id), "
             "j.kb_uid = COALESCE(f.kb_uid, i.kb_uid, t.kb_uid, j.kb_uid), "
             "j.file_uid = COALESCE(f.file_uid, j.file_uid), "
+            "j.idempotency_key = COALESCE(j.idempotency_key, CONCAT('legacy:', j.id)), "
             "j.attempt = COALESCE(j.attempt, j.attempts, 0), "
             "j.attempts = COALESCE(j.attempts, j.attempt, 0), j.max_attempts = COALESCE(j.max_attempts, 3), "
             "j.status = COALESCE(j.status, 'queued'), j.priority = COALESCE(j.priority, 100), "
@@ -482,22 +501,33 @@ def _backfill_legacy_rows() -> None:
             "j.progress_total = COALESCE(j.progress_total, 0), j.retryable = COALESCE(j.retryable, 0)"
         )
     )
-    _require_resolved("knowledge_job", ["tenant_id", "kb_uid", "file_uid"])
+    _require_resolved("knowledge_job", ["tenant_id", "kb_uid", "idempotency_key"])
+    duplicate_idempotency_keys = op.get_bind().execute(
+        sa.text(
+            "SELECT COUNT(*) FROM (SELECT idempotency_key FROM knowledge_job "
+            "GROUP BY idempotency_key HAVING COUNT(*) > 1) duplicates"
+        )
+    ).scalar_one()
+    if duplicate_idempotency_keys:
+        raise RuntimeError(
+            f"Cannot migrate knowledge_job: {duplicate_idempotency_keys} duplicate idempotency key(s)"
+        )
 
 
-def _enforce_required_columns() -> None:
-    for table_name, names in REQUIRED_COLUMNS.items():
+def _apply_column_targets() -> None:
+    for table_name, targets in COLUMN_TARGETS.items():
         existing_columns = {column["name"]: column for column in _inspector().get_columns(table_name)}
-        for name in names:
+        for name, target in targets.items():
             existing = existing_columns[name]
-            op.alter_column(
-                table_name,
-                name,
-                existing_type=existing["type"],
-                existing_server_default=sa.text(existing["default"]) if isinstance(existing["default"], str) else existing["default"],
-                existing_comment=existing.get("comment"),
-                nullable=False,
-            )
+            arguments = {
+                "existing_type": existing["type"],
+                "existing_server_default": sa.text(existing["default"]) if isinstance(existing["default"], str) else existing["default"],
+                "existing_comment": existing.get("comment"),
+                "nullable": target["nullable"],
+            }
+            if "default" in target:
+                arguments["server_default"] = target["default"]
+            op.alter_column(table_name, name, **arguments)
 
 
 def _create_unique_constraints() -> None:
@@ -523,7 +553,7 @@ def upgrade() -> None:
             _add_missing_columns(table_name)
 
     _backfill_legacy_rows()
-    _enforce_required_columns()
+    _apply_column_targets()
     _create_unique_constraints()
 
 
@@ -548,7 +578,7 @@ def downgrade() -> None:
             if name in existing_unique:
                 op.drop_constraint(name, table_name, type_="unique")
         nullability_changes = json.loads(state["nullability_changes"]) if isinstance(state["nullability_changes"], str) else state["nullability_changes"]
-        for name, nullable in nullability_changes.items():
+        for name, original in nullability_changes.items():
             if name in existing_columns:
                 existing = next(column for column in _inspector().get_columns(table_name) if column["name"] == name)
                 op.alter_column(
@@ -557,7 +587,8 @@ def downgrade() -> None:
                     existing_type=existing["type"],
                     existing_server_default=sa.text(existing["default"]) if isinstance(existing["default"], str) else existing["default"],
                     existing_comment=existing.get("comment"),
-                    nullable=nullable,
+                    nullable=original["nullable"],
+                    server_default=sa.text(original["default"]) if isinstance(original["default"], str) else original["default"],
                 )
         added_columns = json.loads(state["added_columns"]) if isinstance(state["added_columns"], str) else state["added_columns"]
         for name in reversed(added_columns):
