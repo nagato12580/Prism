@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import update
-
+from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.models import KnowledgeJob
@@ -23,16 +23,6 @@ class JobCommand:
     kb_uid: str
     file_uid: str | None
     payload: dict[str, Any]
-
-
-TRANSITIONS: dict[str, set[str]] = {
-    JobStatus.QUEUED.value: {JobStatus.CLAIMED.value, JobStatus.CANCELED.value},
-    JobStatus.CLAIMED.value: {JobStatus.RUNNING.value, JobStatus.CANCELED.value},
-    JobStatus.RUNNING.value: {JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELED.value},
-    JobStatus.SUCCEEDED.value: set(),
-    JobStatus.FAILED.value: set(),
-    JobStatus.CANCELED.value: set(),
-}
 
 
 class KnowledgeJobService:
@@ -57,146 +47,215 @@ class KnowledgeJobService:
             status=JobStatus.QUEUED.value,
         )
         self.db.add(job)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            return (
+                self.db.query(KnowledgeJob)
+                .filter_by(idempotency_key=idempotency_key)
+                .one()
+            )
         return job
 
     def claim(self, job_id: str, worker_id: str, lease: timedelta) -> KnowledgeJob | None:
         now = local_now()
-        result = self.db.execute(
-            update(KnowledgeJob)
-            .where(KnowledgeJob.id == job_id, KnowledgeJob.status == JobStatus.QUEUED.value)
-            .values(
-                status=JobStatus.CLAIMED.value,
-                lease_owner=worker_id,
-                heartbeat_at=now,
-                lease_expires_at=now + lease,
+        rowcount = (
+            self.db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.id == job_id,
+                KnowledgeJob.status == JobStatus.QUEUED.value,
+                or_(
+                    KnowledgeJob.available_at.is_(None),
+                    KnowledgeJob.available_at <= now,
+                ),
+            )
+            .update(
+                {
+                    KnowledgeJob.status: JobStatus.CLAIMED.value,
+                    KnowledgeJob.lease_owner: worker_id,
+                    KnowledgeJob.heartbeat_at: now,
+                    KnowledgeJob.lease_expires_at: now + lease,
+                },
+                synchronize_session="fetch",
             )
         )
         self.db.commit()
-        return self.db.get(KnowledgeJob, job_id) if result.rowcount == 1 else None
+        return self.db.get(KnowledgeJob, job_id) if rowcount == 1 else None
 
-    def _check_worker(self, job: KnowledgeJob, worker_id: str) -> None:
-        if job.lease_owner != worker_id:
-            raise InvalidJobTransition(
-                f"Job {job.id} is owned by {job.lease_owner}, not {worker_id}"
+    def reclaim_expired(self, job_id: str, worker_id: str, lease: timedelta) -> KnowledgeJob | None:
+        now = local_now()
+        rowcount = (
+            self.db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.id == job_id,
+                KnowledgeJob.status == JobStatus.CLAIMED.value,
+                KnowledgeJob.lease_expires_at.is_not(None),
+                KnowledgeJob.lease_expires_at <= now,
             )
-
-    def _transition(self, job_id: str, from_status: str, to_status: str, values: dict) -> KnowledgeJob:
-        result = self.db.execute(
-            update(KnowledgeJob)
-            .where(KnowledgeJob.id == job_id, KnowledgeJob.status == from_status)
-            .values(status=to_status, **values)
+            .update(
+                {
+                    KnowledgeJob.lease_owner: worker_id,
+                    KnowledgeJob.heartbeat_at: now,
+                    KnowledgeJob.lease_expires_at: now + lease,
+                },
+                synchronize_session="fetch",
+            )
         )
         self.db.commit()
-        if result.rowcount != 1:
+        return self.db.get(KnowledgeJob, job_id) if rowcount == 1 else None
+
+    def _checked_update(self, job_id: str, worker_id: str, filters: list, values: dict) -> KnowledgeJob:
+        q = self.db.query(KnowledgeJob).filter(KnowledgeJob.id == job_id)
+        for f in filters:
+            q = q.filter(f)
+        rowcount = q.update(values, synchronize_session="fetch")
+        self.db.commit()
+        if rowcount != 1:
             raise InvalidJobTransition(
-                f"Cannot transition job {job_id} from {from_status} to {to_status}"
+                f"Cannot update job {job_id} as {worker_id}"
             )
         return self.db.get(KnowledgeJob, job_id)
 
     def start(self, job_id: str, worker_id: str) -> KnowledgeJob:
-        job = self.db.get(KnowledgeJob, job_id)
-        if job is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
-        self._check_worker(job, worker_id)
         now = local_now()
-        return self._transition(
+        return self._checked_update(
             job_id,
-            JobStatus.CLAIMED.value,
-            JobStatus.RUNNING.value,
+            worker_id,
+            [
+                KnowledgeJob.status == JobStatus.CLAIMED.value,
+                KnowledgeJob.lease_owner == worker_id,
+            ],
             {
-                "heartbeat_at": now,
-                "attempt": KnowledgeJob.attempt + 1,
-                "attempts": KnowledgeJob.attempts + 1,
-                "started_at": now,
+                KnowledgeJob.status: JobStatus.RUNNING.value,
+                KnowledgeJob.heartbeat_at: now,
+                KnowledgeJob.attempt: KnowledgeJob.attempt + 1,
+                KnowledgeJob.attempts: KnowledgeJob.attempts + 1,
+                KnowledgeJob.started_at: now,
             },
         )
 
-    def heartbeat(self, job_id: str, worker_id: str) -> KnowledgeJob:
-        job = self.db.get(KnowledgeJob, job_id)
-        if job is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
-        self._check_worker(job, worker_id)
+    def heartbeat(self, job_id: str, worker_id: str, lease: timedelta) -> KnowledgeJob:
         now = local_now()
-        self.db.execute(
-            update(KnowledgeJob)
-            .where(KnowledgeJob.id == job_id)
-            .values(heartbeat_at=now)
+        return self._checked_update(
+            job_id,
+            worker_id,
+            [
+                KnowledgeJob.lease_owner == worker_id,
+                KnowledgeJob.status.in_({JobStatus.CLAIMED.value, JobStatus.RUNNING.value}),
+            ],
+            {
+                KnowledgeJob.heartbeat_at: now,
+                KnowledgeJob.lease_expires_at: now + lease,
+            },
         )
-        self.db.commit()
-        return self.db.get(KnowledgeJob, job_id)
 
     def progress(self, job_id: str, worker_id: str, current: int, total: int, stage: str) -> KnowledgeJob:
-        job = self.db.get(KnowledgeJob, job_id)
-        if job is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
-        self._check_worker(job, worker_id)
-        self.db.execute(
-            update(KnowledgeJob)
-            .where(KnowledgeJob.id == job_id)
-            .values(progress_current=current, progress_total=total, stage=stage)
+        return self._checked_update(
+            job_id,
+            worker_id,
+            [
+                KnowledgeJob.lease_owner == worker_id,
+                KnowledgeJob.status.in_({JobStatus.CLAIMED.value, JobStatus.RUNNING.value}),
+            ],
+            {
+                KnowledgeJob.progress_current: current,
+                KnowledgeJob.progress_total: total,
+                KnowledgeJob.stage: stage,
+            },
         )
-        self.db.commit()
-        return self.db.get(KnowledgeJob, job_id)
 
     def succeed(self, job_id: str, worker_id: str, result: dict[str, Any]) -> KnowledgeJob:
-        job = self.db.get(KnowledgeJob, job_id)
-        if job is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
-        self._check_worker(job, worker_id)
         now = local_now()
-        return self._transition(
+        return self._checked_update(
             job_id,
-            JobStatus.RUNNING.value,
-            JobStatus.SUCCEEDED.value,
-            {"result": result, "finished_at": now, "heartbeat_at": now},
+            worker_id,
+            [
+                KnowledgeJob.status == JobStatus.RUNNING.value,
+                KnowledgeJob.lease_owner == worker_id,
+            ],
+            {
+                KnowledgeJob.status: JobStatus.SUCCEEDED.value,
+                KnowledgeJob.result: result,
+                KnowledgeJob.finished_at: now,
+                KnowledgeJob.heartbeat_at: now,
+            },
         )
 
     def fail(self, job_id: str, worker_id: str, error_code: str, error_message: str, retryable: bool) -> KnowledgeJob:
-        job = self.db.get(KnowledgeJob, job_id)
-        if job is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
-        self._check_worker(job, worker_id)
         now = local_now()
-        return self._transition(
+        return self._checked_update(
             job_id,
-            JobStatus.RUNNING.value,
-            JobStatus.FAILED.value,
+            worker_id,
+            [
+                KnowledgeJob.status == JobStatus.RUNNING.value,
+                KnowledgeJob.lease_owner == worker_id,
+            ],
             {
-                "error_code": error_code,
-                "error_message": error_message,
-                "retryable": retryable,
-                "finished_at": now,
-                "heartbeat_at": now,
+                KnowledgeJob.status: JobStatus.FAILED.value,
+                KnowledgeJob.error_code: error_code,
+                KnowledgeJob.error_message: error_message,
+                KnowledgeJob.retryable: retryable,
+                KnowledgeJob.finished_at: now,
+                KnowledgeJob.heartbeat_at: now,
             },
         )
 
     def request_cancel(self, job_id: str, canceled_by: str) -> KnowledgeJob:
-        job = self.db.get(KnowledgeJob, job_id)
-        if job is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
         now = local_now()
-        self.db.execute(
-            update(KnowledgeJob)
-            .where(KnowledgeJob.id == job_id)
-            .values(cancel_requested_at=now, canceled_by=canceled_by)
+        self._checked_update(
+            job_id,
+            canceled_by,
+            [
+                KnowledgeJob.status.in_({
+                    JobStatus.QUEUED.value,
+                    JobStatus.CLAIMED.value,
+                    JobStatus.RUNNING.value,
+                }),
+            ],
+            {
+                KnowledgeJob.cancel_requested_at: now,
+                KnowledgeJob.canceled_by: canceled_by,
+            },
         )
-        self.db.commit()
         return self.db.get(KnowledgeJob, job_id)
 
     def cancel(self, job_id: str, worker_id: str) -> KnowledgeJob:
+        now = local_now()
+        return self._checked_update(
+            job_id,
+            worker_id,
+            [
+                KnowledgeJob.lease_owner == worker_id,
+                KnowledgeJob.status.in_({JobStatus.CLAIMED.value, JobStatus.RUNNING.value}),
+            ],
+            {
+                KnowledgeJob.status: JobStatus.CANCELED.value,
+                KnowledgeJob.finished_at: now,
+                KnowledgeJob.heartbeat_at: now,
+            },
+        )
+
+    def reconcile_queued(self, kb_uid: str | None = None) -> list[str]:
+        now = local_now()
+        query = self.db.query(KnowledgeJob).filter(
+            KnowledgeJob.status == JobStatus.QUEUED.value,
+            or_(
+                KnowledgeJob.available_at.is_(None),
+                KnowledgeJob.available_at <= now,
+            ),
+        )
+        if kb_uid:
+            query = query.filter(KnowledgeJob.kb_uid == kb_uid)
+        jobs = query.order_by(KnowledgeJob.created_at.asc()).limit(1000).all()
+        return [job.id for job in jobs]
+
+    def stage_enqueued(self, job_id: str) -> KnowledgeJob:
         job = self.db.get(KnowledgeJob, job_id)
         if job is None:
             raise InvalidJobTransition(f"Job {job_id} not found")
-        self._check_worker(job, worker_id)
-        now = local_now()
-        self.db.execute(
-            update(KnowledgeJob)
-            .where(
-                KnowledgeJob.id == job_id,
-                KnowledgeJob.status.in_({JobStatus.CLAIMED.value, JobStatus.RUNNING.value}),
-            )
-            .values(status=JobStatus.CANCELED.value, finished_at=now, heartbeat_at=now)
-        )
+        if job.stage == "enqueued":
+            return job
+        job.stage = "enqueued"
         self.db.commit()
-        return self.db.get(KnowledgeJob, job_id)
+        return job
