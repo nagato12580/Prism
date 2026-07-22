@@ -2,7 +2,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
-    Enum,
     Index,
     Integer,
     String,
@@ -39,17 +38,9 @@ class KnowledgeJob(Base):
     item_id = Column(CHAR(36), nullable=True)
     topic_id = Column(CHAR(36), nullable=True)
     status = Column(
-        Enum(
-            JobStatus,
-            name="knowledge_job_status",
-            native_enum=False,
-            create_constraint=True,
-            validate_strings=True,
-            values_callable=lambda statuses: [status.value for status in statuses],
-            length=24,
-        ),
+        String(24),
         nullable=False,
-        default=JobStatus.QUEUED,
+        default=JobStatus.QUEUED.value,
         server_default=JobStatus.QUEUED.value,
     )
     priority = Column(Integer, nullable=False, default=100, server_default="100")

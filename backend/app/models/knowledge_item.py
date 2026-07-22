@@ -3,7 +3,6 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
-    Enum,
     ForeignKey,
     Integer,
     String,
@@ -22,18 +21,6 @@ from .knowledge_types import ResourceStatus, StageStatus, uuid4_str
 DocumentText = Text().with_variant(MEDIUMTEXT, "mysql")
 
 
-def _enum_type(enum_class, name):
-    return Enum(
-        enum_class,
-        name=name,
-        native_enum=False,
-        create_constraint=True,
-        validate_strings=True,
-        values_callable=lambda statuses: [status.value for status in statuses],
-        length=24,
-    )
-
-
 class KnowledgeTopic(Base):
     __tablename__ = "knowledge_topic"
     __table_args__ = (
@@ -48,9 +35,9 @@ class KnowledgeTopic(Base):
     name = Column(String(255), nullable=False, comment="Topic name")
     description = Column(Text, comment="Topic description")
     status = Column(
-        _enum_type(ResourceStatus, "resource_status"),
+        String(24),
         nullable=False,
-        default=ResourceStatus.ACTIVE,
+        default=ResourceStatus.ACTIVE.value,
         server_default=ResourceStatus.ACTIVE.value,
     )
     deleted_at = Column(DateTime, nullable=True)
@@ -146,10 +133,9 @@ class KnowledgeFile(Base):
     topic_id = Column(CHAR(36), ForeignKey("knowledge_topic.id", ondelete="CASCADE"), nullable=True)
     item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="SET NULL"), nullable=True)
     title = Column(String(255), nullable=True, comment="Resource title")
-    original_name = Column(String(255), nullable=True, comment="Legacy original filename")
     storage_uri = Column(String(1024), nullable=True)
     relative_path = Column(String(1024), nullable=True)
-    original_filename = Column(String(255), nullable=True, comment="Original filename")
+    original_filename = Column("original_name", String(255), nullable=True, comment="Original filename")
     media_type = Column(String(64), nullable=True, comment="document/image/audio/video")
     mime_type = Column(String(100), comment="MIME type")
     file_type = Column(String(20), nullable=True, comment="Legacy file extension")
@@ -161,21 +147,21 @@ class KnowledgeFile(Base):
     parser_config_snapshot = Column(JSON, nullable=True)
     chunk_config_snapshot = Column(JSON, nullable=True)
     parse_status = Column(
-        _enum_type(StageStatus, "knowledge_file_parse_status"),
+        String(24),
         nullable=False,
-        default=StageStatus.PENDING,
+        default=StageStatus.PENDING.value,
         server_default=StageStatus.PENDING.value,
     )
     index_status = Column(
-        _enum_type(StageStatus, "knowledge_file_index_status"),
+        String(24),
         nullable=False,
-        default=StageStatus.PENDING,
+        default=StageStatus.PENDING.value,
         server_default=StageStatus.PENDING.value,
     )
     graph_status = Column(
-        _enum_type(StageStatus, "knowledge_file_graph_status"),
+        String(24),
         nullable=False,
-        default=StageStatus.PENDING,
+        default=StageStatus.PENDING.value,
         server_default=StageStatus.PENDING.value,
     )
     parsed_content_version = Column(Integer, nullable=False, default=0, server_default="0")
@@ -210,6 +196,7 @@ class KnowledgeFile(Base):
 
     topic = relationship("KnowledgeTopic", back_populates="resources")
     item = relationship("KnowledgeItem")
+    original_name = synonym("original_filename")
     storage_path = synonym("file_path")
     file_ext = synonym("file_type")
     processing_status = synonym("parse_status")

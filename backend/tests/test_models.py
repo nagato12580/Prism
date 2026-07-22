@@ -1,7 +1,7 @@
 # prism/backend/tests/test_models.py
 import uuid
 
-from sqlalchemy import inspect
+from sqlalchemy import CheckConstraint, Enum, String, inspect
 from sqlalchemy.dialects import mysql
 
 from backend.app.database import Base
@@ -162,7 +162,6 @@ def test_knowledge_file_legacy_attrs_map_to_new_attrs(db_session):
         kb_uid=KB_UID,
         title="Legacy Upload",
         original_name="legacy.txt",
-        original_filename="legacy.txt",
         file_path="uploads/legacy.txt",
         file_type=".txt",
         file_size=6,
@@ -599,3 +598,39 @@ def test_knowledge_status_enums_have_only_approved_values():
         "failed",
         "canceled",
     }
+
+
+def test_original_filename_uses_legacy_database_column_as_bidirectional_alias(db_session):
+    legacy = KnowledgeFile(
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
+        original_name="legacy.md",
+    )
+    canonical = KnowledgeFile(
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
+        original_filename="canonical.md",
+    )
+    db_session.add_all([legacy, canonical])
+    db_session.commit()
+
+    assert legacy.original_filename == legacy.original_name == "legacy.md"
+    assert canonical.original_name == canonical.original_filename == "canonical.md"
+    column_names = set(KnowledgeFile.__table__.columns.keys())
+    assert "original_name" in column_names
+    assert "original_filename" not in column_names
+
+
+def test_status_columns_use_plain_strings_without_database_check_constraints():
+    status_columns = [
+        KnowledgeTopic.__table__.columns["status"],
+        KnowledgeFile.__table__.columns["parse_status"],
+        KnowledgeFile.__table__.columns["index_status"],
+        KnowledgeFile.__table__.columns["graph_status"],
+        KnowledgeJob.__table__.columns["status"],
+    ]
+
+    assert all(isinstance(column.type, String) for column in status_columns)
+    assert all(not isinstance(column.type, Enum) for column in status_columns)
+    for table in {column.table for column in status_columns}:
+        assert not any(isinstance(constraint, CheckConstraint) for constraint in table.constraints)
