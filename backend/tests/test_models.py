@@ -1,19 +1,51 @@
 # prism/backend/tests/test_models.py
-import pytest
-from sqlalchemy.exc import IntegrityError
+import uuid
+
+from sqlalchemy import inspect
 from sqlalchemy.dialects import mysql
 
 from backend.app.database import Base
-from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeTopic, KnowledgeChunk, ChatSession, ChatMessage
+from backend.app.models import (
+    ChatMessage,
+    ChatSession,
+    JobStatus,
+    KnowledgeChunk,
+    KnowledgeFile,
+    KnowledgeItem,
+    KnowledgeJob,
+    KnowledgeTopic,
+    ResourceStatus,
+    StageStatus,
+)
 from backend.app.utils import auto_migrate as auto_migrate_module
 
 
+TENANT_ID = "tenant-1"
+OWNER_USER_ID = "owner-1"
+KB_UID = "11111111-1111-4111-8111-111111111111"
+FILE_UID = "22222222-2222-4222-8222-222222222222"
+
+
 def test_create_knowledge_item_with_chunk(db_session):
-    item = KnowledgeItem(title="测试条目", content="内容", source_type="manual", tags=["test"])
+    item = KnowledgeItem(
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
+        title="测试条目",
+        content="内容",
+        source_type="manual",
+        tags=["test"],
+    )
     db_session.add(item)
     db_session.commit()
 
-    chunk = KnowledgeChunk(item_id=item.id, chunk_text="分块文本", chunk_index=0)
+    chunk = KnowledgeChunk(
+        kb_uid=KB_UID,
+        file_uid=FILE_UID,
+        item_id=item.id,
+        generation="generation-1",
+        chunk_text="分块文本",
+        chunk_index=0,
+    )
     db_session.add(chunk)
     db_session.commit()
 
@@ -40,12 +72,20 @@ def test_chat_session_message_cascade(db_session):
 
 
 def test_topic_resource_relationship_and_metadata(db_session):
-    topic = KnowledgeTopic(user_id="default-user", name="Product Docs", description="Launch files")
+    topic = KnowledgeTopic(
+        user_id="default-user",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        name="Product Docs",
+        description="Launch files",
+    )
     db_session.add(topic)
     db_session.commit()
 
     resource = KnowledgeFile(
         user_id="default-user",
+        tenant_id=TENANT_ID,
+        kb_uid=topic.kb_uid,
         topic_id=topic.id,
         title="Roadmap",
         original_filename="roadmap.md",
@@ -55,7 +95,7 @@ def test_topic_resource_relationship_and_metadata(db_session):
         file_size=18,
         md5="md5-roadmap",
         storage_path="uploads/default-user/topic/roadmap.md",
-        processing_status="completed",
+        processing_status="succeeded",
         description="Q3 notes",
         tags=["roadmap", "q3"],
         source_type="upload",
@@ -71,13 +111,20 @@ def test_topic_resource_relationship_and_metadata(db_session):
     assert loaded.resources[0].uploaded_at is not None
 
 
-def test_duplicate_resource_md5_is_rejected_per_user_topic(db_session):
-    topic = KnowledgeTopic(user_id="default-user", name="Research")
+def test_legacy_md5_does_not_replace_public_file_identity(db_session):
+    topic = KnowledgeTopic(
+        user_id="default-user",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        name="Research",
+    )
     db_session.add(topic)
     db_session.commit()
 
     first = KnowledgeFile(
         user_id="default-user",
+        tenant_id=TENANT_ID,
+        kb_uid=topic.kb_uid,
         topic_id=topic.id,
         title="A",
         original_filename="a.txt",
@@ -86,10 +133,12 @@ def test_duplicate_resource_md5_is_rejected_per_user_topic(db_session):
         file_size=3,
         md5="same-md5",
         storage_path="uploads/a.txt",
-        processing_status="completed",
+        processing_status="succeeded",
     )
     second = KnowledgeFile(
         user_id="default-user",
+        tenant_id=TENANT_ID,
+        kb_uid=topic.kb_uid,
         topic_id=topic.id,
         title="A Copy",
         original_filename="a-copy.txt",
@@ -98,23 +147,27 @@ def test_duplicate_resource_md5_is_rejected_per_user_topic(db_session):
         file_size=3,
         md5="same-md5",
         storage_path="uploads/a-copy.txt",
-        processing_status="completed",
+        processing_status="succeeded",
     )
     db_session.add_all([first, second])
+    db_session.commit()
 
-    with pytest.raises(IntegrityError):
-        db_session.commit()
+    assert first.md5 == second.md5 == "same-md5"
+    assert first.file_uid != second.file_uid
 
 
 def test_knowledge_file_legacy_attrs_map_to_new_attrs(db_session):
     resource = KnowledgeFile(
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
         title="Legacy Upload",
         original_name="legacy.txt",
+        original_filename="legacy.txt",
         file_path="uploads/legacy.txt",
         file_type=".txt",
         file_size=6,
         md5="legacy-md5",
-        parse_status="completed",
+        parse_status="succeeded",
     )
     db_session.add(resource)
     db_session.commit()
@@ -123,31 +176,37 @@ def test_knowledge_file_legacy_attrs_map_to_new_attrs(db_session):
     assert loaded.original_filename == "legacy.txt"
     assert loaded.storage_path == "uploads/legacy.txt"
     assert loaded.file_ext == ".txt"
-    assert loaded.processing_status == "completed"
+    assert loaded.processing_status == "succeeded"
     assert loaded.original_name == "legacy.txt"
     assert loaded.file_path == "uploads/legacy.txt"
     assert loaded.file_type == ".txt"
-    assert loaded.parse_status == "completed"
+    assert loaded.parse_status == "succeeded"
 
 
-def test_knowledge_file_done_status_normalizes_to_completed(db_session):
+def test_knowledge_file_stage_status_synonyms_use_approved_values(db_session):
     legacy_status = KnowledgeFile(
-        title="Legacy Done",
-        original_filename="legacy-done.txt",
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
+        title="Legacy Succeeded",
+        original_filename="legacy-succeeded.txt",
         file_ext=".txt",
-        md5="legacy-done-md5",
-        storage_path="uploads/legacy-done.txt",
-        parse_status="done",
+        md5="legacy-succeeded-md5",
+        storage_path="uploads/legacy-succeeded.txt",
+        parse_status="succeeded",
     )
     new_status = KnowledgeFile(
-        title="New Done",
-        original_filename="new-done.txt",
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
+        title="New Running",
+        original_filename="new-running.txt",
         file_ext=".txt",
-        md5="new-done-md5",
-        storage_path="uploads/new-done.txt",
-        processing_status="done",
+        md5="new-running-md5",
+        storage_path="uploads/new-running.txt",
+        processing_status="running",
     )
     pending = KnowledgeFile(
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
         title="Pending",
         original_filename="pending.txt",
         file_ext=".txt",
@@ -159,29 +218,35 @@ def test_knowledge_file_done_status_normalizes_to_completed(db_session):
     db_session.commit()
 
     loaded = {item.md5: item for item in db_session.query(KnowledgeFile).all()}
-    assert loaded["legacy-done-md5"].processing_status == "done"
-    assert loaded["legacy-done-md5"].parse_status == "done"
-    assert loaded["new-done-md5"].processing_status == "done"
-    assert loaded["new-done-md5"].parse_status == "done"
+    assert loaded["legacy-succeeded-md5"].processing_status == "succeeded"
+    assert loaded["legacy-succeeded-md5"].parse_status == "succeeded"
+    assert loaded["new-running-md5"].processing_status == "running"
+    assert loaded["new-running-md5"].parse_status == "running"
     assert loaded["pending-md5"].processing_status == "pending"
 
 
 def test_knowledge_file_model_has_named_unique_constraint():
     constraints = {constraint.name for constraint in KnowledgeFile.__table__.constraints}
-    assert "uq_knowledge_file_user_topic_md5" in constraints
+    assert "uq_knowledge_file_file_uid" in constraints
+    assert "uq_knowledge_file_user_topic_md5" not in constraints
 
 
 def test_knowledge_topic_model_has_named_unique_constraint():
     constraints = {constraint.name for constraint in KnowledgeTopic.__table__.constraints}
-    assert "uq_knowledge_topic_user_name" in constraints
+    assert "uq_knowledge_topic_kb_uid" in constraints
+    assert "uq_knowledge_topic_user_name" not in constraints
 
 
 def test_document_content_columns_use_mysql_mediumtext():
     assert KnowledgeItem.__table__.columns["content"].type.compile(dialect=mysql.dialect()).lower() == "mediumtext"
+    assert (
+        KnowledgeItem.__table__.columns["normalized_markdown"].type.compile(dialect=mysql.dialect()).lower()
+        == "mediumtext"
+    )
     assert KnowledgeFile.__table__.columns["content_text"].type.compile(dialect=mysql.dialect()).lower() == "mediumtext"
 
 
-def test_auto_migrate_adds_missing_topic_resource_unique_constraints(monkeypatch):
+def test_auto_migrate_does_not_restore_obsolete_legacy_unique_constraints(monkeypatch):
     executed_sql = []
 
     class FakeInspector:
@@ -209,6 +274,8 @@ def test_auto_migrate_adds_missing_topic_resource_unique_constraints(monkeypatch
             pass
 
     class FakeEngine:
+        dialect = mysql.dialect()
+
         def connect(self):
             return FakeConnection()
 
@@ -216,8 +283,8 @@ def test_auto_migrate_adds_missing_topic_resource_unique_constraints(monkeypatch
 
     auto_migrate_module.auto_migrate(Base, FakeEngine())
 
-    assert any("ADD CONSTRAINT `uq_knowledge_topic_user_name`" in sql for sql in executed_sql)
-    assert any("ADD CONSTRAINT `uq_knowledge_file_user_topic_md5`" in sql for sql in executed_sql)
+    assert not any("uq_knowledge_topic_user_name" in sql for sql in executed_sql)
+    assert not any("uq_knowledge_file_user_topic_md5" in sql for sql in executed_sql)
 
 
 def test_auto_migrate_adds_missing_columns_without_string_compile_error(monkeypatch):
@@ -282,7 +349,7 @@ def test_auto_migrate_upgrades_existing_text_columns_to_mediumtext(monkeypatch):
             rows = [{"name": column.name, "type": column.type} for column in table.columns]
             if table_name == "knowledge_item":
                 for row in rows:
-                    if row["name"] == "content":
+                    if row["name"] in {"content", "normalized_markdown"}:
                         row["type"] = mysql.TEXT()
             if table_name == "knowledge_file":
                 for row in rows:
@@ -317,18 +384,24 @@ def test_auto_migrate_upgrades_existing_text_columns_to_mediumtext(monkeypatch):
     auto_migrate_module.auto_migrate(Base, FakeEngine())
 
     assert any("MODIFY COLUMN `content` MEDIUMTEXT" in sql for sql in executed_sql)
+    assert any("MODIFY COLUMN `normalized_markdown` MEDIUMTEXT" in sql for sql in executed_sql)
     assert any("MODIFY COLUMN `content_text` MEDIUMTEXT" in sql for sql in executed_sql)
 
 
 def test_knowledge_job_and_resource_governance_fields(db_session):
-    from backend.app.models import KnowledgeFile, KnowledgeJob, KnowledgeTopic
-
-    topic = KnowledgeTopic(user_id="default-user", name="Queue")
+    topic = KnowledgeTopic(
+        user_id="default-user",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        name="Queue",
+    )
     db_session.add(topic)
     db_session.flush()
 
     resource = KnowledgeFile(
         user_id="default-user",
+        tenant_id=TENANT_ID,
+        kb_uid=topic.kb_uid,
         topic_id=topic.id,
         title="Paper",
         original_filename="paper.pdf",
@@ -337,7 +410,7 @@ def test_knowledge_job_and_resource_governance_fields(db_session):
         file_size=123,
         md5="abc123",
         storage_path="/tmp/paper.pdf",
-        processing_status="queued",
+        processing_status="pending",
         governance_status="queued",
         governance_progress_current=1,
         governance_progress_total=10,
@@ -346,6 +419,10 @@ def test_knowledge_job_and_resource_governance_fields(db_session):
     db_session.flush()
 
     job = KnowledgeJob(
+        tenant_id=TENANT_ID,
+        kb_uid=topic.kb_uid,
+        file_uid=resource.file_uid,
+        idempotency_key="ingest:paper",
         job_type="ingest",
         resource_id=resource.id,
         item_id="item-1",
@@ -367,3 +444,158 @@ def test_knowledge_job_and_resource_governance_fields(db_session):
     assert loaded_resource.governance_status == "queued"
     assert loaded_resource.governance_progress_current == 1
     assert loaded_resource.governance_progress_total == 10
+
+
+def test_knowledge_topic_has_explicit_scope_and_public_uuid4(db_session):
+    topic = KnowledgeTopic(
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        name="Scoped knowledge base",
+    )
+    db_session.add(topic)
+    db_session.commit()
+
+    assert uuid.UUID(topic.kb_uid).version == 4
+    assert topic.status == ResourceStatus.ACTIVE
+    assert topic.version == 1
+    assert topic.active_index_generation is None
+    assert topic.active_graph_generation is None
+
+
+def test_file_item_and_chunk_use_public_scope_and_stage_defaults(db_session):
+    topic = KnowledgeTopic(
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        name="Scoped files",
+    )
+    db_session.add(topic)
+    db_session.flush()
+    item = KnowledgeItem(tenant_id=TENANT_ID, kb_uid=topic.kb_uid, title="Document")
+    db_session.add(item)
+    db_session.flush()
+    resource = KnowledgeFile(
+        tenant_id=TENANT_ID,
+        kb_uid=topic.kb_uid,
+        topic_id=topic.id,
+        item_id=item.id,
+        storage_uri="knowledge/document.md",
+        original_filename="document.md",
+    )
+    db_session.add(resource)
+    db_session.flush()
+    parent = KnowledgeChunk(
+        kb_uid=topic.kb_uid,
+        file_uid=resource.file_uid,
+        item_id=item.id,
+        generation="generation-1",
+        chunk_text="Parent",
+    )
+    db_session.add(parent)
+    db_session.flush()
+    child = KnowledgeChunk(
+        kb_uid=topic.kb_uid,
+        file_uid=resource.file_uid,
+        item_id=item.id,
+        generation="generation-1",
+        chunk_text="Child",
+        parent_id=parent.id,
+        parent_chunk_uid=parent.chunk_uid,
+        page_number=2,
+        char_start=10,
+        char_end=20,
+        token_start=3,
+        token_end=7,
+        title_path=["Section"],
+    )
+    db_session.add(child)
+    db_session.commit()
+
+    assert uuid.UUID(resource.file_uid).version == 4
+    assert uuid.UUID(parent.chunk_uid).version == 4
+    assert resource.tenant_id == item.tenant_id == TENANT_ID
+    assert resource.kb_uid == item.kb_uid == child.kb_uid == topic.kb_uid
+    assert resource.parse_status == StageStatus.PENDING
+    assert resource.index_status == StageStatus.PENDING
+    assert resource.graph_status == StageStatus.PENDING
+    assert child.generation == "generation-1"
+    assert child.parent_id == parent.id
+    assert child.page_number == 2
+    assert child.char_start == 10
+    assert child.token_end == 7
+
+
+def test_knowledge_job_supports_kb_wide_payload_and_defaults(db_session):
+    job = KnowledgeJob(
+        tenant_id=TENANT_ID,
+        kb_uid=KB_UID,
+        file_uid=None,
+        idempotency_key="graph:kb-wide:1",
+        payload={"generation": "generation-1"},
+        result={"accepted": True},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    assert job.file_uid is None
+    assert job.status == JobStatus.QUEUED
+    assert job.attempt == 0
+    assert job.attempts == 0
+    assert job.payload == {"generation": "generation-1"}
+    assert job.result == {"accepted": True}
+
+
+def test_knowledge_foundation_metadata_and_database_contract(db_session):
+    inspector = inspect(db_session.get_bind())
+    metadata_contract = {
+        "knowledge_topic": {
+            "required": {"kb_uid", "tenant_id", "owner_user_id", "status", "version"},
+            "unique": "uq_knowledge_topic_kb_uid",
+        },
+        "knowledge_file": {
+            "required": {"file_uid", "kb_uid", "tenant_id", "parse_status", "index_status", "graph_status"},
+            "unique": "uq_knowledge_file_file_uid",
+        },
+        "knowledge_chunk": {
+            "required": {"chunk_uid", "kb_uid", "file_uid", "generation"},
+            "unique": "uq_knowledge_chunk_uid_generation",
+        },
+        "knowledge_job": {
+            "required": {"tenant_id", "kb_uid", "idempotency_key", "status", "attempt", "attempts"},
+            "unique": "uq_knowledge_job_idempotency_key",
+        },
+    }
+
+    for table_name, contract in metadata_contract.items():
+        table = Base.metadata.tables[table_name]
+        assert all(not table.columns[name].nullable for name in contract["required"])
+        assert contract["unique"] in {constraint.name for constraint in table.constraints}
+        inspected_columns = {column["name"]: column for column in inspector.get_columns(table_name)}
+        assert all(not inspected_columns[name]["nullable"] for name in contract["required"])
+        assert contract["unique"] in {
+            constraint["name"] for constraint in inspector.get_unique_constraints(table_name)
+        }
+
+    parent_foreign_keys = list(KnowledgeChunk.__table__.columns["parent_id"].foreign_keys)
+    assert len(parent_foreign_keys) == 1
+    assert parent_foreign_keys[0].target_fullname == "knowledge_chunk.id"
+    assert parent_foreign_keys[0].ondelete == "SET NULL"
+
+
+def test_knowledge_status_enums_have_only_approved_values():
+    assert {status.value for status in ResourceStatus} == {"active", "deleting"}
+    assert {status.value for status in StageStatus} == {
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "stale",
+        "skipped",
+    }
+    assert {status.value for status in JobStatus} == {
+        "queued",
+        "claimed",
+        "running",
+        "succeeded",
+        "failed",
+        "canceled",
+    }
