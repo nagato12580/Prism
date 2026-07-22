@@ -61,9 +61,14 @@ def _mysql_test_url() -> str:
 
 def _run_alembic(*arguments: str) -> None:
     __tracebackhide__ = True
+    result = _run_alembic_process(*arguments)
+    assert result.returncode == 0, "Alembic command failed; inspect captured output locally"
+
+
+def _run_alembic_process(*arguments: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["DATABASE_URL"] = os.environ["MYSQL_TEST_DATABASE_URL"]
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-m", "alembic", "-c", str(ALEMBIC_INI), *arguments],
         cwd=ROOT,
         env=env,
@@ -71,7 +76,14 @@ def _run_alembic(*arguments: str) -> None:
         text=True,
         check=False,
     )
-    assert result.returncode == 0, "Alembic command failed; inspect captured output locally"
+
+
+def _assert_error_has_no_database_credentials(stderr: str) -> None:
+    __tracebackhide__ = True
+    database_url = os.environ["MYSQL_TEST_DATABASE_URL"]
+    password = make_url(database_url).password
+    if database_url in stderr or (password and password in stderr):
+        pytest.fail("Alembic error output leaked database credentials")
 
 
 def _reset_database(engine) -> None:
@@ -276,19 +288,11 @@ def test_legacy_upgrade_fails_when_item_scope_cannot_be_derived():
             connection.execute(text("CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id CHAR(36) NULL)"))
             connection.execute(text("INSERT INTO knowledge_item (id, title, user_id) VALUES ('orphan-item', 'Orphan', NULL)"))
 
-        env = os.environ.copy()
-        env["DATABASE_URL"] = os.environ["MYSQL_TEST_DATABASE_URL"]
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "-c", str(ALEMBIC_INI), "upgrade", "head"],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = _run_alembic_process("upgrade", "head")
         assert result.returncode != 0
         assert "Cannot migrate knowledge_item" in result.stderr
         assert "lack required scope fields" in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
     finally:
         _reset_database(engine)
         engine.dispose()
@@ -303,15 +307,21 @@ def test_partial_legacy_downgrade_preserves_preexisting_column_constraint_and_nu
             connection.execute(
                 text(
                     "CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
-                    "name VARCHAR(255) NOT NULL, kb_uid CHAR(36) NULL, "
+                    "name VARCHAR(255) NOT NULL, kb_uid VARCHAR(48) NULL, tenant_id VARCHAR(64) NULL, "
                     "CONSTRAINT uq_knowledge_topic_kb_uid UNIQUE (kb_uid))"
                 )
             )
             connection.execute(
-                text("INSERT INTO knowledge_topic (id, user_id, name, kb_uid) VALUES ('partial-topic', 'owner', 'Partial', NULL)")
+                text(
+                    "INSERT INTO knowledge_topic (id, user_id, name, kb_uid, tenant_id) "
+                    "VALUES ('partial-topic', 'owner', 'Partial', NULL, NULL)"
+                )
             )
 
         _run_alembic("upgrade", "head")
+        upgraded_columns = {column["name"]: column for column in inspect(engine).get_columns("knowledge_topic")}
+        assert upgraded_columns["kb_uid"]["type"].length == 48
+        assert upgraded_columns["tenant_id"]["type"].length == 64
         with engine.connect() as connection:
             migrated_uid = connection.execute(text("SELECT kb_uid FROM knowledge_topic WHERE id = 'partial-topic'")).scalar_one()
         _assert_uuid4(migrated_uid)
@@ -319,13 +329,60 @@ def test_partial_legacy_downgrade_preserves_preexisting_column_constraint_and_nu
         _run_alembic("downgrade", "base")
         inspector = inspect(engine)
         topic_columns = {column["name"]: column for column in inspector.get_columns("knowledge_topic")}
-        assert set(topic_columns) == {"id", "user_id", "name", "kb_uid"}
+        assert set(topic_columns) == {"id", "user_id", "name", "kb_uid", "tenant_id"}
         assert topic_columns["kb_uid"]["nullable"] is True
+        assert topic_columns["tenant_id"]["nullable"] is True
+        assert topic_columns["kb_uid"]["type"].length == 48
+        assert topic_columns["tenant_id"]["type"].length == 64
         assert "uq_knowledge_topic_kb_uid" in {
             constraint["name"] for constraint in inspector.get_unique_constraints("knowledge_topic")
         }
         with engine.connect() as connection:
             assert connection.execute(text("SELECT kb_uid FROM knowledge_topic WHERE id = 'partial-topic'")).scalar_one() == migrated_uid
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("conflicting_topic", "expected_error"),
+    [
+        (True, "map to conflicting file scopes"),
+        (False, "map to multiple files"),
+    ],
+)
+def test_legacy_upgrade_rejects_ambiguous_item_file_scope(conflicting_topic, expected_error):
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, name VARCHAR(255) NOT NULL)"))
+            connection.execute(text("INSERT INTO knowledge_topic (id, user_id, name) VALUES ('topic-a', 'tenant-a', 'A')"))
+            if conflicting_topic:
+                connection.execute(text("INSERT INTO knowledge_topic (id, user_id, name) VALUES ('topic-b', 'tenant-b', 'B')"))
+            connection.execute(text("CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id CHAR(36) NULL)"))
+            connection.execute(text("INSERT INTO knowledge_item (id, title, user_id) VALUES ('shared-item', 'Shared', NULL)"))
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL)"
+                )
+            )
+            second_topic = "topic-b" if conflicting_topic else "topic-a"
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_file (id, topic_id, item_id, md5) VALUES "
+                    "('file-a', 'topic-a', 'shared-item', 'a'), "
+                    "('file-b', :second_topic, 'shared-item', 'b')"
+                ),
+                {"second_topic": second_topic},
+            )
+
+        result = _run_alembic_process("upgrade", "head")
+        assert result.returncode != 0
+        assert expected_error in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
     finally:
         _reset_database(engine)
         engine.dispose()

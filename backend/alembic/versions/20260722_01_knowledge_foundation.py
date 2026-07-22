@@ -410,14 +410,13 @@ def _backfill_legacy_rows() -> None:
 
 def _enforce_required_columns() -> None:
     for table_name, names in REQUIRED_COLUMNS.items():
-        columns = {column.name: column for column in COLUMN_FACTORIES[table_name]()}
         existing_columns = {column["name"]: column for column in _inspector().get_columns(table_name)}
         for name in names:
             existing = existing_columns[name]
             op.alter_column(
                 table_name,
                 name,
-                existing_type=columns[name].type,
+                existing_type=existing["type"],
                 existing_server_default=sa.text(existing["default"]) if isinstance(existing["default"], str) else existing["default"],
                 existing_comment=existing.get("comment"),
                 nullable=False,
@@ -469,14 +468,13 @@ def downgrade() -> None:
             if name in existing_unique:
                 op.drop_constraint(name, table_name, type_="unique")
         nullability_changes = json.loads(state["nullability_changes"]) if isinstance(state["nullability_changes"], str) else state["nullability_changes"]
-        column_types = {column.name: column.type for column in COLUMN_FACTORIES[table_name]()}
         for name, nullable in nullability_changes.items():
             if name in existing_columns:
                 existing = next(column for column in _inspector().get_columns(table_name) if column["name"] == name)
                 op.alter_column(
                     table_name,
                     name,
-                    existing_type=column_types[name],
+                    existing_type=existing["type"],
                     existing_server_default=sa.text(existing["default"]) if isinstance(existing["default"], str) else existing["default"],
                     existing_comment=existing.get("comment"),
                     nullable=nullable,
