@@ -3,6 +3,8 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+import re
+from urllib.parse import quote
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -62,7 +64,12 @@ def _mysql_test_url() -> str:
 def _run_alembic(*arguments: str) -> None:
     __tracebackhide__ = True
     result = _run_alembic_process(*arguments)
-    assert result.returncode == 0, "Alembic command failed; inspect captured output locally"
+    if result.returncode != 0:
+        pytest.fail(
+            "Alembic command failed\n"
+            f"stdout:\n{_sanitize_alembic_output(result.stdout)}\n"
+            f"stderr:\n{_sanitize_alembic_output(result.stderr)}"
+        )
 
 
 def _run_alembic_process(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -84,6 +91,16 @@ def _assert_error_has_no_database_credentials(stderr: str) -> None:
     password = make_url(database_url).password
     if database_url in stderr or (password and password in stderr):
         pytest.fail("Alembic error output leaked database credentials")
+
+
+def _sanitize_alembic_output(output: str) -> str:
+    database_url = os.environ.get("MYSQL_TEST_DATABASE_URL", "")
+    password = make_url(database_url).password if database_url else None
+    secrets = {database_url, password, quote(password, safe="") if password else None}
+    sanitized = output
+    for secret in sorted((secret for secret in secrets if secret), key=len, reverse=True):
+        sanitized = sanitized.replace(secret, "[REDACTED]")
+    return re.sub(r"(mysql(?:\+[^:]+)?://[^:\s]+:)[^@\s]+@", r"\1[REDACTED]@", sanitized)
 
 
 def _reset_database(engine) -> None:
@@ -117,9 +134,29 @@ def test_configured_migration_database_must_be_exact_prism_test(monkeypatch):
         _mysql_test_url()
 
 
+def test_alembic_failure_output_is_sanitized(monkeypatch):
+    database_url = "mysql+pymysql://root:p%40ssword@localhost/prism_test"
+    monkeypatch.setenv("MYSQL_TEST_DATABASE_URL", database_url)
+    output = f"failed {database_url}; raw=p@ssword; encoded=p%40ssword"
+    sanitized = _sanitize_alembic_output(output)
+    assert database_url not in sanitized
+    assert "p@ssword" not in sanitized
+    assert "p%40ssword" not in sanitized
+    assert "[REDACTED]" in sanitized
+
+
 def test_alembic_configuration_points_to_backend_migrations():
     content = ALEMBIC_INI.read_text(encoding="utf-8")
     assert "script_location = backend/alembic" in content
+
+
+def test_knowledge_revision_rejects_offline_sql_with_clear_error():
+    _mysql_test_url()
+    result = _run_alembic_process("upgrade", "head", "--sql")
+    assert result.returncode != 0
+    assert "requires an online database connection" in result.stderr
+    assert "NoInspectionAvailable" not in result.stderr
+    _assert_error_has_no_database_credentials(result.stderr)
 
 
 def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
@@ -382,6 +419,100 @@ def test_legacy_upgrade_rejects_ambiguous_item_file_scope(conflicting_topic, exp
         result = _run_alembic_process("upgrade", "head")
         assert result.returncode != 0
         assert expected_error in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+def test_legacy_upgrade_rejects_same_name_unique_constraint_with_wrong_columns():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "name VARCHAR(255) NOT NULL, CONSTRAINT uq_knowledge_topic_kb_uid UNIQUE (name))"
+                )
+            )
+
+        result = _run_alembic_process("upgrade", "head")
+        assert result.returncode != 0
+        assert "uq_knowledge_topic_kb_uid" in result.stderr
+        assert "expected columns" in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
+        inspector = inspect(engine)
+        assert set(inspector.get_table_names()) == {"alembic_version", "knowledge_topic"}
+        assert {column["name"] for column in inspector.get_columns("knowledge_topic")} == {
+            "id",
+            "user_id",
+            "name",
+        }
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+def test_legacy_file_scope_uses_topic_tenant_when_child_user_differs():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, name VARCHAR(255) NOT NULL)"))
+            connection.execute(text("INSERT INTO knowledge_topic (id, user_id, name) VALUES ('topic', 'topic-tenant', 'Topic')"))
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_file (id, user_id, topic_id, md5) "
+                    "VALUES ('file', 'child-user', 'topic', 'md5')"
+                )
+            )
+
+        _run_alembic("upgrade", "head")
+        with engine.connect() as connection:
+            topic = connection.execute(text("SELECT tenant_id, kb_uid FROM knowledge_topic WHERE id = 'topic'")).mappings().one()
+            file_row = connection.execute(text("SELECT tenant_id, kb_uid FROM knowledge_file WHERE id = 'file'")).mappings().one()
+        assert file_row == topic
+        assert file_row["tenant_id"] == "topic-tenant"
+    finally:
+        _reset_database(engine)
+        engine.dispose()
+
+
+def test_legacy_upgrade_rejects_preexisting_file_scope_conflict():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE knowledge_topic (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, name VARCHAR(255) NOT NULL)"))
+            connection.execute(text("INSERT INTO knowledge_topic (id, user_id, name) VALUES ('topic', 'topic-tenant', 'Topic')"))
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_file (id CHAR(36) NOT NULL PRIMARY KEY, user_id CHAR(36) NULL, "
+                    "topic_id CHAR(36) NULL, item_id CHAR(36) NULL, md5 VARCHAR(32) NULL, "
+                    "tenant_id CHAR(36) NULL, kb_uid CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_file (id, user_id, topic_id, md5, tenant_id, kb_uid) "
+                    "VALUES ('file', 'child-user', 'topic', 'md5', 'wrong-tenant', 'wrong-kb')"
+                )
+            )
+
+        result = _run_alembic_process("upgrade", "head")
+        assert result.returncode != 0
+        assert "knowledge_file" in result.stderr
+        assert "conflict with canonical topic scope" in result.stderr
         _assert_error_has_no_database_credentials(result.stderr)
     finally:
         _reset_database(engine)

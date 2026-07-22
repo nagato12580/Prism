@@ -4,7 +4,7 @@ from collections.abc import Callable
 import json
 import uuid
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 
 
@@ -219,6 +219,34 @@ def _inspector() -> sa.Inspector:
     return sa.inspect(op.get_bind())
 
 
+def _require_online_connection() -> None:
+    if context.is_offline_mode():
+        raise RuntimeError(
+            "Knowledge foundation revision 20260722_01 requires an online database connection; "
+            "offline SQL generation is not supported"
+        )
+
+
+def _validate_preexisting_unique_constraints(existing_tables: set[str]) -> None:
+    inspector = _inspector()
+    for table_name, expected_constraints in UNIQUE_CONSTRAINTS.items():
+        if table_name not in existing_tables:
+            continue
+        existing = {
+            constraint["name"]: constraint["column_names"]
+            for constraint in inspector.get_unique_constraints(table_name)
+        }
+        for name, expected_columns in expected_constraints:
+            if name not in existing:
+                continue
+            actual_columns = existing[name]
+            if len(actual_columns) != len(expected_columns) or set(actual_columns) != set(expected_columns):
+                raise RuntimeError(
+                    f"Unique constraint {name} on {table_name} has columns {actual_columns}; "
+                    f"expected columns {expected_columns}"
+                )
+
+
 def _create_state_table(existing_tables: set[str]) -> None:
     op.create_table(
         STATE_TABLE,
@@ -312,6 +340,14 @@ def _require_resolved(table_name: str, columns: list[str]) -> None:
         raise RuntimeError(f"Cannot migrate {table_name}: {count} row(s) lack required scope fields: {joined}")
 
 
+def _reject_scope_conflicts(table_name: str, count_sql: str, canonical_source: str) -> None:
+    count = op.get_bind().execute(sa.text(count_sql)).scalar_one()
+    if count:
+        raise RuntimeError(
+            f"Cannot migrate {table_name}: {count} row(s) conflict with canonical {canonical_source} scope"
+        )
+
+
 def _reject_ambiguous_item_scope() -> None:
     count = op.get_bind().execute(
         sa.text(
@@ -338,22 +374,36 @@ def _backfill_legacy_rows() -> None:
     _backfill_public_uuid4("knowledge_topic", "kb_uid")
     _backfill_public_uuid4("knowledge_file", "file_uid")
     _backfill_public_uuid4("knowledge_chunk", "chunk_uid")
+    _reject_scope_conflicts(
+        "knowledge_topic",
+        "SELECT COUNT(*) FROM knowledge_topic WHERE "
+        "(tenant_id IS NOT NULL AND tenant_id <> COALESCE(user_id, 'default-user')) OR "
+        "(owner_user_id IS NOT NULL AND owner_user_id <> COALESCE(user_id, 'default-user'))",
+        "topic user",
+    )
     op.execute(
         sa.text(
             "UPDATE knowledge_topic SET "
-            "tenant_id = COALESCE(tenant_id, user_id, 'default-user'), "
-            "owner_user_id = COALESCE(owner_user_id, user_id, 'default-user'), "
+            "tenant_id = COALESCE(user_id, 'default-user'), "
+            "owner_user_id = COALESCE(user_id, 'default-user'), "
             "status = COALESCE(status, 'active'), version = COALESCE(version, 1), "
             "active_index_generation = COALESCE(active_index_generation, '0'), "
             "active_graph_generation = COALESCE(active_graph_generation, '0')"
         )
     )
     _require_resolved("knowledge_topic", ["kb_uid", "tenant_id", "owner_user_id"])
+    _reject_scope_conflicts(
+        "knowledge_file",
+        "SELECT COUNT(*) FROM knowledge_file f JOIN knowledge_topic t ON f.topic_id = t.id WHERE "
+        "(f.tenant_id IS NOT NULL AND f.tenant_id <> t.tenant_id) OR "
+        "(f.kb_uid IS NOT NULL AND f.kb_uid <> t.kb_uid)",
+        "topic",
+    )
     op.execute(
         sa.text(
             "UPDATE knowledge_file f LEFT JOIN knowledge_topic t ON f.topic_id = t.id SET "
-            "f.kb_uid = COALESCE(f.kb_uid, t.kb_uid), "
-            "f.tenant_id = COALESCE(f.tenant_id, f.user_id, t.tenant_id), "
+            "f.kb_uid = t.kb_uid, "
+            "f.tenant_id = t.tenant_id, "
             "f.storage_uri = COALESCE(f.storage_uri, f.file_path), "
             "f.original_filename = COALESCE(f.original_filename, f.original_name), "
             "f.content_sha256 = COALESCE(f.content_sha256, f.md5), "
@@ -367,37 +417,64 @@ def _backfill_legacy_rows() -> None:
     )
     _require_resolved("knowledge_file", ["file_uid", "kb_uid", "tenant_id"])
     _reject_ambiguous_item_scope()
+    _reject_scope_conflicts(
+        "knowledge_item",
+        "SELECT COUNT(*) FROM knowledge_item i JOIN ("
+        "SELECT item_id, MIN(kb_uid) kb_uid, MIN(tenant_id) tenant_id FROM knowledge_file "
+        "WHERE item_id IS NOT NULL GROUP BY item_id) f ON f.item_id = i.id WHERE "
+        "(i.tenant_id IS NOT NULL AND i.tenant_id <> f.tenant_id) OR "
+        "(i.kb_uid IS NOT NULL AND i.kb_uid <> f.kb_uid)",
+        "file/topic",
+    )
     op.execute(
         sa.text(
             "UPDATE knowledge_item i LEFT JOIN ("
             "SELECT item_id, MIN(kb_uid) kb_uid, MIN(tenant_id) tenant_id FROM knowledge_file "
             "WHERE item_id IS NOT NULL GROUP BY item_id) f ON f.item_id = i.id SET "
-            "i.kb_uid = COALESCE(i.kb_uid, f.kb_uid), "
-            "i.tenant_id = COALESCE(i.tenant_id, i.user_id, f.tenant_id), "
+            "i.kb_uid = f.kb_uid, "
+            "i.tenant_id = f.tenant_id, "
             "i.content_version = COALESCE(i.content_version, 1)"
         )
     )
     _require_resolved("knowledge_item", ["kb_uid", "tenant_id"])
     _reject_ambiguous_chunk_file()
+    _reject_scope_conflicts(
+        "knowledge_chunk",
+        "SELECT COUNT(*) FROM knowledge_chunk c JOIN knowledge_item i ON c.item_id = i.id "
+        "JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file WHERE item_id IS NOT NULL "
+        "GROUP BY item_id) f ON f.item_id = i.id WHERE "
+        "(c.kb_uid IS NOT NULL AND c.kb_uid <> i.kb_uid) OR "
+        "(c.file_uid IS NOT NULL AND c.file_uid <> f.file_uid)",
+        "item/file/topic",
+    )
     op.execute(
         sa.text(
             "UPDATE knowledge_chunk c JOIN knowledge_item i ON c.item_id = i.id "
             "LEFT JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file "
             "WHERE item_id IS NOT NULL GROUP BY item_id) f ON f.item_id = i.id SET "
-            "c.kb_uid = COALESCE(c.kb_uid, i.kb_uid), "
-            "c.file_uid = COALESCE(c.file_uid, f.file_uid), "
+            "c.kb_uid = i.kb_uid, "
+            "c.file_uid = f.file_uid, "
             "c.generation = COALESCE(c.generation, '0')"
         )
     )
     _require_resolved("knowledge_chunk", ["chunk_uid", "kb_uid", "file_uid", "generation"])
+    _reject_scope_conflicts(
+        "knowledge_job",
+        "SELECT COUNT(*) FROM knowledge_job j LEFT JOIN knowledge_file f ON j.resource_id = f.id "
+        "LEFT JOIN knowledge_item i ON j.item_id = i.id LEFT JOIN knowledge_topic t ON j.topic_id = t.id WHERE "
+        "(j.tenant_id IS NOT NULL AND j.tenant_id <> COALESCE(f.tenant_id, i.tenant_id, t.tenant_id)) OR "
+        "(j.kb_uid IS NOT NULL AND j.kb_uid <> COALESCE(f.kb_uid, i.kb_uid, t.kb_uid)) OR "
+        "(j.file_uid IS NOT NULL AND j.file_uid <> f.file_uid)",
+        "file/item/topic",
+    )
     op.execute(
         sa.text(
             "UPDATE knowledge_job j LEFT JOIN knowledge_file f ON j.resource_id = f.id "
             "LEFT JOIN knowledge_item i ON j.item_id = i.id "
             "LEFT JOIN knowledge_topic t ON j.topic_id = t.id SET "
-            "j.tenant_id = COALESCE(j.tenant_id, f.tenant_id, i.tenant_id, t.tenant_id), "
-            "j.kb_uid = COALESCE(j.kb_uid, f.kb_uid, i.kb_uid, t.kb_uid), "
-            "j.file_uid = COALESCE(j.file_uid, f.file_uid), "
+            "j.tenant_id = COALESCE(f.tenant_id, i.tenant_id, t.tenant_id), "
+            "j.kb_uid = COALESCE(f.kb_uid, i.kb_uid, t.kb_uid), "
+            "j.file_uid = f.file_uid, "
             "j.attempt = COALESCE(j.attempt, j.attempts, 0), "
             "j.attempts = COALESCE(j.attempts, j.attempt, 0), j.max_attempts = COALESCE(j.max_attempts, 3), "
             "j.status = COALESCE(j.status, 'queued'), j.priority = COALESCE(j.priority, 100), "
@@ -432,7 +509,9 @@ def _create_unique_constraints() -> None:
 
 
 def upgrade() -> None:
+    _require_online_connection()
     existing_tables = set(_inspector().get_table_names())
+    _validate_preexisting_unique_constraints(existing_tables)
     if STATE_TABLE not in existing_tables:
         _create_state_table(existing_tables)
 
@@ -449,6 +528,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _require_online_connection()
     bind = op.get_bind()
     if STATE_TABLE not in _inspector().get_table_names():
         raise RuntimeError(f"{STATE_TABLE} is required to safely downgrade this revision")
