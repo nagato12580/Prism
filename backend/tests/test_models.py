@@ -621,6 +621,19 @@ def test_original_filename_uses_legacy_database_column_as_bidirectional_alias(db
     assert "original_filename" not in column_names
 
 
+def test_legacy_user_id_columns_have_no_client_or_server_defaults():
+    model_columns = [
+        (KnowledgeTopic, "user_id"),
+        (KnowledgeItem, "user_id"),
+        (KnowledgeFile, "user_id"),
+    ]
+    for model, column_name in model_columns:
+        column = model.__table__.columns[column_name]
+        assert column.default is None, f"{model.__name__}.{column_name} has a Python/client default"
+        assert column.server_default is None, f"{model.__name__}.{column_name} has a server default"
+        assert column.nullable, f"{model.__name__}.{column_name} is not nullable"
+
+
 def test_status_columns_use_plain_strings_without_database_check_constraints():
     status_columns = [
         KnowledgeTopic.__table__.columns["status"],

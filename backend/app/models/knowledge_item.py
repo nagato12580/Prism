@@ -76,7 +76,7 @@ class KnowledgeItem(Base):
     tags = Column(JSON, comment="Tag list")
     category = Column(String(255), comment="Category path")
     status = Column(String(24), default="published", comment="draft/published/archived")
-    user_id = Column(CHAR(36), default="default-user", comment="User id")
+    user_id = Column(CHAR(36), nullable=True, comment="Legacy user id")
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
