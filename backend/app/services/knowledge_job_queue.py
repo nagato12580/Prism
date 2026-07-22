@@ -3,9 +3,10 @@ from dataclasses import dataclass, field
 
 from backend.app.models import KnowledgeFile, KnowledgeJob
 from backend.app.utils.time import local_now
+from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 
 
-ACTIVE_STATUSES = {"queued", "processing"}
+ACTIVE_STATUSES = {"queued", "claimed", "running"}
 ELIGIBLE_INGEST_STATUSES = {"completed", "failed"}
 STAGE_CREATED = "created"
 STAGE_ENQUEUED = "enqueued"
@@ -48,10 +49,13 @@ def _enqueue_job_message(db, redis_client, queue_name, job):
         return job
 
     _push(redis_client, queue_name, job.id)
-    # Delivery is at-least-once: if this commit fails after Redis accepts the
-    # message, a later retry may push again. Workers must claim jobs idempotently.
-    job.stage = STAGE_ENQUEUED
-    db.commit()
+    # Fire-and-forget: Redis failure leaves the Job queued; reconciliation
+    # republishes queued Jobs whose available_at <= now.
+    try:
+        job.stage = STAGE_ENQUEUED
+        db.commit()
+    except Exception:
+        db.rollback()
     db.refresh(job)
     return job
 
