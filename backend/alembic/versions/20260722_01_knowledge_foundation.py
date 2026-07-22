@@ -441,10 +441,10 @@ def _backfill_legacy_rows() -> None:
     _reject_scope_conflicts(
         "knowledge_chunk",
         "SELECT COUNT(*) FROM knowledge_chunk c JOIN knowledge_item i ON c.item_id = i.id "
-        "JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file WHERE item_id IS NOT NULL "
+        "LEFT JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file WHERE item_id IS NOT NULL "
         "GROUP BY item_id) f ON f.item_id = i.id WHERE "
         "(c.kb_uid IS NOT NULL AND c.kb_uid <> i.kb_uid) OR "
-        "(c.file_uid IS NOT NULL AND c.file_uid <> f.file_uid)",
+        "(f.item_id IS NOT NULL AND c.file_uid IS NOT NULL AND c.file_uid <> f.file_uid)",
         "item/file/topic",
     )
     op.execute(

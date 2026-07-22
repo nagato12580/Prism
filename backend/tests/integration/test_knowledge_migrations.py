@@ -600,3 +600,53 @@ def test_partial_legacy_preserves_complete_scope_when_parent_relationships_are_m
     finally:
         _reset_database(engine)
         engine.dispose()
+
+
+def test_legacy_upgrade_rejects_chunk_kb_conflict_when_item_exists_without_file():
+    database_url = _mysql_test_url()
+    engine = create_engine(database_url)
+    item_kb_uid = str(uuid.uuid4())
+    chunk_kb_uid = str(uuid.uuid4())
+    try:
+        _reset_database(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_item (id CHAR(36) NOT NULL PRIMARY KEY, title VARCHAR(255) NOT NULL, "
+                    "user_id CHAR(36) NULL, kb_uid CHAR(36) NULL, tenant_id CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_item (id, title, kb_uid, tenant_id) "
+                    "VALUES ('item', 'Item', :kb_uid, 'tenant')"
+                ),
+                {"kb_uid": item_kb_uid},
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE knowledge_chunk (id CHAR(36) NOT NULL PRIMARY KEY, item_id CHAR(36) NULL, "
+                    "chunk_text TEXT NOT NULL, chunk_uid CHAR(36) NULL, kb_uid CHAR(36) NULL, "
+                    "file_uid CHAR(36) NULL, generation CHAR(36) NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_chunk (id, item_id, chunk_text, chunk_uid, kb_uid, file_uid, generation) "
+                    "VALUES ('chunk', 'item', 'Text', :chunk_uid, :kb_uid, :file_uid, 'legacy-g')"
+                ),
+                {
+                    "chunk_uid": str(uuid.uuid4()),
+                    "kb_uid": chunk_kb_uid,
+                    "file_uid": str(uuid.uuid4()),
+                },
+            )
+
+        result = _run_alembic_process("upgrade", "head")
+        assert result.returncode != 0
+        assert "knowledge_chunk" in result.stderr
+        assert "conflict with canonical item/file/topic scope" in result.stderr
+        _assert_error_has_no_database_credentials(result.stderr)
+    finally:
+        _reset_database(engine)
+        engine.dispose()
