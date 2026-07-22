@@ -105,21 +105,31 @@ def _merge_to_chunks(
     return chunks
 
 
-def chunk_parent_child(text: str) -> list[ParentChunk]:
+def chunk_parent_child(
+    text: str,
+    parent_tokens: int | None = None,
+    child_tokens: int | None = None,
+    overlap_tokens: int | None = None,
+) -> list[ParentChunk]:
     """Split text into parent chunks and child chunks."""
     text = text.strip()
     if not text:
         return []
     sentences = _split_sentences(text)
-    parent_contents = _merge_to_chunks(sentences, settings.PARENT_CHUNK_TOKENS)
+    parent_content_chunks = _merge_to_chunks(
+        sentences,
+        parent_tokens if parent_tokens is not None else settings.PARENT_CHUNK_TOKENS,
+    )
     result: list[ParentChunk] = []
-    for pc in parent_contents:
+    for pc in parent_content_chunks:
         parent = ParentChunk(pc.content, pc.page_start, pc.page_end)
         child_sents = _split_sentences(pc.content)
         parent.children = _merge_to_chunks(
             child_sents,
-            settings.CHILD_CHUNK_TOKENS,
-            settings.CHILD_OVERLAP_RATIO,
+            child_tokens if child_tokens is not None else settings.CHILD_CHUNK_TOKENS,
+            (overlap_tokens / child_tokens if overlap_tokens is not None and child_tokens and child_tokens > 0 else 0)
+            if overlap_tokens is not None
+            else settings.CHILD_OVERLAP_RATIO,
         )
         for child in parent.children:
             if child.page_start is None:
