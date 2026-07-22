@@ -70,6 +70,7 @@ def test_v1_update_conflict_on_wrong_version():
         json={"name": "First", "version": 999},
     )
     assert r1.status_code == 409
+    assert r1.json()["error"]["code"] == "VERSION_CONFLICT"
 
 
 def test_v1_forbidden_actor_cannot_access_others_kb():
@@ -82,3 +83,65 @@ def test_v1_forbidden_actor_cannot_access_others_kb():
     resp = client.get(f"/api/v1/knowledge-bases/{kb_uid}", headers=bob_headers)
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "KNOWLEDGE_ACCESS_DENIED"
+
+
+def test_v1_delete_kb_tombstones_resource():
+    client = _client()
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "Delete Me"})
+    kb_uid = created.json()["kb_uid"]
+
+    deleted = client.delete(f"/api/v1/knowledge-bases/{kb_uid}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleting"
+
+    # Should not appear in list after deletion
+    listed = client.get("/api/v1/knowledge-bases", headers=headers)
+    uids = [item["kb_uid"] for item in listed.json()["items"]]
+    assert kb_uid not in uids
+
+    # Direct access should be not found
+    resp = client.get(f"/api/v1/knowledge-bases/{kb_uid}", headers=headers)
+    assert resp.status_code == 404
+
+
+def test_v1_list_supports_cursor_pagination():
+    client = _client()
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+
+    import uuid
+    prefix = f"cursor-test-{uuid.uuid4().hex[:8]}"
+    for i in range(5):
+        client.post("/api/v1/knowledge-bases", headers=headers, json={"name": f"{prefix}-{i}"})
+
+    page1 = client.get("/api/v1/knowledge-bases", headers=headers, params={"limit": 2})
+    assert page1.status_code == 200
+    p1 = page1.json()
+    assert len(p1["items"]) == 2
+    assert p1["cursor"] is not None
+
+    page2 = client.get("/api/v1/knowledge-bases", headers=headers, params={"cursor": p1["cursor"], "limit": 2})
+    p2 = page2.json()
+    assert len(p2["items"]) == 2
+    assert p2["cursor"] is not None
+
+    all_uids = {item["kb_uid"] for item in p1["items"]} | {item["kb_uid"] for item in p2["items"]}
+    page3 = client.get("/api/v1/knowledge-bases", headers=headers, params={"cursor": p2["cursor"], "limit": 2})
+    p3 = page3.json()
+    for item in p3["items"]:
+        assert item["kb_uid"] not in all_uids
+
+
+def test_v1_update_version_bumps_after_success():
+    client = _client()
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "VB"})
+    body = created.json()
+    assert body["version"] == 1
+
+    updated = client.patch(
+        f"/api/v1/knowledge-bases/{body['kb_uid']}",
+        headers=headers,
+        json={"name": "VB2", "version": 1},
+    )
+    assert updated.json()["version"] == 2
