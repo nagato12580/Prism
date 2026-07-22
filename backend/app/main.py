@@ -6,15 +6,17 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, engine, get_db
 from .utils.auto_migrate import auto_migrate
 from .api import register_routers
+from .api.errors import ApiProblem, api_problem_handler
 from .services.memory_scheduler import MemoryScheduler
 # 导入所有模型，确保注册到 Base.metadata
 from .models import *  # noqa
@@ -146,6 +148,15 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
     )
+
+    app.add_exception_handler(ApiProblem, api_problem_handler)
+
+    @app.middleware("http")
+    async def trace_middleware(request: Request, call_next):
+        request.state.trace_id = str(uuid.uuid4())
+        response = await call_next(request)
+        response.headers["X-Trace-ID"] = request.state.trace_id
+        return response
 
     register_routers(app)
 
