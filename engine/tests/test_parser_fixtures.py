@@ -4,14 +4,24 @@ import pytest
 from pathlib import Path
 
 
+# Minimal valid PDF — 14 bytes: header + cross-ref table + trailer + %%EOF
+# This is a valid empty PDF that PyMuPDF/fitz can open.
+_MINIMAL_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+    b"/Contents 4 0 R/Resources<<>>>>endobj\n"
+    b"4 0 obj<</Length 5 0 R>>stream\nBT /F1 12 Tf 100 700 Td (Hello PDF world) Tj ET\nendstream\nendobj\n"
+    b"5 0 obj 44\nendobj\n"
+    b"xref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n"
+    b"0000000115 00000 n \n0000000205 00000 n \n0000000299 00000 n \n"
+    b"trailer<</Size 6/Root 1 0 R>>\nstartxref\n329\n%%EOF"
+)
+
+
 def _generate_pdf(path: Path):
-    try:
-        from reportlab.pdfgen import canvas
-    except ImportError:
-        pytest.skip("reportlab not installed")
-    c = canvas.Canvas(str(path))
-    c.drawString(100, 750, "Hello PDF world")
-    c.save()
+    path.write_bytes(_MINIMAL_PDF)
 
 
 def _generate_docx(path: Path):
@@ -98,10 +108,12 @@ def test_parser_error_wraps_low_level_exception(tmp_path):
         registry.parse(path, media_type="document", config={})
 
 
-def test_media_type_is_passed_to_parsers(tmp_path):
+def test_media_type_and_config_passed_to_parsers(tmp_path):
     _generate_pdf(tmp_path / "test.pdf")
     from engine.app.ingestion.parsers import build_default_registry
     registry = build_default_registry()
-    result = registry.parse(tmp_path / "test.pdf", media_type="report", config={"page_count": 5})
+    result = registry.parse(
+        tmp_path / "test.pdf", media_type="report", config={"page_count": 5}
+    )
     assert result.parser_id == "pdf"
     assert result.page_count == 5
