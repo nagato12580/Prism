@@ -12,6 +12,11 @@ STAGE_CREATED = "created"
 STAGE_ENQUEUED = "enqueued"
 
 
+def _idempotency_key(resource, job_type):
+    revision = resource.last_modified_at or resource.created_at or local_now()
+    return f"legacy:{resource.id}:{job_type}:{revision.isoformat()}"
+
+
 @dataclass
 class BatchEnqueueResult:
     queued: int = 0
@@ -79,6 +84,10 @@ def enqueue_ingest_job(db, redis_client, resource_id, *, queue_name):
         return _enqueue_job_message(db, redis_client, queue_name, active_job)
 
     job = KnowledgeJob(
+        tenant_id=resource.tenant_id,
+        kb_uid=resource.kb_uid,
+        file_uid=resource.file_uid,
+        idempotency_key=_idempotency_key(resource, "ingest"),
         job_type="ingest",
         resource_id=resource.id,
         item_id=resource.item_id,
@@ -115,6 +124,10 @@ def enqueue_governance_job(db, redis_client, resource_id, *, queue_name):
         return _enqueue_job_message(db, redis_client, queue_name, active_job)
 
     job = KnowledgeJob(
+        tenant_id=resource.tenant_id,
+        kb_uid=resource.kb_uid,
+        file_uid=resource.file_uid,
+        idempotency_key=_idempotency_key(resource, "governance"),
         job_type="governance",
         resource_id=resource.id,
         item_id=resource.item_id,

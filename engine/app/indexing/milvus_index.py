@@ -31,12 +31,14 @@ class MilvusGenerationIndex:
         fields = (
             "tenant_id", "kb_uid", "file_uid", "item_id", "chunk_uid",
             "source_type", "generation", "embedding_model_version", "content",
-            "embedding",
+            "indexed_at", "embedding",
         )
+        schema = getattr(self.collection, "schema", None)
+        schema_fields = {field.name for field in schema.fields} if schema else set(fields)
         payload = [
             {
                 "id": f'{row["chunk_uid"]}:{row["generation"]}',
-                **{field: row[field] for field in fields},
+                **{field: row[field] for field in fields if field in schema_fields},
             }
             for row in rows
         ]
@@ -61,6 +63,16 @@ class MilvusGenerationIndex:
 
     def delete_generation(self, scope):
         result = self.collection.delete(_scope_expr(scope), timeout=15)
+        self.collection.flush(timeout=15)
+        return result
+
+    def delete_file(self, tenant_id, kb_uid, file_uid):
+        expr = (
+            f'tenant_id == "{_literal(tenant_id)}" and '
+            f'kb_uid == "{_literal(kb_uid)}" and '
+            f'file_uid == "{_literal(file_uid)}"'
+        )
+        result = self.collection.delete(expr, timeout=15)
         self.collection.flush(timeout=15)
         return result
 
@@ -93,6 +105,7 @@ def ensure_collection(
         FieldSchema("source_type", DataType.VARCHAR, max_length=32),
         FieldSchema("generation", DataType.VARCHAR, max_length=36),
         FieldSchema("embedding_model_version", DataType.VARCHAR, max_length=32),
+        FieldSchema("indexed_at", DataType.VARCHAR, max_length=40),
         FieldSchema("content", DataType.VARCHAR, max_length=65535),
         FieldSchema("embedding", DataType.FLOAT_VECTOR, dim=profile.dimension),
     ]

@@ -15,6 +15,42 @@ from engine.app.ingestion.parsers import build_default_registry
 from engine.app.ingestion.presets import chunk_with_preset
 
 
+def handle_delete(job_id, worker_id, db_session, job_svc, cleanup):
+    lease = timedelta(seconds=120)
+    try:
+        job = job_svc.claim(job_id, worker_id, lease)
+        if job is None:
+            return {"status": "skipped"}
+        job_svc.start(job_id, worker_id)
+        result = cleanup.run(job.file_uid, job_id=job_id)
+        if result.status != "succeeded":
+            job_svc.fail(
+                job_id,
+                worker_id,
+                "DELETE_CLEANUP_ERROR",
+                result.error or "cleanup failed",
+                True,
+            )
+            return {
+                "status": "failed",
+                "checkpoint": result.checkpoint,
+                "error": result.error,
+            }
+        job_svc.succeed(job_id, worker_id, {"checkpoint": result.checkpoint})
+        return {"status": "completed", "checkpoint": result.checkpoint}
+    except Exception as exc:
+        db_session.rollback()
+        try:
+            job_svc.fail(job_id, worker_id, "DELETE_CLEANUP_ERROR", str(exc), True)
+        except Exception:
+            pass
+        return {"status": "failed", "error": str(exc)}
+    finally:
+        close = getattr(cleanup, "close", None)
+        if close:
+            close()
+
+
 def handle_parse(
     job_id: str,
     worker_id: str,

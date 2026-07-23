@@ -169,3 +169,99 @@ def test_parse_honors_cancel_request_before_parsing(handler_db, tmp_path):
     assert handler_db.get(type(job), job.id).status == "canceled"
     assert handler_db.query(KnowledgeItem).count() == 0
     del os.environ["KNOWLEDGE_STORAGE_ROOT"]
+
+
+def test_delete_handler_completes_checkpointed_cleanup(handler_db):
+    from backend.app.models import KnowledgeJob
+    from backend.app.services.knowledge_cleanup import CleanupResult
+    from engine.app.jobs.knowledge_handlers import handle_delete
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Delete KB")
+    handler_db.add(topic)
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("delete", "t1", topic.kb_uid, "file-delete", {}),
+        "delete-handler",
+    )
+
+    class FakeCleanup:
+        def run(self, file_uid, *, job_id):
+            assert file_uid == "file-delete"
+            assert job_id == job.id
+            return CleanupResult("succeeded", "rows_deleted")
+
+    result = handle_delete(job.id, "worker-1", handler_db, jobs, FakeCleanup())
+
+    assert result == {"status": "completed", "checkpoint": "rows_deleted"}
+    assert handler_db.get(KnowledgeJob, job.id).status == "succeeded"
+
+
+def test_delete_handler_closes_cleanup_on_success(handler_db):
+    from backend.app.services.knowledge_cleanup import CleanupResult
+    from engine.app.jobs.knowledge_handlers import handle_delete
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Close cleanup")
+    handler_db.add(topic); handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(JobCommand("delete", "t1", topic.kb_uid, "f1", {}), "close-cleanup")
+    class Cleanup:
+        closed = False
+        def run(self, file_uid, *, job_id): return CleanupResult("succeeded", "rows_deleted")
+        def close(self): self.closed = True
+    cleanup = Cleanup()
+    handle_delete(job.id, "w1", handler_db, jobs, cleanup)
+    assert cleanup.closed is True
+
+
+def test_delete_handler_closes_cleanup_on_failure(handler_db):
+    from engine.app.jobs.knowledge_handlers import handle_delete
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Close failed cleanup")
+    handler_db.add(topic); handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(JobCommand("delete", "t1", topic.kb_uid, "f2", {}), "close-failed-cleanup")
+    class Cleanup:
+        closed = False
+        def run(self, file_uid, *, job_id): raise RuntimeError("down")
+        def close(self): self.closed = True
+    cleanup = Cleanup()
+    assert handle_delete(job.id, "w1", handler_db, jobs, cleanup)["status"] == "failed"
+    assert cleanup.closed is True
+
+
+def test_delete_handler_closes_cleanup_when_claim_is_skipped(handler_db):
+    from engine.app.jobs.knowledge_handlers import handle_delete
+    class Jobs:
+        def claim(self, *args): return None
+    class Cleanup:
+        closed = False
+        def close(self): self.closed = True
+    cleanup = Cleanup()
+    assert handle_delete("missing", "w1", handler_db, Jobs(), cleanup) == {"status": "skipped"}
+    assert cleanup.closed is True
+
+
+def test_worker_dispatches_delete_job_to_cleanup_handler(handler_db, monkeypatch):
+    from engine.app.jobs import worker
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Delete dispatch")
+    handler_db.add(topic)
+    handler_db.commit()
+    job = KnowledgeJobService(handler_db).create(
+        JobCommand("delete", "t1", topic.kb_uid, "file-delete", {}),
+        "delete-dispatch",
+    )
+    cleanup = object()
+    called = []
+    monkeypatch.setattr(worker, "_build_cleanup_service", lambda db, received: cleanup)
+    monkeypatch.setattr(
+        worker,
+        "handle_delete",
+        lambda job_id, worker_id, db, jobs, received_cleanup: called.append(
+            (job_id, worker_id, received_cleanup)
+        ) or {"status": "completed"},
+    )
+
+    result = worker.dispatch_typed_job(handler_db, job.id, "worker-1")
+
+    assert result == {"status": "completed"}
+    assert called == [(job.id, "worker-1", cleanup)]

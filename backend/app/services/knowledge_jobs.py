@@ -33,7 +33,7 @@ class KnowledgeJobService:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, command: JobCommand, idempotency_key: str) -> KnowledgeJob:
+    def create(self, command: JobCommand, idempotency_key: str, *, commit: bool = True) -> KnowledgeJob:
         existing = (
             self.db.query(KnowledgeJob)
             .filter_by(idempotency_key=idempotency_key)
@@ -50,6 +50,19 @@ class KnowledgeJobService:
             idempotency_key=idempotency_key,
             status=JobStatus.QUEUED.value,
         )
+        if not commit:
+            try:
+                with self.db.begin_nested():
+                    self.db.add(job)
+                    self.db.flush()
+            except IntegrityError:
+                return (
+                    self.db.query(KnowledgeJob)
+                    .filter_by(idempotency_key=idempotency_key)
+                    .with_for_update()
+                    .one()
+                )
+            return job
         self.db.add(job)
         try:
             self.db.commit()

@@ -21,6 +21,19 @@ class FakeMilvusCollection:
         self.deleted.append(expr)
 
 
+def test_milvus_write_omits_indexed_at_for_legacy_schema():
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex
+    fields = ("id", "tenant_id", "kb_uid", "file_uid", "item_id", "chunk_uid",
+              "source_type", "generation", "embedding_model_version", "content", "embedding")
+    collection = FakeMilvusCollection()
+    collection.schema = type("Schema", (), {"fields": [type("F", (), {"name": n})() for n in fields]})()
+    row = {name: name for name in fields if name != "id"}
+    row["indexed_at"] = "2026-07-23T00:00:00"
+    row["embedding"] = [0.1]
+    MilvusGenerationIndex(collection).write([row])
+    assert "indexed_at" not in collection.inserted[0]
+
+
 def test_milvus_generation_index_uses_native_full_scope_expression():
     from engine.app.indexing.milvus_index import MilvusGenerationIndex
 
@@ -72,7 +85,8 @@ def test_es_generation_index_routes_and_filters_by_full_scope():
         "tenant_id": "tenant-a", "kb_uid": "kb-a", "file_uid": "file-a",
         "item_id": "item-a", "chunk_uid": "chunk-a", "source_type": "document",
         "generation": "gen-a", "embedding_model_version": "profile-a",
-        "content": "text", "embedding": [0.1, 0.2],
+        "content": "text", "indexed_at": "2026-07-23T00:00:00",
+        "embedding": [0.1, 0.2],
     }
 
     assert index.write([row]) == 1

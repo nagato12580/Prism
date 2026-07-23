@@ -366,11 +366,15 @@ def project_asset_unit_entities(db, graph, asset_unit_id: str, user_id: str = "d
 def _source_node_for_pku(db, pku: PersonalKnowledgeUnit, user_id: str) -> dict:
     item_id = pku.source_id
     title = pku.source_id
+    tenant_id = ""
+    kb_uid = ""
 
     if pku.source_kind == "document_chunk":
         chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == pku.source_id).first()
         if chunk:
             item_id = chunk.item_id
+            tenant_id = chunk.tenant_id
+            kb_uid = chunk.kb_uid
             item = (
                 db.query(KnowledgeItem)
                 .filter(
@@ -384,6 +388,8 @@ def _source_node_for_pku(db, pku: PersonalKnowledgeUnit, user_id: str) -> dict:
 
     return {
         "id": f"{pku.source_kind}:{pku.source_id}",
+        "tenant_id": tenant_id,
+        "kb_uid": kb_uid,
         "source_kind": pku.source_kind,
         "source_id": pku.source_id,
         "item_id": item_id,
@@ -394,11 +400,15 @@ def _source_node_for_pku(db, pku: PersonalKnowledgeUnit, user_id: str) -> dict:
 def _source_node_for_mention(db, mention: EntityMention, user_id: str) -> dict:
     item_id = mention.item_id or mention.source_id
     title = mention.item_id or mention.source_id
+    tenant_id = ""
+    kb_uid = ""
 
     if mention.source_kind == "document_chunk":
         chunk = db.query(KnowledgeChunk).filter(KnowledgeChunk.id == mention.source_id).first()
         if chunk:
             item_id = chunk.item_id
+            tenant_id = chunk.tenant_id
+            kb_uid = chunk.kb_uid
             item = (
                 db.query(KnowledgeItem)
                 .filter(
@@ -412,6 +422,8 @@ def _source_node_for_mention(db, mention: EntityMention, user_id: str) -> dict:
 
     return {
         "id": f"{mention.source_kind}:{mention.source_id}",
+        "tenant_id": tenant_id,
+        "kb_uid": kb_uid,
         "source_kind": mention.source_kind,
         "source_id": mention.source_id,
         "item_id": item_id,
@@ -422,6 +434,8 @@ def _source_node_for_mention(db, mention: EntityMention, user_id: str) -> dict:
 def _source_node_for_asset_unit(unit: PersonalAssetUnit) -> dict:
     return {
         "id": f"personal_asset_unit:{unit.id}",
+        "tenant_id": "",
+        "kb_uid": "",
         "source_kind": "personal_asset_unit",
         "source_id": unit.id,
         "item_id": unit.id,
@@ -440,10 +454,13 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
     Returns the number of edges projected. Scoped to one item (no full reproject).
     """
     edges = 0
+    item = db.query(KnowledgeItem).filter_by(id=item_id).one_or_none()
+    if item is None:
+        return 0
 
     # Clean this item's previous Source nodes/edges so re-ingest (fresh chunk
     # UUIDs) leaves no zombie Sources. Idempotent: delete then re-project.
-    graph.delete_item_sources(item_id)
+    graph.delete_item_sources(item.tenant_id, item.kb_uid, item_id)
 
     mentions = (
         db.query(EntityMention)

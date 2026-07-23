@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from backend.app.models import KnowledgeChunk, KnowledgeFile, KnowledgeTopic
+from backend.app.utils.time import local_now
 from engine.app.indexing.profiles import EmbeddingProfile
 from engine.app.ingestion.vectorizer import embed_texts
 
@@ -94,6 +95,7 @@ class GenerationPublisher:
                     "title": chunk.item.title if chunk.item else None,
                     "page_start": chunk.page_number,
                     "page_end": chunk.page_number,
+                    "indexed_at": local_now().isoformat(),
                     "embedding": vector,
                 }
                 for chunk, vector in zip(chunks, vectors, strict=True)

@@ -32,6 +32,7 @@ V2_PROPERTIES = {
     "title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
     "page_start": {"type": "integer"},
     "page_end": {"type": "integer"},
+    "indexed_at": {"type": "date"},
 }
 
 
@@ -106,6 +107,25 @@ class ElasticsearchGenerationIndex:
         )
         if response.get("timed_out") or response.get("failures"):
             raise RuntimeError("Elasticsearch generation cleanup failed")
+        return response
+
+    def delete_file(self, tenant_id, kb_uid, file_uid):
+        response = self.client.delete_by_query(
+            index=self.index_name,
+            routing=kb_uid,
+            refresh=True,
+            query={
+                "bool": {
+                    "filter": [
+                        {"term": {"tenant_id": tenant_id}},
+                        {"term": {"kb_uid": kb_uid}},
+                        {"term": {"file_uid": file_uid}},
+                    ]
+                }
+            },
+        )
+        if response.get("timed_out") or response.get("failures"):
+            raise RuntimeError("Elasticsearch file cleanup failed")
         return response
 
 

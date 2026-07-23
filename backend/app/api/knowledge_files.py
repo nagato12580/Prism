@@ -273,6 +273,7 @@ def delete_file(
     job = KnowledgeJobService(db).create(
         JobCommand("delete", actor.tenant_id, kb_uid, file_uid, {}),
         f"{kb_uid}:{file_uid}:delete",
+        commit=False,
     )
     file_row.deleted_at = local_now()
     file_row.last_job_id = job.id

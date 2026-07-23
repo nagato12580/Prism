@@ -28,6 +28,8 @@ from ..utils.media_type import infer_media_type
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 DEFAULT_USER_ID = "default-user"
+LEGACY_TENANT_ID = "legacy-personal"
+LEGACY_DEFAULT_KB_UID = "legacy-default-kb"
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESOURCE_INGEST_TIMEOUT_SECONDS = 1800
@@ -52,6 +54,7 @@ def _topic_out(topic: KnowledgeTopic, resource_count: int = 0) -> KnowledgeTopic
 def _get_topic_or_404(topic_id: str, db: Session) -> KnowledgeTopic:
     topic = db.query(KnowledgeTopic).filter(
         KnowledgeTopic.id == topic_id,
+        KnowledgeTopic.tenant_id == LEGACY_TENANT_ID,
         KnowledgeTopic.user_id == DEFAULT_USER_ID,
     ).first()
     if not topic:
@@ -72,6 +75,7 @@ def _normalize_topic_name(raw_name: str) -> str:
 def _ensure_topic_name_unique(name: str, db: Session, *, exclude_topic_id: Optional[str] = None) -> None:
     query = db.query(KnowledgeTopic).filter(
         KnowledgeTopic.user_id == DEFAULT_USER_ID,
+        KnowledgeTopic.tenant_id == LEGACY_TENANT_ID,
         KnowledgeTopic.name == name,
     )
     if exclude_topic_id is not None:
@@ -153,6 +157,7 @@ def _run_resource_ingestion(resource_id: str, item_id: str) -> None:
 
         resource = db.query(KnowledgeFile).filter(
             KnowledgeFile.id == resource_id,
+            KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
             KnowledgeFile.user_id == DEFAULT_USER_ID,
         ).first()
         if not resource:
@@ -195,6 +200,8 @@ def _engine_error_message(resp: httpx.Response) -> str:
 @router.post("", response_model=KnowledgeItemOut)
 def create_item(payload: KnowledgeItemCreate, db: Session = Depends(get_db)):
     item = KnowledgeItem(
+        tenant_id=LEGACY_TENANT_ID,
+        kb_uid=LEGACY_DEFAULT_KB_UID,
         title=payload.title,
         content=payload.content,
         source_type=payload.source_type,
@@ -216,7 +223,10 @@ def list_items(
     tag: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    query = db.query(KnowledgeItem).filter(KnowledgeItem.status != "archived")
+    query = db.query(KnowledgeItem).filter(
+        KnowledgeItem.tenant_id == LEGACY_TENANT_ID,
+        KnowledgeItem.status != "archived",
+    )
     if category:
         query = query.filter(KnowledgeItem.category == category)
     if source_type:
@@ -232,6 +242,8 @@ def create_topic(payload: KnowledgeTopicCreate, db: Session = Depends(get_db)):
     _ensure_topic_name_unique(name, db)
     topic = KnowledgeTopic(
         user_id=DEFAULT_USER_ID,
+        tenant_id=LEGACY_TENANT_ID,
+        owner_user_id=DEFAULT_USER_ID,
         name=name,
         description=payload.description,
     )
@@ -248,6 +260,7 @@ def list_topics(db: Session = Depends(get_db)):
             KnowledgeFile.topic_id.label("topic_id"),
             func.count(KnowledgeFile.id).label("resource_count"),
         )
+        .filter(KnowledgeFile.tenant_id == LEGACY_TENANT_ID)
         .group_by(KnowledgeFile.topic_id)
         .subquery()
     )
@@ -257,7 +270,7 @@ def list_topics(db: Session = Depends(get_db)):
             func.coalesce(resource_counts.c.resource_count, 0),
         )
         .outerjoin(resource_counts, resource_counts.c.topic_id == KnowledgeTopic.id)
-        .filter(KnowledgeTopic.user_id == DEFAULT_USER_ID)
+        .filter(KnowledgeTopic.user_id == DEFAULT_USER_ID, KnowledgeTopic.tenant_id == LEGACY_TENANT_ID)
         .order_by(KnowledgeTopic.updated_at.desc())
         .all()
     )
@@ -267,7 +280,7 @@ def list_topics(db: Session = Depends(get_db)):
 @router.get("/topics/{topic_id}", response_model=KnowledgeTopicOut)
 def get_topic(topic_id: str, db: Session = Depends(get_db)):
     topic = _get_topic_or_404(topic_id, db)
-    count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id).count()
+    count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id, KnowledgeFile.tenant_id == topic.tenant_id, KnowledgeFile.kb_uid == topic.kb_uid).count()
     return _topic_out(topic, count)
 
 
@@ -301,14 +314,14 @@ def update_topic(topic_id: str, payload: KnowledgeTopicUpdate, db: Session = Dep
         topic.description = data["description"]
     _commit_topic_change(db)
     db.refresh(topic)
-    count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id).count()
+    count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id, KnowledgeFile.tenant_id == topic.tenant_id, KnowledgeFile.kb_uid == topic.kb_uid).count()
     return _topic_out(topic, count)
 
 
 @router.delete("/topics/{topic_id}")
 def delete_topic(topic_id: str, db: Session = Depends(get_db)):
     topic = _get_topic_or_404(topic_id, db)
-    count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id).count()
+    count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id, KnowledgeFile.tenant_id == topic.tenant_id, KnowledgeFile.kb_uid == topic.kb_uid).count()
     if count:
         raise HTTPException(
             status_code=409,
@@ -339,6 +352,8 @@ async def upload_topic_resource(
     content, md5 = _read_upload(file)
     duplicate = db.query(KnowledgeFile).filter(
         KnowledgeFile.user_id == DEFAULT_USER_ID,
+        KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
+        KnowledgeFile.kb_uid == topic.kb_uid,
         KnowledgeFile.topic_id == topic.id,
         KnowledgeFile.md5 == md5,
     ).first()
@@ -351,6 +366,8 @@ async def upload_topic_resource(
     saved_path = _save_upload(content, file.filename, topic.id, md5)
     resource = KnowledgeFile(
         user_id=DEFAULT_USER_ID,
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
         topic_id=topic.id,
         title=_resource_title(file.filename or ""),
         original_filename=file.filename or "resource",
@@ -386,6 +403,8 @@ async def upload_topic_resource(
                 db.refresh(resource)
                 return resource
             item = KnowledgeItem(
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
                 title=resource.title,
                 content=text,
                 source_type="file",
@@ -420,7 +439,8 @@ def list_topic_resources(
     db: Session = Depends(get_db),
 ):
     _get_topic_or_404(topic_id, db)
-    query = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic_id)
+    topic = _get_topic_or_404(topic_id, db)
+    query = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic_id, KnowledgeFile.tenant_id == topic.tenant_id, KnowledgeFile.kb_uid == topic.kb_uid)
     if media_type:
         query = query.filter(KnowledgeFile.media_type == media_type)
     if processing_status:
@@ -434,6 +454,7 @@ def list_topic_resources(
 def get_resource(resource_id: str, db: Session = Depends(get_db)):
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
+        KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
     ).first()
     if not resource:
@@ -448,6 +469,7 @@ def get_resource(resource_id: str, db: Session = Depends(get_db)):
 def delete_resource(resource_id: str, db: Session = Depends(get_db)):
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
+        KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
     ).first()
     if not resource:
@@ -457,7 +479,7 @@ def delete_resource(resource_id: str, db: Session = Depends(get_db)):
         )
 
     storage_path = Path(resource.storage_path)
-    item = db.query(KnowledgeItem).filter(KnowledgeItem.id == resource.item_id).first() if resource.item_id else None
+    item = db.query(KnowledgeItem).filter(KnowledgeItem.id == resource.item_id, KnowledgeItem.tenant_id == resource.tenant_id, KnowledgeItem.kb_uid == resource.kb_uid).first() if resource.item_id else None
     if item:
         purge_item_derived_artifacts(db, item.id)
     db.delete(resource)
@@ -473,6 +495,7 @@ def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
     """Queue resource ingestion without waiting for Engine to finish."""
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
+        KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
     ).first()
     if not resource:
@@ -513,6 +536,7 @@ def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
 def retry_resource_governance(resource_id: str, db: Session = Depends(get_db)):
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
+        KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
     ).first()
     if not resource:
@@ -551,6 +575,7 @@ def retry_resource_governance(resource_id: str, db: Session = Depends(get_db)):
 def update_resource(resource_id: str, payload: KnowledgeResourceUpdate, db: Session = Depends(get_db)):
     resource = db.query(KnowledgeFile).filter(
         KnowledgeFile.id == resource_id,
+        KnowledgeFile.tenant_id == LEGACY_TENANT_ID,
         KnowledgeFile.user_id == DEFAULT_USER_ID,
     ).first()
     if not resource:
@@ -569,7 +594,7 @@ def update_resource(resource_id: str, payload: KnowledgeResourceUpdate, db: Sess
             )
         resource.title = title
         if resource.item_id:
-            item = db.query(KnowledgeItem).filter(KnowledgeItem.id == resource.item_id).first()
+            item = db.query(KnowledgeItem).filter(KnowledgeItem.id == resource.item_id, KnowledgeItem.tenant_id == resource.tenant_id, KnowledgeItem.kb_uid == resource.kb_uid).first()
             if item:
                 item.title = title
 
@@ -580,7 +605,10 @@ def update_resource(resource_id: str, payload: KnowledgeResourceUpdate, db: Sess
 
 @router.get("/{item_id}", response_model=KnowledgeItemOut)
 def get_item(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+    item = db.query(KnowledgeItem).filter(
+        KnowledgeItem.id == item_id,
+        KnowledgeItem.tenant_id == LEGACY_TENANT_ID,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="知识条目不存在")
     return item
@@ -588,7 +616,10 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
 
 @router.put("/{item_id}", response_model=KnowledgeItemOut)
 def update_item(item_id: str, payload: KnowledgeItemUpdate, db: Session = Depends(get_db)):
-    item = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+    item = db.query(KnowledgeItem).filter(
+        KnowledgeItem.id == item_id,
+        KnowledgeItem.tenant_id == LEGACY_TENANT_ID,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="知识条目不存在")
     update_data = payload.model_dump(exclude_unset=True)
@@ -601,7 +632,10 @@ def update_item(item_id: str, payload: KnowledgeItemUpdate, db: Session = Depend
 
 @router.delete("/{item_id}")
 def delete_item(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+    item = db.query(KnowledgeItem).filter(
+        KnowledgeItem.id == item_id,
+        KnowledgeItem.tenant_id == LEGACY_TENANT_ID,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="知识条目不存在")
     purge_item_derived_artifacts(db, item.id)

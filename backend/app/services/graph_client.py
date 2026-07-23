@@ -54,7 +54,7 @@ class GraphClient:
         self._upsert_node(
             "Source",
             data,
-            ["source_kind", "source_id", "item_id", "title"],
+            ["tenant_id", "kb_uid", "source_kind", "source_id", "item_id", "title"],
         )
 
     def upsert_entity(self, data: dict[str, Any]) -> None:
@@ -111,13 +111,13 @@ class GraphClient:
             {"start_id": start_id, "end_id": end_id, "props": props or {}},
         )
 
-    def delete_item_sources(self, item_id: str) -> None:
-        """Delete all :Source nodes (and their edges) for one item. Idempotent."""
+    def delete_item_sources(self, tenant_id: str, kb_uid: str, item_id: str) -> None:
+        """Delete scoped :Source nodes for one item. Idempotent; no legacy fallback."""
         query = """
-        MATCH (s:Source {item_id: $item_id})
+        MATCH (s:Source {tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id})
         DETACH DELETE s
         """
-        self._execute_write(query, {"item_id": item_id})
+        self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id})
 
     def _execute_read(self, query: str, params: dict[str, Any] | None = None) -> list[dict]:
         with self.driver.session(database=self.database) as session:

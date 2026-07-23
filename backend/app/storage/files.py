@@ -121,7 +121,7 @@ class LocalFileStorage:
         _validate_path_component(file_uid, "file_uid")
         safe_name = _validate_filename(filename)
 
-        staged_path = self.staging / f"{file_uid}.part"
+        staged_path = self.staging / tenant_id / kb_uid / f"{file_uid}.part"
         final_path = self.root / tenant_id / kb_uid / file_uid / safe_name
 
         # Pre-validate that final_path (before resolution) does not escape.
@@ -181,3 +181,27 @@ class LocalFileStorage:
 
     def exists(self, storage_uri: str) -> bool:
         return self._resolve(storage_uri).exists()
+
+    def stale_unreferenced(self, referenced_file_uids, older_than):
+        if not self.staging.exists():
+            return []
+        cutoff = older_than.timestamp()
+        stale = []
+        for path in self.staging.glob("*/*/*.part"):
+            relative = path.relative_to(self.staging)
+            identity = (relative.parts[0], relative.parts[1], path.stem)
+            if identity not in referenced_file_uids and path.stat().st_mtime < cutoff:
+                stale.append(identity)
+        return stale
+
+    def remove_staging(self, identity):
+        tenant_id, kb_uid, file_uid = identity
+        _validate_path_component(tenant_id, "tenant_id")
+        _validate_path_component(kb_uid, "kb_uid")
+        _validate_path_component(file_uid, "file_uid")
+        path = _validate_containment(
+            self.staging / tenant_id / kb_uid / f"{file_uid}.part",
+            self.staging,
+            "staging file",
+        )
+        path.unlink(missing_ok=True)

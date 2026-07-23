@@ -33,23 +33,37 @@ class FailingOnceRedis(FakeRedis):
 
 
 def _topic(db_session, name="Queue Topic"):
-    topic = KnowledgeTopic(user_id="default-user", name=name)
+    topic = KnowledgeTopic(
+        user_id="default-user",
+        tenant_id="tenant-test",
+        owner_user_id="default-user",
+        name=name,
+    )
     db_session.add(topic)
     db_session.flush()
     return topic
 
 
-def _item(db_session, title):
-    item = KnowledgeItem(title=title, content=f"{title} content", source_type="upload")
+def _item(db_session, title, topic=None):
+    item = KnowledgeItem(
+        tenant_id=topic.tenant_id if topic else "tenant-test",
+        kb_uid=topic.kb_uid if topic else "kb-test",
+        title=title,
+        content=f"{title} content",
+        source_type="upload",
+    )
     db_session.add(item)
     db_session.flush()
     return item
 
 
 def _resource(db_session, topic, title, status="completed", media_type="document", item=None):
-    item = item or _item(db_session, title)
+    item = item or _item(db_session, title, topic)
     resource = KnowledgeFile(
         user_id="default-user",
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        file_uid=f"file-{title}",
         topic_id=topic.id,
         item_id=item.id,
         title=title,
@@ -136,6 +150,10 @@ def test_enqueue_governance_job_recovers_created_active_job_and_resets_resource_
     resource.governance_error_message = "old governance error"
     resource.governance_finished_at = local_now()
     job = KnowledgeJob(
+        tenant_id=resource.tenant_id,
+        kb_uid=resource.kb_uid,
+        file_uid=resource.file_uid,
+        idempotency_key="governance-retry-created",
         job_type="governance",
         resource_id=resource.id,
         item_id=resource.item_id,
@@ -169,6 +187,10 @@ def test_enqueue_governance_job_resets_resource_when_active_job_already_enqueued
     resource.governance_error_message = "old"
     resource.governance_finished_at = local_now()
     job = KnowledgeJob(
+        tenant_id=resource.tenant_id,
+        kb_uid=resource.kb_uid,
+        file_uid=resource.file_uid,
+        idempotency_key="governance-already-enqueued",
         job_type="governance",
         resource_id=resource.id,
         item_id=resource.item_id,
@@ -198,6 +220,9 @@ def test_enqueue_governance_job_rejects_dangling_item_id_as_not_ingestable(db_se
     topic = _topic(db_session)
     resource = KnowledgeFile(
         user_id="default-user",
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        file_uid="file-dangling-governance",
         topic_id=topic.id,
         item_id="missing-item",
         title="Dangling Governance",
@@ -220,6 +245,9 @@ def test_enqueue_ingest_job_rejects_dangling_item_id(db_session):
     topic = _topic(db_session)
     resource = KnowledgeFile(
         user_id="default-user",
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        file_uid="file-dangling-ingest",
         topic_id=topic.id,
         item_id="missing-item",
         title="Dangling",

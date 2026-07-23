@@ -118,7 +118,7 @@ class FakeGraph:
         self.upserted_entities = []
         self.relations = []
 
-    def delete_item_sources(self, item_id):
+    def delete_item_sources(self, tenant_id, kb_uid, item_id):
         pass
 
     def upsert_source(self, data):
@@ -144,10 +144,11 @@ def _sqlite_session():
 def test_project_item_entities_upserts_source_entity_and_mentioned_in():
     db = _sqlite_session()
     try:
-        db.add(KnowledgeItem(id="i1", user_id="default-user", title="doc"))
+        db.add(KnowledgeItem(id="i1", tenant_id="tenant-a", kb_uid="kb-a", user_id="default-user", title="doc"))
         db.add(
             KnowledgeChunk(
                 id="c1",
+                tenant_id="tenant-a", kb_uid="kb-a", file_uid="file-a",
                 item_id="i1",
                 chunk_text="x",
                 chunk_index=0,
@@ -198,8 +199,8 @@ class FakeGraphWithDelete:
         self.relations = []
         self.deleted_item_ids = []
 
-    def delete_item_sources(self, item_id):
-        self.deleted_item_ids.append(item_id)
+    def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        self.deleted_item_ids.append((tenant_id, kb_uid, item_id))
 
     def upsert_source(self, data):
         self.upserted_sources.append(data)
@@ -224,8 +225,8 @@ def test_project_item_entities_deletes_old_sources_before_projecting():
         db.query(KnowledgeChunk).delete()
         db.query(KnowledgeItem).delete()
         db.commit()
-        db.add(KnowledgeItem(id="i1", user_id="default-user", title="doc"))
-        db.add(KnowledgeChunk(id="c1", item_id="i1", chunk_text="x", chunk_index=0, chunk_type="child"))
+        db.add(KnowledgeItem(id="i1", tenant_id="tenant-a", kb_uid="kb-a", user_id="default-user", title="doc"))
+        db.add(KnowledgeChunk(id="c1", tenant_id="tenant-a", kb_uid="kb-a", file_uid="file-a", item_id="i1", chunk_text="x", chunk_index=0, chunk_type="child"))
         ent = KnowledgeEntity(id="e1", user_id="default-user", entity_type="concept", canonical_name="K", normalized_key="k", status="active")
         db.add(ent); db.flush()
         db.add(EntityMention(id="m1", entity_id="e1", source_kind="document_chunk", source_id="c1", item_id="i1", chunk_id="c1", surface_text="K", normalized_key="k", confidence=0.85, extraction_method="llm_stage_a:INFERRED"))
@@ -235,7 +236,7 @@ def test_project_item_entities_deletes_old_sources_before_projecting():
         project_item_entities(db, fake, item_id="i1", user_id="default-user")
 
         # cleanup MUST run first, scoped to this item_id
-        assert fake.deleted_item_ids == ["i1"]
+        assert fake.deleted_item_ids == [("tenant-a", "kb-a", "i1")]
         # and then re-projected
         assert any(e["id"] == "e1" for e in fake.upserted_entities)
     finally:
@@ -332,8 +333,8 @@ def test_project_item_entities_projects_relation_as_related_to():
         db.query(KnowledgeChunk).delete()
         db.query(KnowledgeItem).delete()
         db.commit()
-        db.add(KnowledgeItem(id="i1", user_id="default-user", title="doc"))
-        db.add(KnowledgeChunk(id="c1", item_id="i1", chunk_text="x", chunk_index=0, chunk_type="child"))
+        db.add(KnowledgeItem(id="i1", tenant_id="tenant-a", kb_uid="kb-a", user_id="default-user", title="doc"))
+        db.add(KnowledgeChunk(id="c1", tenant_id="tenant-a", kb_uid="kb-a", file_uid="file-a", item_id="i1", chunk_text="x", chunk_index=0, chunk_type="child"))
         e1 = KnowledgeEntity(id="e1", user_id="default-user", entity_type="concept", canonical_name="混合检索", normalized_key="a", status="active")
         e2 = KnowledgeEntity(id="e2", user_id="default-user", entity_type="method", canonical_name="RRF融合", normalized_key="b", status="active")
         db.add_all([e1, e2]); db.flush()

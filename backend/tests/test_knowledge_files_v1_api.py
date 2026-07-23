@@ -223,3 +223,22 @@ def test_job_snapshot_is_scoped_to_requested_kb(client, file_headers):
         f"/api/v1/knowledge-bases/{second}/files/jobs/{job_id}", headers=file_headers
     )
     assert response.status_code == 404
+
+
+def test_delete_tombstone_and_job_are_committed_atomically(client, db_session, monkeypatch):
+    from backend.app.api import knowledge_files
+    from backend.app.models import KnowledgeFile, KnowledgeJob
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    kb_uid = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "Atomic delete"}).json()["kb_uid"]
+    uploaded = client.post(f"/api/v1/knowledge-bases/{kb_uid}/files", headers=headers,
+                           files={"file": ("atomic.md", b"body", "text/markdown")}).json()
+    file_uid = uploaded["file"]["file_uid"]
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
+    commits = []
+    original_commit = db_session.commit
+    monkeypatch.setattr(db_session, "commit", lambda: (commits.append((file_row.deleted_at, db_session.query(KnowledgeJob).filter_by(file_uid=file_row.file_uid, job_type="delete").count())), original_commit())[1])
+    monkeypatch.setattr(knowledge_files, "_get_publisher", lambda: type("P", (), {"publish": lambda self, job_id: None})())
+    response = client.delete(f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}", headers=headers)
+    assert response.status_code == 202
+    assert commits[0][0] is not None
+    assert commits[0][1] == 1

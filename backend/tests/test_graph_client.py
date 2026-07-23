@@ -174,3 +174,17 @@ def test_close_closes_driver():
     client.close()
 
     assert driver.closed is True
+
+
+def test_source_upsert_and_delete_are_scoped_by_tenant_kb_and_item():
+    driver = FakeDriver()
+    client = GraphClient(driver=driver)
+    client.upsert_source({"id": "document_chunk:c1", "tenant_id": "t1", "kb_uid": "kb1",
+                          "source_kind": "document_chunk", "source_id": "c1", "item_id": "i1", "title": "Doc"})
+    client.delete_item_sources("t1", "kb1", "i1")
+    upsert_query, upsert_params = driver.session_obj.tx.queries[0]
+    delete_query, delete_params = driver.session_obj.tx.queries[1]
+    assert "tenant_id: $tenant_id" in upsert_query
+    assert "kb_uid: $kb_uid" in upsert_query
+    assert "tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id" in delete_query
+    assert delete_params == {"tenant_id": "t1", "kb_uid": "kb1", "item_id": "i1"}

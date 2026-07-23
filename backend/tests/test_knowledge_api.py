@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from backend.app.utils.media_type import infer_media_type, supported_accept_extensions
-from backend.app.models import KnowledgeFile, KnowledgeJob
+from backend.app.models import KnowledgeFile, KnowledgeJob, KnowledgeTopic
 from sqlalchemy.exc import IntegrityError
 
 
@@ -188,9 +188,12 @@ def test_update_topic_rejects_whitespace_only_name(client):
 def test_delete_non_empty_topic_conflict(client, db_session):
     create = client.post("/api/v1/knowledge/topics", json={"name": "Filled"})
     topic_id = create.json()["id"]
+    topic = db_session.get(KnowledgeTopic, topic_id)
 
     db_session.add(KnowledgeFile(
         user_id="default-user",
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
         topic_id=topic_id,
         title="Doc",
         original_filename="doc.pdf",
@@ -730,3 +733,29 @@ def test_delete_metadata_only_resource_skips_derived_cleanup(client, monkeypatch
 
     assert response.status_code == 200
     assert cleaned == []
+
+
+def test_legacy_endpoints_cannot_access_other_tenant_rows(client, db_session):
+    from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeTopic
+    other_item = KnowledgeItem(tenant_id="other", kb_uid="other-kb", title="Foreign", content="x")
+    other_topic = KnowledgeTopic(tenant_id="other", owner_user_id="default-user", user_id="default-user", name="Shared Name")
+    db_session.add_all([other_item, other_topic]); db_session.flush()
+    other_file = KnowledgeFile(user_id="default-user", tenant_id="other", kb_uid=other_topic.kb_uid,
+                               topic_id=other_topic.id, file_uid="foreign-file", title="Foreign",
+                               original_filename="foreign.txt", storage_path="missing.txt")
+    db_session.add(other_file); db_session.commit()
+
+    for method, path, kwargs in (
+        (client.get, f"/api/v1/knowledge/{other_item.id}", {}),
+        (client.put, f"/api/v1/knowledge/{other_item.id}", {"json": {"title": "Changed"}}),
+        (client.delete, f"/api/v1/knowledge/{other_item.id}", {}),
+        (client.get, f"/api/v1/knowledge/topics/{other_topic.id}", {}),
+        (client.put, f"/api/v1/knowledge/topics/{other_topic.id}", {"json": {"name": "Changed"}}),
+        (client.delete, f"/api/v1/knowledge/topics/{other_topic.id}", {}),
+        (client.get, f"/api/v1/knowledge/resources/{other_file.id}", {}),
+        (client.delete, f"/api/v1/knowledge/resources/{other_file.id}", {}),
+    ):
+        assert method(path, **kwargs).status_code == 404
+    assert client.post("/api/v1/knowledge/topics", json={"name": "Shared Name"}).status_code == 200
+    db_session.refresh(other_item); db_session.refresh(other_topic); db_session.refresh(other_file)
+    assert other_item.title == "Foreign" and other_topic.name == "Shared Name"

@@ -50,6 +50,42 @@ def test_duplicate_idempotency_key_returns_existing_job(db_session):
     assert service.create(command, "same-key-2").id != first.id
 
 
+def test_create_without_commit_recovers_nested_unique_conflict_and_keeps_outer_transaction():
+    from contextlib import contextmanager
+    from sqlalchemy.exc import IntegrityError
+    from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
+    existing = type("Existing", (), {"id": "existing"})()
+    class Query:
+        calls = 0
+        def filter_by(self, **kwargs): return self
+        def one_or_none(self):
+            self.calls += 1
+            return None
+        def one(self): return existing
+        def with_for_update(self):
+            self.locked = True
+            return self
+    class Session:
+        committed = False
+        tombstoned = False
+        query_obj = Query()
+        def query(self, model): return self.query_obj
+        @contextmanager
+        def begin_nested(self): yield
+        def add(self, obj): pass
+        def flush(self): raise IntegrityError("insert", {}, Exception("duplicate"))
+        def commit(self): self.committed = True
+    db = Session()
+    result = KnowledgeJobService(db).create(
+        JobCommand("delete", "t", "kb", "f", {}), "same", commit=False
+    )
+    db.tombstoned = True
+    db.commit()
+    assert result is existing
+    assert db.tombstoned is True and db.committed is True
+    assert db.query_obj.locked is True
+
+
 def test_job_state_transitions_through_valid_paths(db_session):
     from backend.app.services.knowledge_jobs import InvalidJobTransition, JobCommand, KnowledgeJobService
 

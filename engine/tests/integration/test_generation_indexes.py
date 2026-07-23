@@ -26,6 +26,7 @@ def _row(tenant, kb, generation, chunk):
         "title": "Real service gate",
         "page_start": 1,
         "page_end": 1,
+        "indexed_at": "2026-07-23T00:00:00",
         "embedding": [0.1, 0.2],
     }
 

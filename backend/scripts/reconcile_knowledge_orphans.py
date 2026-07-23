@@ -16,7 +16,7 @@ def _iter_es_chunk_docs(es) -> Iterable[dict]:
     return helpers.scan(
         es,
         index=CHUNKS_INDEX,
-        query={"_source": ["item_id", "chunk_id"], "query": {"match_all": {}}},
+        query={"_source": ["tenant_id", "kb_uid", "item_id", "chunk_id"], "query": {"match_all": {}}},
     )
 
 
@@ -35,7 +35,7 @@ def reconcile_knowledge_orphans(db: Session, *, es=None) -> dict[str, int]:
     live_chunk_ids = {row[0] for row in db.query(KnowledgeChunk.id).all()}
 
     stale_doc_ids: list[str] = []
-    missing_item_ids: set[str] = set()
+    missing_items: set[tuple[str, str, str]] = set()
     scanned = 0
 
     for doc in _iter_es_chunk_docs(es):
@@ -48,23 +48,23 @@ def reconcile_knowledge_orphans(db: Session, *, es=None) -> dict[str, int]:
         if not item_missing and not chunk_missing:
             continue
         stale_doc_ids.append(doc.get("_id"))
-        if item_missing and item_id:
-            missing_item_ids.add(item_id)
+        if item_missing and item_id and source.get("tenant_id") and source.get("kb_uid"):
+            missing_items.add((source["tenant_id"], source["kb_uid"], item_id))
 
     deleted_es_docs = _delete_es_docs(es, [doc_id for doc_id in stale_doc_ids if doc_id])
 
     graph = GraphClient()
     try:
-        for item_id in sorted(missing_item_ids):
+        for tenant_id, kb_uid, item_id in sorted(missing_items):
             delete_vectors_by_item(item_id)
-            graph.delete_item_sources(item_id)
+            graph.delete_item_sources(tenant_id, kb_uid, item_id)
     finally:
         graph.close()
 
     return {
         "scanned_es_docs": scanned,
         "deleted_es_docs": deleted_es_docs,
-        "deleted_item_level_artifacts": len(missing_item_ids),
+        "deleted_item_level_artifacts": len(missing_items),
     }
 
 

@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from backend.app.models import EntityMention, EntityRelation, KnowledgeChunk
+from backend.app.models import EntityMention, EntityRelation, KnowledgeChunk, KnowledgeItem
 from backend.app.services.graph_client import GraphClient
 from backend.app.services.knowledge_governance import clear_document_item_governance
 from engine.app.es_client import CHUNKS_INDEX, get_es
@@ -34,6 +34,9 @@ def purge_item_derived_artifacts(db: Session, item_id: str) -> None:
     if not item_id:
         return
 
+    item = db.query(KnowledgeItem).filter_by(id=item_id).one_or_none()
+    if item is None:
+        return
     chunk_ids = [
         chunk_id
         for (chunk_id,) in (
@@ -61,7 +64,7 @@ def purge_item_derived_artifacts(db: Session, item_id: str) -> None:
 
     graph = GraphClient()
     try:
-        graph.delete_item_sources(item_id)
+        graph.delete_item_sources(item.tenant_id, item.kb_uid, item_id)
     finally:
         graph.close()
 

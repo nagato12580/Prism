@@ -55,6 +55,9 @@ class FakeGraph:
             (start_label, start_id, rel_type, end_label, end_id, props or {})
         )
 
+    def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        pass
+
 
 def _db_session():
     engine = create_engine(
@@ -111,12 +114,17 @@ def test_project_ckp_graph_projects_hierarchy_support_and_source():
     try:
         item = KnowledgeItem(
             id="item-1",
+            tenant_id="tenant-a",
+            kb_uid="kb-a",
             user_id="default-user",
             title="OpenViewer",
             content="paper text",
         )
         chunk = KnowledgeChunk(
             id="chunk-1",
+            tenant_id="tenant-a",
+            kb_uid="kb-a",
+            file_uid="file-a",
             item_id=item.id,
             chunk_text="OpenViewer chunk",
             chunk_index=0,
@@ -163,6 +171,8 @@ def test_project_ckp_graph_projects_hierarchy_support_and_source():
         assert graph.sources == [
             {
                 "id": "document_chunk:chunk-1",
+                "tenant_id": "tenant-a",
+                "kb_uid": "kb-a",
                 "source_kind": "document_chunk",
                 "source_id": "chunk-1",
                 "item_id": "item-1",
@@ -311,12 +321,17 @@ def test_project_ckp_graph_counts_and_upserts_each_source_once():
     try:
         item = KnowledgeItem(
             id="item-1",
+            tenant_id="tenant-a",
+            kb_uid="kb-a",
             user_id="default-user",
             title="OpenViewer",
             content="paper text",
         )
         chunk = KnowledgeChunk(
             id="chunk-1",
+            tenant_id="tenant-a",
+            kb_uid="kb-a",
+            file_uid="file-a",
             item_id=item.id,
             chunk_text="OpenViewer chunk",
         )
@@ -333,6 +348,8 @@ def test_project_ckp_graph_counts_and_upserts_each_source_once():
         assert graph.sources == [
             {
                 "id": "document_chunk:chunk-1",
+                "tenant_id": "tenant-a",
+                "kb_uid": "kb-a",
                 "source_kind": "document_chunk",
                 "source_id": "chunk-1",
                 "item_id": "item-1",
@@ -349,12 +366,17 @@ def test_project_ckp_graph_does_not_use_wrong_user_item_title_for_source():
     try:
         wrong_user_item = KnowledgeItem(
             id="item-wrong-user",
+            tenant_id="tenant-other",
+            kb_uid="kb-other",
             user_id="other-user",
             title="Private Other User Title",
             content="paper text",
         )
         chunk = KnowledgeChunk(
             id="chunk-1",
+            tenant_id="tenant-other",
+            kb_uid="kb-other",
+            file_uid="file-other",
             item_id=wrong_user_item.id,
             chunk_text="OpenViewer chunk",
         )
@@ -369,6 +391,8 @@ def test_project_ckp_graph_does_not_use_wrong_user_item_title_for_source():
         assert graph.sources == [
             {
                 "id": "document_chunk:chunk-1",
+                "tenant_id": "tenant-other",
+                "kb_uid": "kb-other",
                 "source_kind": "document_chunk",
                 "source_id": "chunk-1",
                 "item_id": "item-wrong-user",
@@ -512,6 +536,8 @@ def test_project_entity_graph_projects_entities_aliases_mentions_and_relations()
         assert graph.sources == [
             {
                 "id": "document_chunk:chunk-1",
+                "tenant_id": "",
+                "kb_uid": "",
                 "source_kind": "document_chunk",
                 "source_id": "chunk-1",
                 "item_id": "item-1",
@@ -719,12 +745,17 @@ def test_project_entity_graph_does_not_use_wrong_user_item_title_for_mention_sou
     try:
         wrong_user_item = KnowledgeItem(
             id="item-wrong-user",
+            tenant_id="tenant-other",
+            kb_uid="kb-other",
             user_id="other-user",
             title="Private Other User Title",
             content="paper text",
         )
         chunk = KnowledgeChunk(
             id="chunk-1",
+            tenant_id="tenant-other",
+            kb_uid="kb-other",
+            file_uid="file-other",
             item_id=wrong_user_item.id,
             chunk_text="OpenViewer chunk",
         )
@@ -747,6 +778,8 @@ def test_project_entity_graph_does_not_use_wrong_user_item_title_for_mention_sou
         assert graph.sources == [
             {
                 "id": "document_chunk:chunk-1",
+                "tenant_id": "tenant-other",
+                "kb_uid": "kb-other",
                 "source_kind": "document_chunk",
                 "source_id": "chunk-1",
                 "item_id": "item-wrong-user",
@@ -815,8 +848,10 @@ def test_project_asset_unit_entities_projects_source_mentions_and_relations():
 
         assert result == 3
         assert graph.sources == [
-            {
-                "id": "personal_asset_unit:unit-1",
+                {
+                    "id": "personal_asset_unit:unit-1",
+                    "tenant_id": "",
+                    "kb_uid": "",
                 "source_kind": "personal_asset_unit",
                 "source_id": "unit-1",
                 "item_id": "unit-1",

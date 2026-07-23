@@ -4,13 +4,15 @@ import threading
 import time
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy import and_
 from sqlalchemy import or_
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models import KnowledgeFile, KnowledgeJob
+from backend.app.models import KnowledgeFile, KnowledgeJob, KnowledgeTopic
+from backend.app.services.knowledge_cleanup import KnowledgeCleanupService
 from backend.app.services.document_text_quality import assess_document_text
 from backend.app.services.knowledge_governance import settle_document_item_to_governance
 from backend.app.services.knowledge_jobs import KnowledgeJobService
@@ -19,7 +21,7 @@ from engine.app.config import settings
 from engine.app.ingestion.pipeline import ingest_item
 
 from . import redis_queue
-from .knowledge_handlers import handle_parse
+from .knowledge_handlers import handle_delete, handle_parse
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
@@ -28,6 +30,63 @@ logger = logging.getLogger("uvicorn.error")
 
 ACTIVE_STATUSES = {"queued", "processing"}
 NEEDS_REPUBLISH_STAGES = {"created", "retry", "recovered"}
+
+
+class _MissingExternalIndex:
+    def delete_file(self, tenant_id, kb_uid, file_uid):
+        return None
+
+
+class _CompositeCleanupIndex:
+    def __init__(self, indexes):
+        self.indexes = indexes
+
+    def delete_file(self, tenant_id, kb_uid, file_uid):
+        for index in self.indexes:
+            index.delete_file(tenant_id, kb_uid, file_uid)
+
+
+def _build_cleanup_service(db, job):
+    from elasticsearch import Elasticsearch
+    from pymilvus import Collection, utility
+
+    from backend.app.storage.files import LocalFileStorage
+    from backend.app.services.graph_client import GraphClient
+    from engine.app.indexing.es_index import (
+        ElasticsearchGenerationIndex,
+        V2_INDEX_NAME,
+    )
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex, _connect
+
+    db.query(KnowledgeTopic).filter_by(
+        tenant_id=job.tenant_id, kb_uid=job.kb_uid
+    ).one()
+    _connect(settings.MILVUS_HOST, settings.MILVUS_PORT)
+    milvus_indexes = [
+        MilvusGenerationIndex(Collection(name))
+        for name in utility.list_collections()
+        if name.startswith("prism_kb_")
+    ]
+    milvus = _CompositeCleanupIndex(milvus_indexes) if milvus_indexes else _MissingExternalIndex()
+    es_client = Elasticsearch([settings.ES_HOST], request_timeout=15)
+    graph = None
+    try:
+        es = (
+            ElasticsearchGenerationIndex(es_client, V2_INDEX_NAME)
+            if es_client.indices.exists(index=V2_INDEX_NAME)
+            else _MissingExternalIndex()
+        )
+        storage = LocalFileStorage(Path(settings.KNOWLEDGE_STORAGE_ROOT))
+        graph = GraphClient()
+        return KnowledgeCleanupService(
+            db, milvus, es, storage, graph_client=graph,
+            closers=(es_client.close, graph.close),
+        )
+    except Exception:
+        if graph is not None:
+            graph.close()
+        es_client.close()
+        raise
 
 
 def dispatch_typed_job(db, job_id, worker_id):
@@ -42,6 +101,14 @@ def dispatch_typed_job(db, job_id, worker_id):
             KnowledgeJobService(db),
             publisher=_publish_typed_job_id,
         )
+    if job.job_type == "delete":
+        return handle_delete(
+            job_id,
+            worker_id,
+            db,
+            KnowledgeJobService(db),
+            _build_cleanup_service(db, job),
+        )
     return None
 
 
@@ -54,7 +121,7 @@ def run_ingest_queue_job(job_id, *, worker_id):
     db = _Session()
     try:
         job_type = db.query(KnowledgeJob.job_type).filter(KnowledgeJob.id == job_id).scalar()
-        if job_type == "parse":
+        if job_type in {"parse", "delete"}:
             return dispatch_typed_job(db, job_id, worker_id)
     finally:
         db.close()

@@ -255,3 +255,22 @@ def test_stage_accepts_filename_with_spaces(tmp_path):
     staged = storage.stage("t", "kb", "f", "doc  with spaces.md", b"content")
     assert staged.sha256 is not None
     assert staged.size_bytes == 7
+
+
+def test_staging_orphans_keep_full_scope_when_file_uids_collide(tmp_path):
+    from datetime import datetime, timedelta
+    storage = _storage(tmp_path)
+    first = storage.stage("tenant-a", "kb-a", "same-file", "a.md", b"a")
+    second = storage.stage("tenant-b", "kb-b", "same-file", "b.md", b"b")
+    old = (datetime.now() - timedelta(days=2)).timestamp()
+    import os
+    os.utime(first.path, (old, old))
+    os.utime(second.path, (old, old))
+
+    identities = storage.stale_unreferenced(
+        {("tenant-a", "kb-a", "same-file")}, datetime.now() - timedelta(days=1)
+    )
+    assert identities == [("tenant-b", "kb-b", "same-file")]
+    storage.remove_staging(identities[0])
+    assert first.path.exists()
+    assert not second.path.exists()

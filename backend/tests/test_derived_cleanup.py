@@ -5,8 +5,8 @@ from backend.app.models.entity import compute_relation_key
 def test_purge_item_derived_artifacts_deletes_document_entity_rows_and_calls_external_cleanup(db_session, monkeypatch):
     from backend.app.services import derived_cleanup as cleanup
 
-    item = KnowledgeItem(id="item-1", title="Doc", user_id="default-user")
-    chunk = KnowledgeChunk(id="chunk-1", item_id="item-1", chunk_text="hello", chunk_type="child")
+    item = KnowledgeItem(id="item-1", tenant_id="tenant-a", kb_uid="kb-a", title="Doc", user_id="default-user")
+    chunk = KnowledgeChunk(id="chunk-1", tenant_id="tenant-a", kb_uid="kb-a", file_uid="file-a", item_id="item-1", chunk_text="hello", chunk_type="child")
     entity_a = KnowledgeEntity(
         id="entity-a",
         user_id="default-user",
@@ -51,8 +51,8 @@ def test_purge_item_derived_artifacts_deletes_document_entity_rows_and_calls_ext
     monkeypatch.setattr(cleanup, "clear_document_item_governance", lambda db, item_id: cleared_governance.append(item_id))
 
     class _FakeGraph:
-        def delete_item_sources(self, item_id):
-            deleted_graph.append(item_id)
+        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+            deleted_graph.append((tenant_id, kb_uid, item_id))
 
         def close(self):
             pass
@@ -64,7 +64,7 @@ def test_purge_item_derived_artifacts_deletes_document_entity_rows_and_calls_ext
     assert cleared_governance == ["item-1"]
     assert deleted_vectors == ["item-1"]
     assert deleted_es == ["item-1"]
-    assert deleted_graph == ["item-1"]
+    assert deleted_graph == [("tenant-a", "kb-a", "item-1")]
     assert db_session.query(EntityMention).count() == 0
     assert db_session.query(EntityRelation).count() == 0
 
@@ -72,7 +72,7 @@ def test_purge_item_derived_artifacts_deletes_document_entity_rows_and_calls_ext
 def test_purge_item_derived_artifacts_handles_item_without_chunks(db_session, monkeypatch):
     from backend.app.services import derived_cleanup as cleanup
 
-    item = KnowledgeItem(id="item-2", title="Doc", user_id="default-user")
+    item = KnowledgeItem(id="item-2", tenant_id="tenant-a", kb_uid="kb-a", title="Doc", user_id="default-user")
     db_session.add(item)
     db_session.commit()
 
@@ -85,8 +85,8 @@ def test_purge_item_derived_artifacts_handles_item_without_chunks(db_session, mo
     monkeypatch.setattr(cleanup, "clear_document_item_governance", lambda db, item_id: None)
 
     class _FakeGraph:
-        def delete_item_sources(self, item_id):
-            deleted_graph.append(item_id)
+        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+            deleted_graph.append((tenant_id, kb_uid, item_id))
 
         def close(self):
             pass
@@ -97,4 +97,4 @@ def test_purge_item_derived_artifacts_handles_item_without_chunks(db_session, mo
 
     assert deleted_vectors == ["item-2"]
     assert deleted_es == ["item-2"]
-    assert deleted_graph == ["item-2"]
+    assert deleted_graph == [("tenant-a", "kb-a", "item-2")]

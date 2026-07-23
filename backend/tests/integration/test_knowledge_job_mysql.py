@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from backend.app.models import KnowledgeJob
+from backend.app.models import KnowledgeJob, KnowledgeTopic
 from backend.app.models.knowledge_types import JobStatus
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 
@@ -75,6 +75,55 @@ def test_real_concurrent_create_idempotency(mysql_session_1, mysql_session_2):
         idempotency_key="real-cc-create-key"
     ).all()
     assert len(rows) == 1
+
+
+def test_real_concurrent_create_without_commit_preserves_outer_transactions(
+    mysql_session_1, mysql_session_2
+):
+    """The losing idempotent insert recovers inside a savepoint, not the outer tx."""
+    command = JobCommand("delete", "tenant-a", "kb-a", "file-atomic", {})
+    key = "real-cc-create-no-commit-key"
+    barrier = threading.Barrier(2, timeout=10)
+    results = []
+    errors = []
+
+    def create_and_commit(db, marker):
+        try:
+            barrier.wait()
+            job = KnowledgeJobService(db).create(command, key, commit=False)
+            topic = KnowledgeTopic(
+                tenant_id="tenant-a",
+                owner_user_id="default-user",
+                user_id="default-user",
+                name=f"outer-transaction-{marker}",
+            )
+            db.add(topic)
+            db.commit()
+            results.append((marker, job.id, topic.id))
+        except Exception as exc:  # assertion below reports either thread failure
+            errors.append((marker, exc))
+
+    thread = threading.Thread(
+        target=create_and_commit, args=(mysql_session_2, "session-2")
+    )
+    thread.start()
+    create_and_commit(mysql_session_1, "session-1")
+    thread.join(timeout=15)
+
+    assert not thread.is_alive(), "concurrent create did not finish"
+    assert errors == []
+    assert len(results) == 2
+    assert len({job_id for _, job_id, _ in results}) == 1
+
+    mysql_session_1.commit()  # end any RR snapshot before verification reads
+    assert mysql_session_1.query(KnowledgeJob).filter_by(idempotency_key=key).count() == 1
+    topic_ids = {topic_id for _, _, topic_id in results}
+    assert {
+        row[0]
+        for row in mysql_session_1.query(KnowledgeTopic.id)
+        .filter(KnowledgeTopic.id.in_(topic_ids))
+        .all()
+    } == topic_ids
 
 
 def test_claim_respects_available_at(mysql_session_1):
