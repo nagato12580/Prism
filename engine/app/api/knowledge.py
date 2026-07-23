@@ -186,6 +186,7 @@ def process_file(req: ProcessRequest):
             "item_id": item_id,
             "file_uid": req.file_uid,
             "chunks": len(chunk_list),
+            "first_chunk_id": chunk_list[0]["chunk_uid"] if chunk_list else None,
             "parse_status": file_row.parse_status,
             "index_status": file_row.index_status,
             "job_id": parse_job_id,

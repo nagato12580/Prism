@@ -155,6 +155,7 @@ class Verifier:
                          timeout=120)
         check("process endpoint 200", code == 200 and resp.get("status") == "succeeded")
         self.item_id = resp.get("item_id", "")
+        self.first_chunk_id = resp.get("first_chunk_id", None)
         if code == 200:
             check("parse_status succeeded", resp.get("parse_status") == "succeeded")
             check("index_status succeeded", resp.get("index_status") == "succeeded")
@@ -275,18 +276,15 @@ class Verifier:
             from pymilvus import MilvusClient
             mc = MilvusClient(uri="http://127.0.0.1:19530")
             col_name = "prism_knowledge"
-            if mc.has_collection(col_name):
-                results = mc.query(
-                    collection_name=col_name,
-                    filter=f'item_id == "{self.item_id}"',
-                    output_fields=["chunk_id", "item_id"],
-                    limit=10,
-                )
-                check("Milvus has vectors for this item", len(results) > 0)
-                if results:
-                    check("Milvus item_id matches", results[0].get("item_id") == self.item_id)
-            else:
+            if mc.has_collection(col_name) and hasattr(self, "first_chunk_id") and self.first_chunk_id:
+                result = mc.get(collection_name=col_name, ids=[self.first_chunk_id])
+                check("Milvus has vector for this chunk", len(result) > 0)
+                if result:
+                    check("Milvus chunk_id matches", result[0].get("chunk_id") == self.first_chunk_id or result[0].get("id") == self.first_chunk_id)
+            elif not mc.has_collection(col_name):
                 check("Milvus collection exists", False)
+            else:
+                check("Milvus has data (no chunk ID to verify)", False)
         except Exception as exc:
             check(f"Milvus verification error", False)
             print(f"  [INFO] Milvus error: {exc}")
