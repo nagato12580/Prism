@@ -15,6 +15,8 @@ class Settings:
     KNOWLEDGE_GOVERNANCE_QUEUE: str = os.getenv("KNOWLEDGE_GOVERNANCE_QUEUE", "prism:queue:governance")
     KNOWLEDGE_TEXT_MAX_CHARS: int = int(os.getenv("KNOWLEDGE_TEXT_MAX_CHARS", "300000"))
     KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE: int = int(os.getenv("KNOWLEDGE_TEXT_MAX_CHARS_PER_PAGE", "12000"))
+    KNOWLEDGE_STAGING_REAPER_ENABLED: bool = os.getenv("KNOWLEDGE_STAGING_REAPER_ENABLED", "1") == "1"
+    KNOWLEDGE_STAGING_REAPER_INTERVAL_MINUTES: int = int(os.getenv("KNOWLEDGE_STAGING_REAPER_INTERVAL_MINUTES", "60"))
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")

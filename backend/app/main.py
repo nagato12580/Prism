@@ -18,6 +18,7 @@ from .utils.auto_migrate import auto_migrate
 from .api import register_routers
 from .api.errors import ApiProblem, api_problem_handler
 from .services.memory_scheduler import MemoryScheduler
+from .services.knowledge_uploads import StagingReaperScheduler
 # 导入所有模型，确保注册到 Base.metadata
 from .models import *  # noqa
 
@@ -25,6 +26,7 @@ _engine_proc = None
 _engine_log_file = None
 _engine_log_thread = None
 _memory_scheduler = None
+_staging_reaper_scheduler = None
 
 
 def _read_engine_output(process) -> str:
@@ -181,9 +183,20 @@ def create_app() -> FastAPI:
             _memory_scheduler.start()
         except Exception as e:
             print(f"[backend] Memory scheduler failed to start: {e}")
+        global _staging_reaper_scheduler
+        try:
+            _staging_reaper_scheduler = StagingReaperScheduler()
+            _staging_reaper_scheduler.start()
+        except Exception as e:
+            print(f"[backend] Knowledge staging reaper failed to start: {e}")
 
     @app.on_event("shutdown")
     def shutdown():
+        if _staging_reaper_scheduler:
+            try:
+                _staging_reaper_scheduler.shutdown()
+            except Exception as e:
+                print(f"[backend] Knowledge staging reaper shutdown error: {e}")
         if _memory_scheduler:
             try:
                 _memory_scheduler.shutdown()
