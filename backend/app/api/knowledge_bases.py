@@ -101,6 +101,16 @@ def list_knowledge_bases(
     )
 
 
+@router.get("/capabilities/parsers")
+def get_parser_capabilities():
+    try:
+        from engine.app.ingestion.parsers import build_default_registry
+        registry = build_default_registry()
+        return {"parsers": registry.capabilities()}
+    except Exception:
+        raise ApiProblem(503, "PARSER_UNAVAILABLE", "Parser registry cannot be loaded")
+
+
 @router.get("/{kb_uid}", response_model=KnowledgeBaseResponse)
 def get_knowledge_base(
     kb_uid: str,
@@ -170,13 +180,3 @@ def delete_knowledge_base(
     db.commit()
     db.refresh(topic)
     return topic
-
-
-@router.get("/capabilities/parsers")
-def get_parser_capabilities():
-    try:
-        from engine.app.ingestion.parsers import build_default_registry
-        registry = build_default_registry()
-        return {"parsers": registry.capabilities()}
-    except ImportError:
-        return {"parsers": []}

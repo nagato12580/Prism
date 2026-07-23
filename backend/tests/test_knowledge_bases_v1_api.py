@@ -113,7 +113,14 @@ def test_v1_list_supports_cursor_pagination(client):
         assert item["kb_uid"] not in all_uids
 
 
-def test_v1_update_version_bumps_after_success(client):
+def test_capability_route_is_not_swallowed_by_kb_uid(client):
+    """The /capabilities/parsers route must work and not be caught by /{kb_uid}."""
+    resp = client.get("/api/v1/knowledge-bases/capabilities/parsers")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "parsers" in body
+    parser_ids = {p["parser_id"] for p in body["parsers"]}
+    assert parser_ids >= {"markdown", "text", "pdf", "docx", "xlsx", "pptx"}
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
     created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "VB"})
     body = created.json()

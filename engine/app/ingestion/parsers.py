@@ -21,7 +21,7 @@ class DocumentParser(Protocol):
     parser_id: str
     extensions: frozenset[str]
 
-    def parse(self, path: Path, config: dict) -> "ParsedDocument": ...
+    def parse(self, path: Path, media_type: str, config: dict) -> "ParsedDocument": ...
 
 
 @dataclass(frozen=True)
@@ -42,17 +42,25 @@ class ParserRegistry:
         parser = next((candidate for candidate in self._parsers if suffix in candidate.extensions), None)
         if parser is None:
             raise UnsupportedDocument(f"Unsupported file extension: {suffix}")
-        return parser.parse(path, config)
+        try:
+            return parser.parse(path, media_type, config)
+        except ParserError:
+            raise
+        except Exception as exc:
+            raise ParserError(parser.parser_id, f"{type(exc).__name__}: {exc}")
 
     def capabilities(self) -> list[dict]:
-        return [{"parser_id": p.parser_id, "extensions": sorted(p.extensions)} for p in self._parsers]
+        return [
+            {"parser_id": p.parser_id, "extensions": sorted(p.extensions)}
+            for p in self._parsers
+        ]
 
 
 class MarkdownParser:
     parser_id = "markdown"
     extensions = frozenset({".md", ".markdown"})
 
-    def parse(self, path: Path, config: dict) -> ParsedDocument:
+    def parse(self, path: Path, media_type: str, config: dict) -> ParsedDocument:
         content = path.read_text(encoding="utf-8")
         if not content.strip():
             raise ParserError(self.parser_id, "empty document")
@@ -63,7 +71,7 @@ class TextParser:
     parser_id = "text"
     extensions = frozenset({".txt"})
 
-    def parse(self, path: Path, config: dict) -> ParsedDocument:
+    def parse(self, path: Path, media_type: str, config: dict) -> ParsedDocument:
         content = path.read_text(encoding="utf-8")
         if not content.strip():
             raise ParserError(self.parser_id, "empty document")
@@ -74,23 +82,25 @@ class PdfParser:
     parser_id = "pdf"
     extensions = frozenset({".pdf"})
 
-    def parse(self, path: Path, config: dict) -> ParsedDocument:
+    def parse(self, path: Path, media_type: str, config: dict) -> ParsedDocument:
         try:
-            from backend.app.utils.file_parser import _extract_pdf, count_pages
+            from backend.app.utils.file_parser import _extract_pdf
         except ImportError:
             raise ParserError(self.parser_id, "PDF parser backend unavailable")
         text = _extract_pdf(str(path))
         if not text.strip():
             raise ParserError(self.parser_id, "empty or unreadable PDF")
-        pages = count_pages(str(path)) if hasattr(count_pages, "__call__") else None
-        return ParsedDocument(markdown=text, parser_id=self.parser_id, page_count=pages)
+        page_count = config.get("page_count") if config else None
+        return ParsedDocument(
+            markdown=text, parser_id=self.parser_id, page_count=page_count
+        )
 
 
 class DocxParser:
     parser_id = "docx"
     extensions = frozenset({".docx"})
 
-    def parse(self, path: Path, config: dict) -> ParsedDocument:
+    def parse(self, path: Path, media_type: str, config: dict) -> ParsedDocument:
         try:
             from backend.app.utils.file_parser import _extract_docx
         except ImportError:
@@ -105,7 +115,7 @@ class XlsxParser:
     parser_id = "xlsx"
     extensions = frozenset({".xlsx"})
 
-    def parse(self, path: Path, config: dict) -> ParsedDocument:
+    def parse(self, path: Path, media_type: str, config: dict) -> ParsedDocument:
         try:
             from backend.app.utils.file_parser import _extract_xlsx
         except ImportError:
@@ -120,11 +130,11 @@ class PptxParser:
     parser_id = "pptx"
     extensions = frozenset({".pptx"})
 
-    def parse(self, path: Path, config: dict) -> ParsedDocument:
+    def parse(self, path: Path, media_type: str, config: dict) -> ParsedDocument:
         try:
             from pptx import Presentation
         except ImportError:
-            raise ParserError(self.parser_id, "PPTX parser requires python-pptx")
+            raise ParserError(self.parser_id, "PPTX parser backend unavailable")
         prs = Presentation(str(path))
         texts = []
         for slide in prs.slides:
@@ -138,11 +148,13 @@ class PptxParser:
 
 
 def build_default_registry() -> ParserRegistry:
-    return ParserRegistry([
-        MarkdownParser(),
-        TextParser(),
-        PdfParser(),
-        DocxParser(),
-        XlsxParser(),
-        PptxParser(),
-    ])
+    return ParserRegistry(
+        [
+            MarkdownParser(),
+            TextParser(),
+            PdfParser(),
+            DocxParser(),
+            XlsxParser(),
+            PptxParser(),
+        ]
+    )
