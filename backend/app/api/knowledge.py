@@ -15,6 +15,7 @@ from .upload import _trigger_ingestion
 from ..config import settings
 from ..database import SessionLocal, get_db
 from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
+from ..models.knowledge_evaluation import EvaluationRun
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
     KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut, KnowledgeResourceOut,
@@ -320,12 +321,25 @@ def update_topic(topic_id: str, payload: KnowledgeTopicUpdate, db: Session = Dep
 
 @router.delete("/topics/{topic_id}")
 def delete_topic(topic_id: str, db: Session = Depends(get_db)):
-    topic = _get_topic_or_404(topic_id, db)
+    _get_topic_or_404(topic_id, db)
+    topic = db.query(KnowledgeTopic).filter(
+        KnowledgeTopic.id == topic_id,
+        KnowledgeTopic.tenant_id == LEGACY_TENANT_ID,
+        KnowledgeTopic.user_id == DEFAULT_USER_ID,
+    ).with_for_update().one()
     count = db.query(KnowledgeFile).filter(KnowledgeFile.topic_id == topic.id, KnowledgeFile.tenant_id == topic.tenant_id, KnowledgeFile.kb_uid == topic.kb_uid).count()
     if count:
         raise HTTPException(
             status_code=409,
             detail={"code": "topic_not_empty", "message": "Delete resources before deleting the topic"},
+        )
+    evaluation_count = db.query(EvaluationRun.id).filter_by(
+        tenant_id=topic.tenant_id, kb_uid=topic.kb_uid,
+    ).count()
+    if evaluation_count:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "topic_has_evaluations", "message": "Delete evaluation records before deleting the topic"},
         )
     db.delete(topic)
     db.commit()

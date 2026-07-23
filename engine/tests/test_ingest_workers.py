@@ -753,6 +753,7 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     import engine.app.jobs.worker as worker
 
     recovered = []
+    evaluation_recovered = []
     republished = []
     started = []
 
@@ -771,6 +772,7 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
             self.join_timeout = timeout
 
     monkeypatch.setattr(worker, "recover_stale_jobs", lambda: recovered.append(True))
+    monkeypatch.setattr(worker, "recover_expired_evaluation_jobs", lambda: evaluation_recovered.append(True))
     monkeypatch.setattr(worker, "republish_due_queued_jobs", lambda: republished.append(True))
     monkeypatch.setattr(worker.redis_queue, "redis_client", lambda: "redis-client")
     monkeypatch.setattr(worker.threading, "Thread", FakeThread)
@@ -781,20 +783,69 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     manager.start()
 
     assert recovered == [True]
+    assert evaluation_recovered == [True]
     assert republished == [True]
-    assert len(started) == 2
+    assert len(started) == 3
     assert [thread.name for thread in started] == [
+        "knowledge-evaluation-lease-reaper",
         "knowledge-ingest-worker-0",
         "knowledge-governance-worker-0",
     ]
     assert all(thread.started for thread in started)
-    assert started[0].args == (
+    assert started[0].args == ()
+    assert started[1].args == (
         worker.settings.KNOWLEDGE_INGEST_QUEUE,
         worker.run_ingest_queue_job,
-        started[0].args[2],
-    )
-    assert started[1].args == (
-        worker.settings.KNOWLEDGE_GOVERNANCE_QUEUE,
-        worker.run_governance_job,
         started[1].args[2],
     )
+    assert started[2].args == (
+        worker.settings.KNOWLEDGE_GOVERNANCE_QUEUE,
+        worker.run_governance_job,
+        started[2].args[2],
+    )
+
+
+def test_worker_manager_periodically_sweeps_expired_evaluations(monkeypatch):
+    import time
+    import engine.app.jobs.worker as worker
+    sweeps = []
+    class Redis:
+        def brpop(self, *_args, **_kwargs):
+            time.sleep(0.005)
+            return None
+    monkeypatch.setattr(worker, "recover_stale_jobs", lambda: None)
+    monkeypatch.setattr(worker, "recover_expired_evaluation_jobs", lambda: sweeps.append(time.monotonic()))
+    monkeypatch.setattr(worker, "republish_due_queued_jobs", lambda: None)
+    monkeypatch.setattr(worker.redis_queue, "redis_client", lambda: Redis())
+    monkeypatch.setattr(worker, "EVALUATION_REAPER_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(worker.settings, "KNOWLEDGE_INGEST_WORKERS", 0)
+    monkeypatch.setattr(worker.settings, "KNOWLEDGE_GOVERNANCE_WORKERS", 0)
+    manager = worker.KnowledgeWorkerManager()
+    manager.start()
+    time.sleep(0.04)
+    manager.stop()
+    assert len(sweeps) >= 2
+    assert manager._threads == []
+
+
+def test_concurrent_evaluation_reapers_only_run_one_sweep(monkeypatch):
+    import threading
+    import time
+    import engine.app.jobs.worker as worker
+    entered = []
+    release = threading.Event()
+    def sweep():
+        entered.append(True)
+        release.wait(1)
+        return 1
+    monkeypatch.setattr(worker, "_recover_expired_evaluation_jobs", sweep)
+    results = []
+    first = threading.Thread(target=lambda: results.append(worker.recover_expired_evaluation_jobs()))
+    first.start()
+    while not entered:
+        time.sleep(0.001)
+    second = threading.Thread(target=lambda: results.append(worker.recover_expired_evaluation_jobs()))
+    second.start(); second.join()
+    release.set(); first.join()
+    assert entered == [True]
+    assert sorted(results) == [0, 1]

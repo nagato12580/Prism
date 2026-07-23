@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import Base, engine, get_db
@@ -23,6 +24,7 @@ from .services.knowledge_uploads import StagingReaperScheduler
 from .models import *  # noqa
 
 _engine_proc = None
+MAX_EVALUATION_REQUEST_BYTES = 10 * 1024 * 1024
 _engine_log_file = None
 _engine_log_thread = None
 _memory_scheduler = None
@@ -152,6 +154,34 @@ def create_app() -> FastAPI:
     )
 
     app.add_exception_handler(ApiProblem, api_problem_handler)
+
+    @app.middleware("http")
+    async def evaluation_body_limit(request: Request, call_next):
+        is_evaluation_write = request.method == "POST" and (
+            "/evaluation-datasets/" in request.url.path or request.url.path.endswith("/evaluation-runs")
+        )
+        if is_evaluation_write:
+            content_length = request.headers.get("content-length")
+            if content_length and content_length.isdigit() and int(content_length) > MAX_EVALUATION_REQUEST_BYTES:
+                return JSONResponse(status_code=413, content={"detail": {"code": "EVALUATION_BODY_TOO_LARGE"}})
+            chunks = []
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_EVALUATION_REQUEST_BYTES:
+                    return JSONResponse(status_code=413, content={"detail": {"code": "EVALUATION_BODY_TOO_LARGE"}})
+                chunks.append(chunk)
+            body = b"".join(chunks)
+            request._body = body
+            delivered = False
+            async def receive():
+                nonlocal delivered
+                if delivered:
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                delivered = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            request._receive = receive
+        return await call_next(request)
 
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next):

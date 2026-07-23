@@ -37,15 +37,15 @@ def _retrieval_scope_expr(scope) -> str:
     return " and ".join(parts)
 
 
-def search_index(*, query_embedding, scope, top_k):
+def search_index(*, query_embedding, scope, top_k, timeout=15):
     """Search the generation collection with server-side tenant/KB filters."""
     collection_name = os.getenv("PRISM_RETRIEVAL_MILVUS_COLLECTION")
     if collection_name:
         _connect()
         collection = Collection(collection_name)
-        collection.load(timeout=30)
+        collection.load(timeout=min(30, timeout))
     else:
-        collection = ensure_collection()
+        collection = ensure_collection(load_timeout=timeout)
     rows = collection.search(
         data=[query_embedding],
         anns_field="embedding",
@@ -53,7 +53,7 @@ def search_index(*, query_embedding, scope, top_k):
         limit=top_k,
         expr=_retrieval_scope_expr(scope),
         output_fields=["chunk_uid", "item_id", "file_uid", "kb_uid", "source_type", "content"],
-        timeout=15,
+        timeout=min(15, timeout),
     )
     results = []
     for hit in rows[0] if rows else []:
@@ -140,12 +140,13 @@ def ensure_collection(
     *,
     host: str = "127.0.0.1",
     port: int = 19530,
+    load_timeout: float = 30,
 ):
     profile = profile or DEFAULT_PROFILE
     _connect(host, port)
     if utility.has_collection(profile.collection_name):
         collection = Collection(profile.collection_name)
-        collection.load(timeout=30)
+        collection.load(timeout=min(30, load_timeout))
         return collection
     from pymilvus import CollectionSchema, DataType, FieldSchema
     fields = [
@@ -163,14 +164,14 @@ def ensure_collection(
         FieldSchema("embedding", DataType.FLOAT_VECTOR, dim=profile.dimension),
     ]
     schema = CollectionSchema(fields, description="Prism knowledge chunks")
-    collection = Collection(profile.collection_name, schema, timeout=15)
+    collection = Collection(profile.collection_name, schema, timeout=min(15, load_timeout))
     index_params = {
         "metric_type": profile.metric,
         "index_type": "IVF_FLAT",
         "params": {"nlist": 128},
     }
-    collection.create_index("embedding", index_params, timeout=30)
-    collection.load(timeout=30)
+    collection.create_index("embedding", index_params, timeout=min(30, load_timeout))
+    collection.load(timeout=min(30, load_timeout))
     return collection
 
 

@@ -32,6 +32,18 @@ def test_dense_passes_complete_native_scope_to_milvus(monkeypatch):
     assert result.candidates[0].metadata["kb_uid"] == "kb-a"
 
 
+def test_dense_caps_milvus_timeout_to_remaining_execution_budget(monkeypatch):
+    from engine.app.retrieval import vector_search as module
+    from engine.app.retrieval.execution_control import RetrievalExecutionControl
+
+    seen = {}
+    monkeypatch.setattr(module, "search_index", lambda **kwargs: seen.update(kwargs) or [])
+    control = RetrievalExecutionControl.with_timeout(60)
+    module.vector_search([0.1], _scope(), 10, control=control)
+
+    assert 0 < seen["timeout"] <= 15
+
+
 def test_dense_failure_is_typed(monkeypatch):
     from engine.app.retrieval import vector_search as module
 
@@ -91,6 +103,26 @@ def test_bm25_failure_is_typed(monkeypatch):
     assert result.problem.retryable is True
 
 
+def test_bm25_passes_remaining_budget_as_request_timeout(monkeypatch):
+    from engine.app.retrieval import es_search as module
+    from engine.app.retrieval.execution_control import RetrievalExecutionControl
+    seen = {}
+    class ScopedES:
+        def search(self, **kwargs):
+            seen.update(kwargs)
+            return {"hits": {"hits": []}}
+    class ES:
+        def options(self, **kwargs):
+            seen["options"] = kwargs
+            return ScopedES()
+    monkeypatch.setattr(module, "get_es", lambda: ES())
+    module.es_fulltext_search("q", _scope(), 10, RetrievalExecutionControl.with_timeout(60))
+    assert 0 < seen["options"]["request_timeout"] <= 30
+    assert seen["options"]["max_retries"] == 0
+    assert seen["options"]["retry_on_timeout"] is False
+    assert "request_timeout" not in seen
+
+
 def test_bm25_malformed_response_is_typed(monkeypatch):
     from engine.app.retrieval import es_search as module
     class ES:
@@ -145,6 +177,19 @@ def test_graph_requires_graph_generation_without_calling_client():
     assert result.health == "failed"
     assert result.problem.code == "GRAPH_GENERATION_REQUIRED"
     assert graph.calls == []
+
+
+def test_graph_passes_managed_transaction_timeout(monkeypatch):
+    from engine.app.retrieval.execution_control import RetrievalExecutionControl
+    from engine.app.retrieval.graph_expand import graph_search
+    timeouts = []
+    class Graph:
+        def _execute_read(self, query, _params, *, timeout):
+            timeouts.append(timeout)
+            return [{"entity_id": "e"}] if "seed_entities" in query else []
+    graph_search("query", _scope(), Graph(), 10, 1, RetrievalExecutionControl.with_timeout(60))
+    assert len(timeouts) == 2
+    assert all(0 < timeout <= 30 for timeout in timeouts)
 
 
 def test_graph_malformed_response_is_typed():

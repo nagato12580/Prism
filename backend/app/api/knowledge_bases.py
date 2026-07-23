@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.models import KnowledgeTopic
+from backend.app.models import EvaluationRun, KnowledgeJob, KnowledgeTopic
 from backend.app.models.knowledge_types import ResourceStatus
 from backend.app.security.actor import ActorContext, get_actor_context
 from backend.app.services.knowledge_access import (
@@ -124,7 +124,6 @@ def get_knowledge_base(
     except KnowledgeAccessDenied:
         raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
 
-
 @router.patch("/{kb_uid}", response_model=KnowledgeBaseResponse)
 def update_knowledge_base(
     kb_uid: str,
@@ -174,6 +173,27 @@ def delete_knowledge_base(
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
         raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+
+    topic = (
+        db.query(KnowledgeTopic)
+        .filter_by(tenant_id=actor.tenant_id, kb_uid=kb_uid)
+        .with_for_update()
+        .one()
+    )
+
+    active_run_ids = db.query(EvaluationRun.id).filter(
+        EvaluationRun.tenant_id == actor.tenant_id,
+        EvaluationRun.kb_uid == kb_uid,
+        EvaluationRun.status.in_({"queued", "claimed", "running", "cancel_requested"}),
+    )
+    active_job = db.query(KnowledgeJob.id).filter(
+        KnowledgeJob.tenant_id == actor.tenant_id,
+        KnowledgeJob.kb_uid == kb_uid,
+        KnowledgeJob.job_type == "evaluation",
+        KnowledgeJob.status.in_({"queued", "claimed", "running"}),
+    ).first()
+    if db.query(active_run_ids.exists()).scalar() or active_job is not None:
+        raise ApiProblem(409, "EVALUATION_RUN_ACTIVE", "Active evaluations must finish before deleting the knowledge base")
 
     topic.status = ResourceStatus.DELETING.value
     topic.deleted_at = local_now()

@@ -32,18 +32,21 @@ def _batches(texts: list[str], size: int) -> Iterator[list[str]]:
         yield texts[start : start + batch_size]
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(texts: list[str], *, timeout: float | None = None) -> list[list[float]]:
     """Embed texts in bounded batches and preserve input order."""
     if not texts:
         return []
 
     client = _get_client()
+    if timeout is not None:
+        client = client.with_options(timeout=timeout, max_retries=0)
     embeddings: list[list[float]] = []
     batches = list(_batches(texts, settings.EMBEDDING_BATCH_SIZE))
 
     for index, batch in enumerate(batches, start=1):
         try:
-            resp = client.embeddings.create(model=settings.EMBEDDING_MODEL, input=batch)
+            kwargs = {"model": settings.EMBEDDING_MODEL, "input": batch}
+            resp = client.embeddings.create(**kwargs)
         except Exception as exc:
             raise EmbeddingProviderError(
                 "Embedding request failed "
@@ -57,6 +60,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return embeddings
 
 
-def embed_query(text: str) -> list[float]:
+def embed_query(text: str, *, timeout: float | None = None) -> list[float]:
     """Embed a single query string."""
-    return embed_texts([text])[0]
+    return embed_texts([text], timeout=timeout)[0]

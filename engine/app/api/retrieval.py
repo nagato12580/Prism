@@ -12,6 +12,7 @@ from engine.app.config import settings
 from engine.app.retrieval.contracts import SearchScope
 from engine.app.retrieval.evidence import ChannelProblem, ChannelScore, Evidence, RetrievalResponse
 from engine.app.retrieval.unified import unified_search
+from engine.app.retrieval.execution_control import RetrievalExecutionAborted, RetrievalExecutionControl
 
 
 router = APIRouter(prefix="/internal/retrieval", tags=["internal-retrieval"])
@@ -129,7 +130,8 @@ def open_retrieval_resources():
 
 
 def execute_retrieval(
-    request: RetrievalRequest, scope: AuthorizedKnowledgeScope
+    request: RetrievalRequest, scope: AuthorizedKnowledgeScope,
+    control: RetrievalExecutionControl | None = None,
 ) -> RetrievalResponse:
     scope = scope.model_copy(update={
         "file_uids": request.filters.file_uids,
@@ -147,7 +149,10 @@ def execute_retrieval(
                 scope=scope,
                 graph_hops=request.config.graph_hops,
                 diagnostics=diagnostics,
+                control=control,
             )
+    except RetrievalExecutionAborted:
+        raise
     except ValueError as exc:
         return RetrievalResponse(status="invalid_request", warnings=[
             ChannelProblem(code="INVALID_RETRIEVAL_REQUEST", message=str(exc), retryable=False)

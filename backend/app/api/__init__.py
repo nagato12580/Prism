@@ -16,6 +16,7 @@ from .knowledge_files import router as knowledge_files_router
 from .agent_tools import router as agent_tools_router
 from .citations import router as citations_router
 from .knowledge_retrieval import router as knowledge_retrieval_router
+from .knowledge_evaluation import router as knowledge_evaluation_router
 
 
 def register_routers(app):
@@ -35,4 +36,5 @@ def register_routers(app):
     api_prefix.include_router(agent_tools_router)
     api_prefix.include_router(citations_router)
     api_prefix.include_router(knowledge_retrieval_router)
+    api_prefix.include_router(knowledge_evaluation_router)
     app.include_router(api_prefix)

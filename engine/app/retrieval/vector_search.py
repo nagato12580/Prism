@@ -2,13 +2,21 @@
 
 from ..indexing.milvus_index import search_index
 from .contracts import Candidate, ChannelResult, SearchScope
+from .execution_control import RetrievalExecutionAborted, RetrievalExecutionControl
 
 
 def vector_search(
-    query_embedding: list[float], scope: SearchScope, top_k: int
+    query_embedding: list[float], scope: SearchScope, top_k: int,
+    control: RetrievalExecutionControl | None = None,
 ) -> ChannelResult:
     try:
-        rows = search_index(query_embedding=query_embedding, scope=scope, top_k=top_k)
+        if control: control.checkpoint()
+        kwargs = dict(query_embedding=query_embedding, scope=scope, top_k=top_k)
+        if control: kwargs["timeout"] = control.remaining_timeout(15)
+        rows = search_index(**kwargs)
+        if control: control.checkpoint()
+    except RetrievalExecutionAborted:
+        raise
     except Exception:
         return ChannelResult.failed("dense", "VECTOR_INDEX_UNAVAILABLE", retryable=True)
     try:

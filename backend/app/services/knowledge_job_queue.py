@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass, field
 
-from backend.app.models import KnowledgeFile, KnowledgeJob
+from backend.app.models import EvaluationRun, KnowledgeFile, KnowledgeJob
 from backend.app.utils.time import local_now
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 
@@ -143,6 +143,34 @@ def enqueue_governance_job(db, redis_client, resource_id, *, queue_name):
     db.commit()
     db.refresh(job)
     return _enqueue_active_job_message(db, redis_client, queue_name, job)
+
+
+def enqueue_evaluation_job(db, redis_client, run_id, *, queue_name):
+    """Durably create/reuse and publish an evaluation job after the run exists."""
+    run = db.query(EvaluationRun).filter_by(id=run_id).with_for_update().one_or_none()
+    if run is None:
+        raise ValueError("evaluation_run_not_found")
+    active = _active_job(db, run.id, "evaluation", for_update=True)
+    if active is not None:
+        return _enqueue_job_message(db, redis_client, queue_name, active)
+    job = new_evaluation_job(run)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return _enqueue_active_job_message(db, redis_client, queue_name, job)
+
+
+def new_evaluation_job(run):
+    return KnowledgeJob(
+        tenant_id=run.tenant_id, kb_uid=run.kb_uid, file_uid=None,
+        idempotency_key=f"evaluation:{run.id}", job_type="evaluation", resource_id=run.id,
+        status="queued", stage=STAGE_CREATED, max_attempts=3, available_at=local_now(),
+        payload={"run_uid": run.run_uid}, progress_total=run.progress_total,
+    )
+
+
+def publish_evaluation_job(db, redis_client, job, *, queue_name):
+    return _enqueue_job_message(db, redis_client, queue_name, job)
 
 
 def enqueue_topic_ingest_jobs(db, redis_client, topic_id, *, queue_name):

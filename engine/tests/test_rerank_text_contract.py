@@ -46,6 +46,21 @@ def test_reranker_receives_chunk_text_not_uuid(monkeypatch):
     assert out[0]["rerank_score"] == 0.9
 
 
+def test_reranker_passes_remaining_budget_to_urlopen(monkeypatch):
+    from engine.app.retrieval import rerank as module
+    from engine.app.retrieval.execution_control import RetrievalExecutionControl
+    seen = {}
+    def fake_post(_query, _documents, _top_n, timeout):
+        seen["timeout"] = timeout
+        return [{"index": 0, "relevance_score": 0.9}]
+    monkeypatch.setattr(module, "_post_rerank", fake_post)
+    module.rerank(
+        "query", [_candidate("uuid-c1")], 1, enabled=True,
+        control=RetrievalExecutionControl.with_timeout(60),
+    )
+    assert 0 < seen["timeout"] <= 30
+
+
 def test_unified_loads_child_text_before_rerank(monkeypatch):
     from engine.app.retrieval import unified
 

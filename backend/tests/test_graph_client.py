@@ -39,6 +39,36 @@ class FakeDriver:
         self.closed = True
 
 
+def test_execute_read_timeout_uses_explicit_transaction_without_managed_retry():
+    events = []
+    class Result:
+        def data(self):
+            events.append("data")
+            return [{"value": 1}]
+    class Tx:
+        def run(self, query, **params):
+            events.append(("run", query, params))
+            return Result()
+        def commit(self): events.append("commit")
+        def close(self): events.append("close")
+    class Session(FakeSession):
+        def begin_transaction(self, *, timeout):
+            events.append(("begin", timeout))
+            return Tx()
+        def execute_read(self, _fn, **_kwargs):
+            raise AssertionError("managed transaction must not be used with a deadline")
+    driver = FakeDriver()
+    driver.session_obj = Session()
+
+    rows = GraphClient(driver=driver)._execute_read("RETURN $value AS value", {"value": 1}, timeout=2.5)
+
+    assert rows == [{"value": 1}]
+    assert events == [
+        ("begin", 2.5), ("run", "RETURN $value AS value", {"value": 1}),
+        "data", "commit", "close",
+    ]
+
+
 def test_upsert_ckp_emits_merge_with_params_and_database():
     driver = FakeDriver()
     client = GraphClient(driver=driver, database="prism")

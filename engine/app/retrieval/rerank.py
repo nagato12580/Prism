@@ -11,11 +11,12 @@ import numbers
 import urllib.request
 
 from ..config import settings
+from .execution_control import RetrievalExecutionAborted, RetrievalExecutionControl
 
 logger = logging.getLogger("uvicorn.error")
 
 
-def _post_rerank(query: str, docs: list[str], top_n: int) -> list[dict]:
+def _post_rerank(query: str, docs: list[str], top_n: int, timeout: float | None = None) -> list[dict]:
     """POST to the configured rerank endpoint; return [{"index": int, ...}].
 
     Raises on any problem so the caller can degrade.
@@ -28,7 +29,7 @@ def _post_rerank(query: str, docs: list[str], top_n: int) -> list[dict]:
         url, data=body, method="POST",
         headers={"Authorization": f"Bearer {settings.RERANK_API_KEY}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=settings.RERANK_TIMEOUT_SECONDS) as resp:
+    with urllib.request.urlopen(req, timeout=timeout or settings.RERANK_TIMEOUT_SECONDS) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     results = data.get("results") or data.get("data") or []
     return [
@@ -70,6 +71,7 @@ def rerank(
     enabled: bool | None = None,
     *,
     warnings: list[dict] | None = None,
+    control: RetrievalExecutionControl | None = None,
 ) -> list[dict]:
     """Rerank candidates by relevance to query. Never raises.
 
@@ -85,8 +87,15 @@ def rerank(
         _warn_unavailable(warnings, ValueError("rerank candidates must contain non-empty text"))
         return candidates[:top_n]
     try:
-        order = _post_rerank(query, docs, top_n)
+        if control: control.checkpoint()
+        if control:
+            order = _post_rerank(query, docs, top_n, control.remaining_timeout(30))
+        else:
+            order = _post_rerank(query, docs, top_n)
+        if control: control.checkpoint()
         validated = _validated_order(order, len(candidates), top_n)
+    except RetrievalExecutionAborted:
+        raise
     except Exception as exc:
         _warn_unavailable(warnings, exc)
         return candidates[:top_n]

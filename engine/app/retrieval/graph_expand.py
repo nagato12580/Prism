@@ -10,12 +10,14 @@ import logging
 from backend.app.models import EntityAlias, KnowledgeEntity
 from backend.app.services.entity_resolution import normalize_entity_key
 from .contracts import Candidate, ChannelResult, SearchScope
+from .execution_control import RetrievalExecutionAborted, RetrievalExecutionControl
 
 logger = logging.getLogger("uvicorn.error")
 
 
 def graph_search(
-    query: str, scope: SearchScope, graph_client, top_k: int, hops: int
+    query: str, scope: SearchScope, graph_client, top_k: int, hops: int,
+    control: RetrievalExecutionControl | None = None,
 ) -> ChannelResult:
     """Retrieve graph-backed chunks using fully scoped Cypher at every stage."""
     if not scope.graph_generation:
@@ -46,9 +48,16 @@ def graph_search(
     ORDER BY score DESC LIMIT $top_k
     """
     try:
-        seeds = graph_client._execute_read(seed_query, params)
+        if control: control.checkpoint()
+        timeout = control.remaining_timeout(30) if control else None
+        seeds = graph_client._execute_read(seed_query, params, **({"timeout": timeout} if control else {}))
+        if control: control.checkpoint()
         seed_ids = [row["entity_id"] for row in seeds if row.get("entity_id")]
-        rows = graph_client._execute_read(path_query, {**params, "entity_ids": seed_ids})
+        timeout = control.remaining_timeout(30) if control else None
+        rows = graph_client._execute_read(path_query, {**params, "entity_ids": seed_ids}, **({"timeout": timeout} if control else {}))
+        if control: control.checkpoint()
+    except RetrievalExecutionAborted:
+        raise
     except Exception:
         logger.exception("[graph_search] scoped Cypher failed")
         return ChannelResult.failed("graph", "GRAPH_INDEX_UNAVAILABLE", retryable=True)

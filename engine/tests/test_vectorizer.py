@@ -57,3 +57,18 @@ def test_embed_texts_wraps_provider_timeout_with_context(monkeypatch):
     assert "test-embedding" in message
     assert "batch 1/1" in message
     assert "Request timed out." in message
+
+
+def test_embed_query_uses_non_retrying_client_with_hard_timeout(monkeypatch):
+    seen = {}
+    class FakeEmbeddings:
+        def create(self, *, model, input):
+            return _FakeEmbeddingResponse([[0.1]])
+    class FakeClient:
+        embeddings = FakeEmbeddings()
+        def with_options(self, **kwargs):
+            seen.update(kwargs)
+            return self
+    monkeypatch.setattr(vectorizer, "_get_client", lambda: FakeClient())
+    vectorizer.embed_query("q", timeout=7.5)
+    assert seen == {"timeout": 7.5, "max_retries": 0}

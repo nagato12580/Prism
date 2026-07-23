@@ -27,6 +27,7 @@ from .knowledge_governance import (
 from .entity import KnowledgeEntity, EntityAlias, EntityMention, EntityRelation
 from .graph_community import GraphCommunity
 from .graph_insight_summary import GraphInsightSummary
+from .knowledge_evaluation import EvaluationDataset, EvaluationDatasetItem, EvaluationRun, EvaluationRunItem
 
 __all__ = [
     "KnowledgeTopic",
@@ -75,4 +76,8 @@ __all__ = [
     "EntityRelation",
     "GraphCommunity",
     "GraphInsightSummary",
+    "EvaluationDataset",
+    "EvaluationDatasetItem",
+    "EvaluationRun",
+    "EvaluationRunItem",
 ]

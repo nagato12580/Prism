@@ -4,9 +4,10 @@ import os
 from ..es_client import get_es
 from ..indexing.es_index import V2_INDEX_NAME
 from .contracts import Candidate, ChannelResult, SearchScope
+from .execution_control import RetrievalExecutionAborted, RetrievalExecutionControl
 
 
-def es_fulltext_search(query: str, scope: SearchScope, top_k: int) -> ChannelResult:
+def es_fulltext_search(query: str, scope: SearchScope, top_k: int, control: RetrievalExecutionControl | None = None) -> ChannelResult:
     filters = [
         {"term": {"tenant_id": scope.tenant_id}},
         {"term": {"kb_uid": scope.kb_uid}},
@@ -17,13 +18,24 @@ def es_fulltext_search(query: str, scope: SearchScope, top_k: int) -> ChannelRes
     if scope.source_types:
         filters.append({"terms": {"source_type": list(scope.source_types)}})
     try:
-        response = get_es().search(
+        if control: control.checkpoint()
+        client = get_es()
+        if control:
+            client = client.options(
+                request_timeout=control.remaining_timeout(30),
+                max_retries=0,
+                retry_on_timeout=False,
+            )
+        response = client.search(
             index=os.getenv("PRISM_RETRIEVAL_ES_INDEX", V2_INDEX_NAME), routing=scope.kb_uid, size=top_k,
             query={"bool": {
                 "must": [{"match": {"content": {"query": query}}}],
                 "filter": filters,
             }},
         )
+        if control: control.checkpoint()
+    except RetrievalExecutionAborted:
+        raise
     except Exception:
         return ChannelResult.failed("bm25", "FULLTEXT_INDEX_UNAVAILABLE", retryable=True)
 

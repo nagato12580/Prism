@@ -157,9 +157,17 @@ class GraphClient:
             {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id},
         )
 
-    def _execute_read(self, query: str, params: dict[str, Any] | None = None) -> list[dict]:
+    def _execute_read(self, query: str, params: dict[str, Any] | None = None, *, timeout: float | None = None) -> list[dict]:
         with self.driver.session(database=self.database) as session:
-            return session.execute_read(lambda tx: tx.run(query, **(params or {})).data())
+            if timeout is None:
+                return session.execute_read(lambda tx: tx.run(query, **(params or {})).data())
+            tx = session.begin_transaction(timeout=timeout)
+            try:
+                rows = tx.run(query, **(params or {})).data()
+                tx.commit()
+                return rows
+            finally:
+                tx.close()
 
     def read_entity_communities(self) -> dict[str, int]:
         """Return {entity_id: community_id} for entities that already have one."""

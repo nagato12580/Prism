@@ -13,6 +13,7 @@ from .es_search import es_fulltext_search
 from .vector_search import vector_search
 from ..ingestion.vectorizer import embed_query
 from .rerank import rerank
+from .execution_control import RetrievalExecutionAborted, RetrievalExecutionControl
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -64,12 +65,15 @@ def recall(
     graph_client=None,
     top_k: int = 30,
     hops: int = 1,
+    control: RetrievalExecutionControl | None = None,
 ) -> dict:
     """Call each enabled raw channel once and fuse their results once."""
-    dense = vector_search(query_embedding, scope, top_k)
-    bm25 = es_fulltext_search(query, scope, top_k)
+    if control: control.checkpoint()
+    dense = vector_search(query_embedding, scope, top_k, **({"control": control} if control else {}))
+    if control: control.checkpoint()
+    bm25 = es_fulltext_search(query, scope, top_k, **({"control": control} if control else {}))
     if scope.graph_generation and graph_client is not None:
-        graph = graph_search(query, scope, graph_client, top_k, hops)
+        graph = graph_search(query, scope, graph_client, top_k, hops, **({"control": control} if control else {}))
     else:
         graph = ChannelResult.failed("graph", "GRAPH_UNAVAILABLE", retryable=False)
 
@@ -417,6 +421,7 @@ def unified_search(
     allow_legacy_unscoped: bool = False,
     graph_hops: int | None = None,
     diagnostics: dict | None = None,
+    control: RetrievalExecutionControl | None = None,
 ) -> list[dict]:
     """Compatibility SearchHit adapter over the single-fusion recall path."""
     if scope is None:
@@ -434,7 +439,11 @@ def unified_search(
             allowed_item_ids=allowed_item_ids,
         )
     try:
-        embedding = embed_query(query)
+        if control: control.checkpoint()
+        embedding = embed_query(query, **({"timeout": control.remaining_timeout(30)} if control else {}))
+        if control: control.checkpoint()
+    except RetrievalExecutionAborted:
+        raise
     except Exception as exc:
         logger.warning("[unified] embedding_failed err=%s", exc)
         embedding = []
@@ -448,6 +457,7 @@ def unified_search(
         graph_client=graph_client,
         top_k=max(top_k, settings.RERANK_TOP_N),
         hops=hops,
+        control=control,
     )
     channel_warnings = [
         result.problem.model_dump()
@@ -470,14 +480,19 @@ def unified_search(
         hit = _enrich_graph_hit(db, hit)
         hit["graph_rag"] = _build_graph_rag_payload(hit)
         candidates.append(hit)
+    if control: control.checkpoint()
     candidates = _filter_stale_hits(db, candidates)
+    if control: control.checkpoint()
     candidates = _load_child_texts(db, candidates, scope)
+    if control: control.checkpoint()
 
     # Rerank child text here; the answer layer expands selected hits to parent
     # context later (small-to-big).
     top_n = max(top_k, settings.RERANK_TOP_N)
     rerank_warnings: list[dict] = []
-    reranked = rerank(query, candidates, top_n=top_n, warnings=rerank_warnings)
+    rerank_kwargs = {"warnings": rerank_warnings}
+    if control: rerank_kwargs["control"] = control
+    reranked = rerank(query, candidates, top_n=top_n, **rerank_kwargs)
     if rerank_warnings:
         reranked = [{**hit, "warnings": list(rerank_warnings)} for hit in reranked]
     if diagnostics is not None:

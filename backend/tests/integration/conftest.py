@@ -58,6 +58,10 @@ def mysql_engine():
 
 
 TABLE_NAMES = [
+    "evaluation_run_item",
+    "evaluation_run",
+    "evaluation_dataset_item",
+    "evaluation_dataset",
     "knowledge_job",
     "knowledge_chunk",
     "knowledge_file",
@@ -67,12 +71,18 @@ TABLE_NAMES = [
 
 
 @pytest.fixture(autouse=True)
-def _truncate_before_each_test(mysql_engine):
+def _truncate_before_each_test(request):
+    # Migration tests must start before ORM metadata can create any tables.
+    if request.node.path.name == "test_knowledge_evaluation_mysql.py":
+        yield
+        return
+    mysql_engine = request.getfixturevalue("mysql_engine")
     with mysql_engine.begin() as conn:
         conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
         for name in TABLE_NAMES:
             conn.execute(text(f"TRUNCATE TABLE {name}"))
         conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+    yield
 
 
 @pytest.fixture()

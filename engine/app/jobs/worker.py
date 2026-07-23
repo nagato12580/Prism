@@ -11,7 +11,7 @@ from sqlalchemy import and_
 from sqlalchemy import or_
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models import KnowledgeFile, KnowledgeJob, KnowledgeTopic
+from backend.app.models import EvaluationRun, KnowledgeFile, KnowledgeJob, KnowledgeTopic
 from backend.app.services.knowledge_cleanup import KnowledgeCleanupService
 from backend.app.services.document_text_quality import assess_document_text
 from backend.app.services.knowledge_governance import settle_document_item_to_governance
@@ -22,6 +22,7 @@ from engine.app.ingestion.pipeline import ingest_item
 
 from . import redis_queue
 from .knowledge_handlers import handle_delete, handle_parse
+from .evaluation_handlers import handle_evaluation
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
@@ -30,6 +31,8 @@ logger = logging.getLogger("uvicorn.error")
 
 ACTIVE_STATUSES = {"queued", "processing"}
 NEEDS_REPUBLISH_STAGES = {"created", "retry", "recovered"}
+EVALUATION_REAPER_INTERVAL_SECONDS = 30
+_EVALUATION_REAPER_LOCK = threading.Lock()
 
 
 class _MissingExternalIndex:
@@ -109,6 +112,8 @@ def dispatch_typed_job(db, job_id, worker_id):
             KnowledgeJobService(db),
             _build_cleanup_service(db, job),
         )
+    if job.job_type == "evaluation":
+        return handle_evaluation(job_id, worker_id, db, KnowledgeJobService(db))
     return None
 
 
@@ -121,7 +126,7 @@ def run_ingest_queue_job(job_id, *, worker_id):
     db = _Session()
     try:
         job_type = db.query(KnowledgeJob.job_type).filter(KnowledgeJob.id == job_id).scalar()
-        if job_type in {"parse", "delete"}:
+        if job_type in {"parse", "delete", "evaluation"}:
             return dispatch_typed_job(db, job_id, worker_id)
     finally:
         db.close()
@@ -297,6 +302,74 @@ def recover_stale_jobs(stale_seconds=None):
         for job in jobs:
             _publish_job_and_mark_enqueued(db, job)
         return len(jobs)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def recover_expired_evaluation_jobs():
+    if not _EVALUATION_REAPER_LOCK.acquire(blocking=False):
+        return 0
+    try:
+        return _recover_expired_evaluation_jobs()
+    finally:
+        _EVALUATION_REAPER_LOCK.release()
+
+
+def _recover_expired_evaluation_jobs():
+    """Requeue typed evaluation jobs whose worker lease expired."""
+    now = local_now()
+    db = _Session()
+    recovered = []
+    try:
+        jobs = (
+            db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.job_type == "evaluation",
+                KnowledgeJob.status.in_({"claimed", "running"}),
+                KnowledgeJob.lease_expires_at.is_not(None),
+                KnowledgeJob.lease_expires_at <= now,
+            )
+            .with_for_update()
+            .all()
+        )
+        for job in jobs:
+            if job.cancel_requested_at is not None:
+                job.status = "canceled"
+                job.finished_at = now
+                job.lease_owner = None
+                job.lease_expires_at = None
+                run = db.get(EvaluationRun, job.resource_id)
+                if run is not None:
+                    run.status = "canceled"
+                continue
+            if job.status == "running" and job.attempt >= job.max_attempts:
+                job.status = "failed"
+                job.error_code = "EVALUATION_LEASE_EXHAUSTED"
+                job.error_message = "Evaluation worker lease expired"
+                job.retryable = False
+                job.finished_at = now
+                run = db.get(EvaluationRun, job.resource_id)
+                if run is not None:
+                    run.status = "failed"
+                    run.error_message = "evaluation run failed"
+                continue
+            job.status = "queued"
+            job.stage = "recovered"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.heartbeat_at = now
+            job.available_at = now
+            recovered.append(job)
+            run = db.get(EvaluationRun, job.resource_id)
+            if run is not None:
+                run.status = "queued"
+        db.commit()
+        for job in recovered:
+            _publish_job_and_mark_enqueued(db, job)
+        return len(recovered)
     except Exception:
         db.rollback()
         raise
@@ -550,8 +623,17 @@ class KnowledgeWorkerManager:
         if self._threads:
             return
         recover_stale_jobs()
+        recover_expired_evaluation_jobs()
         republish_due_queued_jobs()
         self._client = redis_queue.redis_client()
+        reaper = threading.Thread(
+            target=self._evaluation_reaper_loop,
+            args=(),
+            daemon=True,
+            name="knowledge-evaluation-lease-reaper",
+        )
+        self._threads.append(reaper)
+        reaper.start()
         for index in range(max(1, settings.KNOWLEDGE_INGEST_WORKERS)):
             worker_id = _worker_id(f"ingest-{index}")
             thread = threading.Thread(
@@ -595,3 +677,10 @@ class KnowledgeWorkerManager:
                     exc,
                 )
                 time.sleep(1)
+
+    def _evaluation_reaper_loop(self):
+        while not self._stop.wait(EVALUATION_REAPER_INTERVAL_SECONDS):
+            try:
+                recover_expired_evaluation_jobs()
+            except Exception as exc:
+                logger.exception("[knowledge.worker] evaluation lease sweep failed error=%s", exc)
