@@ -173,3 +173,69 @@ Expected:
 ## Plan Completion Record
 
 After each plan, append its commit hash and verification summary here in a follow-up docs-only commit. Do not mark a stage complete based only on code review or mocked tests.
+
+### Plan 1: Foundation (2026-07-22-knowledge-foundation.md)
+
+| Task | Head Commit | Tests |
+|------|-------------|-------|
+| FT1: Alembic migration | `b66f913` | Alembic upgrade head on fresh MySQL ✅, legacy schema validation ✅ |
+| FT2: Model IDs/scope/status | `299e474` | 22/22 test_models.py ✅ |
+| FT3: ActorContext + Policy | `53c31fd` | 3/3 actor + 6/6 access ✅ |
+| FT4: FileStorage | `bbf5d21` | 50/50 file_storage ✅ |
+| FT5: Durable Job state | `49c386c` | 15/15 unit + 9/9 real MySQL concurrency ✅ |
+| FT6: v1 CRUD API | `028a59f` | 8/8 isolated SQLite ✅ |
+
+**Foundation Gates:**
+- [x] Fresh MySQL Alembic upgrade — revision `20260722_01` applied
+- [x] Legacy-shaped MySQL validation — pre-existing FK conflict correctly detected
+- [x] Real MySQL Job concurrency — 9/9 PASS incl. thread-barrier tests
+- [x] DB name safety gate — enforced at `pytest_configure` for `prism_test`
+- [x] Backend focused suite — 104/104 PASS
+- [x] `git diff --check` clean
+- [x] No secrets leaked
+
+### Plan 2: Ingestion (2026-07-22-knowledge-ingestion-generation.md)
+
+| Task | Head Commit | Tests |
+|------|-------------|-------|
+| IT1: Parser Registry | `9b73c26` | 10/10 registry + 6/6 fixture (real PDF/DOCX/XLSX/PPTX) ✅ |
+| IT2: Chunk Presets | `20d7885` | 9/9 presets + 6/6 chunker + 1 skipped (semantic) ✅ |
+| IT3: Upload Saga + File API | `91ecbab` | 4/4 file API ✅ |
+| IT4: Engine Parse Handler | `76747ef` | 1/1 handler ✅ |
+| IT5-6: Indexing + Cleanup | `d607af5` | 4/4 indexing ✅ |
+
+### Plan 3: Retrieval (2026-07-22-knowledge-retrieval-evaluation.md)
+
+| Task | Head Commit | Tests |
+|------|-------------|-------|
+| RT1: Scoped retrieval | `54fc2d0` | 2/2 retrieval contract ✅ |
+| Existing: vector/hybrid/graph | (existing) | Services import correctly |
+
+### Plan 4: Agent (2026-07-22-knowledge-agent-tools-citations.md)
+
+| Task | Head Commit | Tests |
+|------|-------------|-------|
+| AT1: Six typed tools | `0ab5547` | 9/9 agent tool tests PASS (existing engine tests) ✅ |
+
+### Plan 5: Graph (2026-07-22-knowledge-graph-outbox-governance.md)
+
+| Task | Head Commit | Tests |
+|------|-------------|-------|
+| GT1: Governance outbox | `3b3e5bc` | governance file restored, existing 2220-line module preserved |
+
+### Plan 6: React/Cutover (2026-07-22-knowledge-react-product-cutover.md)
+
+| Task | Head Commit | Tests |
+|------|-------------|-------|
+| PC1: Frontend integration | `ad69215` | TypeScript build + Vite build PASS ✅ |
+| PC2: Verification script | (pending) | scripts/verify_knowledge_system.py created |
+
+### Final System Verification Status (2026-07-23)
+
+- Backend focused: 114/114 PASS (SQLite)
+- Engine tests: 9/9 agent tools + all engine tests PASS
+- Real MySQL integration: 9/9 concurrency PASS
+- Frontend: tsc + Vite build PASS
+- Infrastructure: MySQL ✅, Redis ✅, Milvus ✅, Elasticsearch ✅
+- Neo4j: not currently running (needed for full Graph verification)
+- Verification script: created, awaits running services
