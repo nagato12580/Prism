@@ -55,6 +55,7 @@ class Settings:
     ES_PASSWORD: str = os.getenv("ES_PASSWORD", "")
 
     JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret")
+    KNOWLEDGE_SCOPE_SECRET: str = os.getenv("KNOWLEDGE_SCOPE_SECRET", "")
     MEMORY_EXTRACTION_AUTO_ENABLED: bool = os.getenv("MEMORY_EXTRACTION_AUTO_ENABLED", "0") == "1"
     MEMORY_SCHEDULED_ENABLED: bool = os.getenv("MEMORY_SCHEDULED_ENABLED", "1") == "1"
     MEMORY_SCHEDULED_INTERVAL_MINUTES: int = int(os.getenv("MEMORY_SCHEDULED_INTERVAL_MINUTES", "30"))
