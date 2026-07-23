@@ -1,5 +1,6 @@
 # backend/tests/integration/conftest.py
 import os
+import re
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -11,14 +12,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 from backend.app.database import Base
 from backend.app.models import *  # noqa
 
+_REQUIRED_DB_NAME = "prism_test"
+
 
 def _get_mysql_url():
     for key in ("PRISM_TEST_DATABASE_URL", "MYSQL_TEST_DATABASE_URL"):
         url = os.environ.get(key)
         if url:
-            if "mysql" in url or "mariadb" in url:
+            if any(proto in url for proto in ("mysql", "mariadb")):
                 return url
     return None
+
+
+def _resolve_db_name(url: str) -> str:
+    match = re.search(r"/([^/?]+)(?:\?|$)", url.split("@")[-1] if "@" in url else url)
+    if match:
+        return match.group(1)
+    return ""
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    url = _get_mysql_url()
+    if url:
+        db_name = _resolve_db_name(url)
+        if db_name != _REQUIRED_DB_NAME:
+            pytest.exit(
+                f"Refusing to run MySQL integration tests: database name is "
+                f"{db_name!r}, must be {_REQUIRED_DB_NAME!r}."
+            )
+        os.environ["DATABASE_URL"] = url
+    else:
+        config.option.markexpr = "not mysql"
 
 
 @pytest.fixture(scope="session")
@@ -32,9 +57,26 @@ def mysql_engine():
     engine.dispose()
 
 
+TABLE_NAMES = [
+    "knowledge_job",
+    "knowledge_chunk",
+    "knowledge_file",
+    "knowledge_item",
+    "knowledge_topic",
+]
+
+
+@pytest.fixture(autouse=True)
+def _truncate_before_each_test(mysql_engine):
+    with mysql_engine.begin() as conn:
+        conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+        for name in TABLE_NAMES:
+            conn.execute(text(f"TRUNCATE TABLE {name}"))
+        conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+
+
 @pytest.fixture()
 def mysql_session(mysql_engine):
-    _truncate_knowledge_tables(mysql_engine)
     TestingSession = sessionmaker(bind=mysql_engine, autocommit=False, autoflush=False)
     session = TestingSession()
     yield session
@@ -43,7 +85,6 @@ def mysql_session(mysql_engine):
 
 @pytest.fixture()
 def mysql_session_1(mysql_engine):
-    _truncate_knowledge_tables(mysql_engine)
     TestingSession = sessionmaker(bind=mysql_engine, autocommit=False, autoflush=False)
     session = TestingSession()
     yield session
@@ -52,19 +93,7 @@ def mysql_session_1(mysql_engine):
 
 @pytest.fixture()
 def mysql_session_2(mysql_engine):
-    _truncate_knowledge_tables(mysql_engine)
     TestingSession = sessionmaker(bind=mysql_engine, autocommit=False, autoflush=False)
     session = TestingSession()
     yield session
     session.close()
-
-
-def _truncate_knowledge_tables(engine):
-    with engine.begin() as conn:
-        conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
-        conn.execute(text("TRUNCATE TABLE knowledge_job"))
-        conn.execute(text("TRUNCATE TABLE knowledge_chunk"))
-        conn.execute(text("TRUNCATE TABLE knowledge_file"))
-        conn.execute(text("TRUNCATE TABLE knowledge_item"))
-        conn.execute(text("TRUNCATE TABLE knowledge_topic"))
-        conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
