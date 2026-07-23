@@ -242,8 +242,16 @@ def test_stage_then_commit_produces_uri_readable(tmp_path):
     assert body == b"content"
 
 
-def test_stage_rejects_filename_with_only_spaces(tmp_path):
+def test_stage_rejects_filename_that_strips_to_empty(tmp_path):
     storage = _storage(tmp_path)
-    # Path.name strips surrounding spaces but the resulting name may be empty
-    # or still dangerous; we accept whatever Path.name yields but reject empty
-    pass  # Path("   ").name == "   " which is non-empty but not meaningful
+    # PurePath.name of a whitespace-only filename may yield the original
+    # whitespace string, but _validate_filename already rejects empty.
+    # Test the primary empty rejection path directly.
+    with pytest.raises(ValueError):
+        storage.stage("t", "kb", "f", "", b"x")
+
+def test_stage_accepts_filename_with_spaces(tmp_path):
+    storage = _storage(tmp_path)
+    staged = storage.stage("t", "kb", "f", "doc  with spaces.md", b"content")
+    assert staged.sha256 is not None
+    assert staged.size_bytes == 7

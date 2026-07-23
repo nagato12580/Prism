@@ -40,9 +40,6 @@ _PATH_SEPARATOR_CHARS = re.compile(r"[/\\]")
 # Matches a Windows drive letter prefix (e.g. "C:", "D:").
 _DRIVE_LETTER = re.compile(r"^[a-zA-Z]:$")
 
-# Matches UNC-ish prefixes like "\\server" or "//server".
-_UNC_PREFIX = re.compile(r"^[/\\]{2}")
-
 
 def _validate_path_component(value: str, label: str) -> None:
     """Reject path components that could escape their intended directory."""
