@@ -1,14 +1,21 @@
 import json
 import os
+import pytest
+from pydantic import ValidationError
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./_deep_search_import.db")
 
 from engine.app.agent.rag.agentic import AgenticRagResult
 from engine.app.agent.tools.base import BUILTIN_REGISTRY, ToolContext, build_enabled_tools
+from engine.app.api.chat import ChatRequest
 
 
 class FakeDeepRagRunner:
-    def run(self, query: str):
+    def __init__(self):
+        self.calls = []
+
+    def run(self, query: str, *, config=None):
+        self.calls.append((query, config))
         return AgenticRagResult(
             status="sufficient",
             summary=f"Deep unified evidence for {query}",
@@ -43,7 +50,8 @@ def test_deep_knowledge_search_is_registered_but_default_disabled():
 
 
 def test_deep_knowledge_search_returns_unified_graphrag_payload():
-    ctx = ToolContext(rag_runner=FakeDeepRagRunner(), citations=[], stats_holder={})
+    rag_runner = FakeDeepRagRunner()
+    ctx = ToolContext(rag_runner=rag_runner, citations=[], stats_holder={})
     tools = build_enabled_tools(ctx, overrides={"deep_knowledge_search": True})
     tool = next(tool for tool in tools if tool.name == "deep_knowledge_search")
 
@@ -64,6 +72,30 @@ def test_deep_knowledge_search_returns_unified_graphrag_payload():
     assert any(step["agent"] == "JudgeAgent" for step in payload["trace_steps"])
     assert ctx.citations == payload["sources"]
     assert ctx.stats_holder["deep_knowledge_search"]["evidence_count"] == len(payload["evidence"])
+    query, config = rag_runner.calls[0]
+    assert query == "how does MiniMind-O work"
+    assert config.mode == "deep"
+    assert config.top_k == 6
+    assert config.graph_hops == 2
+    assert config.max_iterations == 3
+
+
+def test_deep_knowledge_search_depth_changes_real_run_controls():
+    rag_runner = FakeDeepRagRunner()
+    ctx = ToolContext(rag_runner=rag_runner, citations=[], stats_holder={})
+    tool = next(
+        tool
+        for tool in build_enabled_tools(ctx, overrides={"deep_knowledge_search": True})
+        if tool.name == "deep_knowledge_search"
+    )
+
+    tool.invoke({"query": "quick", "depth": "quick", "limit": 3})
+    tool.invoke({"query": "deep", "depth": "deep", "limit": 30})
+
+    quick = rag_runner.calls[0][1]
+    deep = rag_runner.calls[1][1]
+    assert (quick.mode, quick.top_k, quick.graph_hops, quick.max_iterations) == ("deep", 3, 1, 1)
+    assert (deep.mode, deep.top_k, deep.graph_hops, deep.max_iterations) == ("deep", 30, 3, 5)
 
 
 def test_deep_knowledge_search_handles_missing_runner():
@@ -77,3 +109,23 @@ def test_deep_knowledge_search_handles_missing_runner():
     assert payload["sources"] == []
     assert payload["evidence"] == []
     assert payload["evidence_items"] == []
+
+
+def test_chat_request_validates_deep_search_control_boundaries():
+    request = ChatRequest(
+        query="q",
+        deep_search_depth="deep",
+        deep_search_top_k=30,
+        graph_hops=3,
+        rag_max_iterations=10,
+    )
+    assert request.deep_search_depth == "deep"
+
+    for field, value in (
+        ("deep_search_depth", "unbounded"),
+        ("deep_search_top_k", 31),
+        ("graph_hops", 4),
+        ("rag_max_iterations", 11),
+    ):
+        with pytest.raises(ValidationError):
+            ChatRequest(query="q", **{field: value})

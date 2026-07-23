@@ -97,6 +97,31 @@ def test_answer_stream_forwards_deep_search_options(monkeypatch):
     assert captured["deep_search_depth"] == "deep"
 
 
+def test_answer_stream_forwards_explicit_rag_controls(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        answer,
+        "build_agent_runner",
+        lambda **kwargs: captured.update(kwargs) or FakeRunner(),
+    )
+
+    list(
+        answer.answer_stream(
+            "hello",
+            [],
+            deep_search_enabled=True,
+            deep_search_top_k=17,
+            graph_hops=3,
+            rag_max_iterations=4,
+        )
+    )
+
+    assert captured["deep_search_top_k"] == 17
+    assert captured["graph_hops"] == 3
+    assert captured["rag_max_iterations"] == 4
+
+
 def test_answer_stream_continues_when_trace_start_returns_none(monkeypatch):
     FakeTraceRecorder.instances = []
     runner = CapturingRunner()
@@ -164,6 +189,34 @@ def test_build_agent_runner_does_not_advertise_deep_search_when_disabled(monkeyp
     runner = answer.build_agent_runner(deep_search_enabled=False)
 
     assert "deep_knowledge_search" not in runner.system_prompt
+
+
+def test_build_agent_runner_places_chat_controls_on_rag_runner(monkeypatch):
+    captured = {}
+
+    def fake_rag_runner(**kwargs):
+        captured["config"] = kwargs["config"]
+        return object()
+
+    monkeypatch.setattr(answer, "_resolve_search_scope", lambda *args: None)
+    monkeypatch.setattr(answer, "AgenticRagRunner", fake_rag_runner)
+    monkeypatch.setattr(answer, "build_enabled_tools", lambda ctx, overrides=None: [])
+    monkeypatch.setattr(answer, "create_chat_model", lambda settings: object())
+
+    answer.build_agent_runner(
+        deep_search_enabled=True,
+        deep_search_top_k=19,
+        graph_hops=3,
+        rag_max_iterations=4,
+    )
+
+    config = captured["config"]
+    assert (config.mode, config.top_k, config.graph_hops, config.max_iterations) == (
+        "deep",
+        19,
+        3,
+        4,
+    )
 
 
 def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):

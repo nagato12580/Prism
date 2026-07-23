@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 from engine.app.agent.tools.evidence import normalize_evidence_items
 from engine.app.agent.tools.knowledge import _append_unique_citations
+from engine.app.agent.rag.agentic import RagRunConfig
 
 
 KEY = "deep_knowledge_search"
@@ -84,7 +85,21 @@ def _build_deep_knowledge_search(ctx: ToolContext) -> StructuredTool:
             payload["stats"] = ctx.stats_holder[KEY]
             return json.dumps(payload, ensure_ascii=False)
 
-        result = ctx.rag_runner.run(query)
+        depth_controls = {
+            "quick": (1, 1),
+            "standard": (2, 3),
+            "deep": (3, 5),
+        }
+        graph_hops, max_iterations = depth_controls[depth]
+        result = ctx.rag_runner.run(
+            query,
+            config=RagRunConfig(
+                mode="deep",
+                top_k=limit,
+                graph_hops=graph_hops,
+                max_iterations=max_iterations,
+            ),
+        )
         sources = list(getattr(result, "sources", []))
         if not sources:
             sources = list(getattr(result, "evidence", []))

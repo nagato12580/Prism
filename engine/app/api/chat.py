@@ -1,8 +1,8 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..chat.answer import answer_stream
 from ..observability import logger, quoted
@@ -19,7 +19,10 @@ class ChatRequest(BaseModel):
     user_message_id: Optional[str] = None
     source_types: Optional[list[str]] = None
     deep_search_enabled: bool = False
-    deep_search_depth: str = "standard"
+    deep_search_depth: Literal["quick", "standard", "deep"] = "standard"
+    deep_search_top_k: int = Field(8, ge=1, le=30)
+    graph_hops: int = Field(1, ge=1, le=3)
+    rag_max_iterations: int = Field(3, ge=1, le=10)
 
 
 @router.post("/answer")
@@ -42,6 +45,9 @@ def chat_answer(req: ChatRequest):
             source_types=req.source_types,
             deep_search_enabled=req.deep_search_enabled,
             deep_search_depth=req.deep_search_depth,
+            deep_search_top_k=req.deep_search_top_k,
+            graph_hops=req.graph_hops,
+            rag_max_iterations=req.rag_max_iterations,
             session_id=req.session_id,
             user_message_id=req.user_message_id,
         ):

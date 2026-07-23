@@ -111,6 +111,21 @@ def test_make_unified_search_returns_scoped_search_fn(monkeypatch):
     assert captured == {"query": "q", "top_k": 5, "mode": "fast", "topic_ids": ["t1"]}
 
 
+def test_make_unified_search_forwards_configured_graph_hops_once(monkeypatch):
+    calls = []
+
+    def _fake_unified_search(query, top_k, **kwargs):
+        calls.append((query, top_k, kwargs["mode"], kwargs["graph_hops"]))
+        return []
+
+    monkeypatch.setattr("engine.app.retrieval.unified.unified_search", _fake_unified_search)
+    scoped = make_unified_search(mode="fast", scope=SCOPE)
+
+    scoped("q", 7, mode="deep", graph_hops=3)
+
+    assert calls == [("q", 7, "deep", 3)]
+
+
 def test_build_agent_runner_uses_unified_search_with_mode(monkeypatch):
     import engine.app.chat.answer as ans
     captured = {}

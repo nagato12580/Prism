@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from ..agent.events import error_event, trace_event
-from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult
+from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult, RagRunConfig
 from ..agent.prompts import AGENT_SYSTEM_PROMPT
 from ..agent.runner import LangChainAgentRunner, create_chat_model
 from ..agent.trace import AgentTraceRecorder
@@ -264,6 +264,9 @@ def build_agent_runner(
     clarify_depth: int = 0,
     deep_search_enabled: bool = False,
     deep_search_depth: str = "standard",
+    deep_search_top_k: int = 8,
+    graph_hops: int = 1,
+    rag_max_iterations: int = 3,
 ) -> LangChainAgentRunner:
     """构造 Agent Runner，注入带过滤的搜索闭包。
 
@@ -285,8 +288,12 @@ def build_agent_runner(
         search=_scoped_search,
         load_chunks=lambda chunk_ids: _load_chunks(chunk_ids, scope=scope),
         judge=_judge_rag,
-        max_iterations=3,
-        top_k=8,
+        config=RagRunConfig(
+            mode=mode,
+            top_k=deep_search_top_k,
+            graph_hops=graph_hops,
+            max_iterations=rag_max_iterations,
+        ),
     )
     ctx = ToolContext(
         rag_runner=rag_runner,
@@ -317,6 +324,9 @@ def answer_stream(
     source_types: list[str] | None = None,
     deep_search_enabled: bool = False,
     deep_search_depth: str = "standard",
+    deep_search_top_k: int = 8,
+    graph_hops: int = 1,
+    rag_max_iterations: int = 3,
     session_id: str | None = None,
     user_message_id: str | None = None,
 ):
@@ -344,6 +354,9 @@ def answer_stream(
             clarify_depth=clarify_depth,
             deep_search_enabled=deep_search_enabled,
             deep_search_depth=deep_search_depth,
+            deep_search_top_k=deep_search_top_k,
+            graph_hops=graph_hops,
+            rag_max_iterations=rag_max_iterations,
         )
         logger.info("[chat] runner_ready")
         trace_recorder = None

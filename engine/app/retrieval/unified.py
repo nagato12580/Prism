@@ -415,6 +415,7 @@ def unified_search(
     allowed_item_ids: set[str] | None = None,
     scope: SearchScope | None = None,
     allow_legacy_unscoped: bool = False,
+    graph_hops: int | None = None,
 ) -> list[dict]:
     """Compatibility SearchHit adapter over the single-fusion recall path."""
     if scope is None:
@@ -436,7 +437,9 @@ def unified_search(
     except Exception as exc:
         logger.warning("[unified] embedding_failed err=%s", exc)
         embedding = []
-    hops = settings.GRAPH_EXPAND_FAST_HOPS if mode == "fast" else settings.GRAPH_EXPAND_DEEP_HOPS
+    hops = graph_hops if graph_hops is not None else (
+        settings.GRAPH_EXPAND_FAST_HOPS if mode == "fast" else settings.GRAPH_EXPAND_DEEP_HOPS
+    )
     recalled = recall(
         query,
         embedding,
@@ -486,7 +489,13 @@ def make_unified_search(
     Lazy-imports db session + GraphClient so module import stays cheap and tests
     can monkeypatch the helpers.
     """
-    def _search(query: str, top_k: int) -> list[dict]:
+    def _search(
+        query: str,
+        top_k: int,
+        *,
+        mode: str = mode,
+        graph_hops: int | None = None,
+    ) -> list[dict]:
         db = None
         graph_client = None
         try:
@@ -502,7 +511,7 @@ def make_unified_search(
             return unified_search(
                 query, top_k, mode=mode, db=db, graph_client=graph_client,
                 topic_ids=topic_ids, source_types=source_types, allowed_item_ids=allowed_item_ids,
-                scope=scope,
+                scope=scope, graph_hops=graph_hops,
             )
         finally:
             if db is not None:
