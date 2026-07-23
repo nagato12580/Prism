@@ -57,7 +57,7 @@ def reconcile_knowledge_orphans(db: Session, *, es=None) -> dict[str, int]:
     try:
         for tenant_id, kb_uid, item_id in sorted(missing_items):
             delete_vectors_by_item(item_id)
-            graph.delete_item_sources(tenant_id, kb_uid, item_id)
+            graph.delete_item_sources_all_generations(tenant_id, kb_uid, item_id)
     finally:
         graph.close()
 

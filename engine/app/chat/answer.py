@@ -43,7 +43,7 @@ def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
 
     db = _Session()
     try:
-        chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(chunk_ids)).all()
+        chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.chunk_uid.in_(chunk_ids)).all()
         if not chunks:
             return {}
 
@@ -76,10 +76,10 @@ def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
             if chunk.parent_id and chunk.parent_id in parent_chunks:
                 parent = parent_chunks[chunk.parent_id]
                 doc_name = files.get(parent.item_id) or items.get(parent.item_id, "")
-                result[chunk.id] = {"text": parent.chunk_text, "doc_name": doc_name}
+                result[chunk.chunk_uid] = {"text": parent.chunk_text, "doc_name": doc_name}
             else:
                 doc_name = files.get(chunk.item_id) or items.get(chunk.item_id, "")
-                result[chunk.id] = {"text": chunk.chunk_text, "doc_name": doc_name}
+                result[chunk.chunk_uid] = {"text": chunk.chunk_text, "doc_name": doc_name}
         return result
     finally:
         db.close()
@@ -221,23 +221,24 @@ def _judge_rag(
     )
 
 
-def _resolve_allowed_item_ids(topic_id: str | None) -> set[str] | None:
+def _resolve_search_scope(topic_id: str | None, source_types: list[str] | None = None):
     """从 knowledge_file 表查出 topic 下所有 item_id，用于向量检索后置过滤。"""
     if not topic_id:
         return None
-    from backend.app.models.knowledge_item import KnowledgeFile
+    from backend.app.models.knowledge_item import KnowledgeTopic
+    from ..retrieval.contracts import SearchScope
 
     db = _Session()
     try:
-        item_ids = (
-            db.query(KnowledgeFile.item_id)
-            .filter(
-                KnowledgeFile.topic_id == topic_id,
-                KnowledgeFile.item_id.isnot(None),
-            )
-            .all()
+        topic = db.query(KnowledgeTopic).filter(KnowledgeTopic.id == topic_id).one_or_none()
+        if topic is None or not topic.active_index_generation:
+            return None
+        return SearchScope(
+            tenant_id=topic.tenant_id, kb_uid=topic.kb_uid,
+            index_generation=topic.active_index_generation,
+            graph_generation=topic.active_graph_generation,
+            source_types=tuple(source_types or ()),
         )
-        return {row[0] for row in item_ids if row[0]}
     finally:
         db.close()
 
@@ -254,7 +255,7 @@ def build_agent_runner(
     搜索闭包会捕获 topic_id / source_types / allowed_item_ids，
     RAG runner 调用 search(query, top_k) 时自动限定检索范围。
     """
-    allowed_item_ids = _resolve_allowed_item_ids(topic_id)
+    scope = _resolve_search_scope(topic_id, source_types)
     topic_ids = [topic_id] if topic_id else None
 
     mode = "deep" if deep_search_enabled else "fast"
@@ -262,7 +263,7 @@ def build_agent_runner(
         mode=mode,
         topic_ids=topic_ids,
         source_types=source_types,
-        allowed_item_ids=allowed_item_ids,
+        scope=scope,
     )
 
     rag_runner = AgenticRagRunner(

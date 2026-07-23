@@ -29,15 +29,24 @@ def test_rrf_weights_sum_reasonable():
 
 
 def test_hybrid_search_falls_back_to_bm25_when_vector_search_fails(monkeypatch):
-    def fail_vector_search(query: str, top_k: int):
-        raise RuntimeError("embedding endpoint unavailable")
+    from engine.app.retrieval.contracts import Candidate, ChannelResult, SearchScope
+    scope = SearchScope(tenant_id="t", kb_uid="k", index_generation="g")
+    monkeypatch.setattr(hybrid, "embed_query", lambda query: [0.1])
+    monkeypatch.setattr(hybrid, "vector_search", lambda *args: ChannelResult.failed("dense", "X", True))
+    monkeypatch.setattr(hybrid, "es_fulltext_search", lambda *args: ChannelResult.ok("bm25", [
+        Candidate(chunk_uid="c1", item_id="i1", file_uid="f1", channel="bm25", raw_score=3.0, raw_rank=1)
+    ]))
+    assert hybrid.hybrid_search("phase 2", scope, top_k=5)[0]["chunk_id"] == "c1"
 
-    def fake_bm25_search(query: str, top_k: int):
-        return [{"chunk_id": "c1", "item_id": "i1", "score": 3.0}]
 
-    monkeypatch.setattr(hybrid, "vector_search", fail_vector_search)
-    monkeypatch.setattr(hybrid, "bm25_search", fake_bm25_search)
-
-    assert hybrid.hybrid_search("phase 2", top_k=5) == [
-        {"chunk_id": "c1", "item_id": "i1", "score": BM25_WEIGHT / (RRF_K + 1)}
-    ]
+def test_hybrid_embedding_failure_still_runs_scoped_bm25(monkeypatch):
+    from engine.app.retrieval.contracts import Candidate, ChannelResult, SearchScope
+    scope = SearchScope(tenant_id="t", kb_uid="k", index_generation="g")
+    monkeypatch.setattr(hybrid, "embed_query", lambda query: (_ for _ in ()).throw(ConnectionError()))
+    seen = {}
+    def bm25(query, actual_scope, top_k):
+        seen["scope"] = actual_scope
+        return ChannelResult.ok("bm25", [Candidate(chunk_uid="c", item_id="i", file_uid="f", channel="bm25", raw_score=1, raw_rank=1)])
+    monkeypatch.setattr(hybrid, "es_fulltext_search", bm25)
+    assert hybrid.hybrid_search("q", scope, 5)[0]["chunk_id"] == "c"
+    assert seen["scope"] == scope

@@ -83,7 +83,10 @@ def project_source_graph(persisted: dict, db=None, graph_client=None) -> None:
         if source_kind == "document_chunk":
             item_id = persisted.get("item_id")
             if item_id:
-                project_item_entities(db, client, item_id=str(item_id), user_id=user_id)
+                project_item_entities(
+                    db, client, item_id=str(item_id), user_id=user_id,
+                    graph_generation=persisted.get("graph_generation"),
+                )
         elif source_kind == "personal_asset_unit":
             project_asset_unit_entities(
                 db,

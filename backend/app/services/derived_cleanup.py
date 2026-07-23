@@ -64,7 +64,7 @@ def purge_item_derived_artifacts(db: Session, item_id: str) -> None:
 
     graph = GraphClient()
     try:
-        graph.delete_item_sources(item.tenant_id, item.kb_uid, item_id)
+        graph.delete_item_sources_all_generations(item.tenant_id, item.kb_uid, item_id)
     finally:
         graph.close()
 

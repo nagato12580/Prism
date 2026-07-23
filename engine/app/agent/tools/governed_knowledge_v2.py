@@ -201,8 +201,9 @@ def _query_governed_v2(
         hits = search_vectors(embedding, top_k=top_k_chunks)
     if not hits:
         # 向量不可用或无结果时，回退到 hybrid（BM25+向量 RRF）
-        from engine.app.retrieval.hybrid import hybrid_search
-        hits = hybrid_search(query, top_k=top_k_chunks)
+        # No authoritative KB generation scope is available in this legacy
+        # tool path, so it must not call the production hybrid adapter.
+        hits = []
     # hits: [{chunk_id, item_id, score}]
 
     db = _Session()

@@ -26,7 +26,7 @@ def test_reconcile_knowledge_orphans_cleans_es_and_item_level_artifacts(db_sessi
     monkeypatch.setattr(script, "delete_vectors_by_item", lambda item_id: milvus_deleted.append(item_id))
 
     class _FakeGraph:
-        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        def delete_item_sources_all_generations(self, tenant_id, kb_uid, item_id):
             graph_deleted.append((tenant_id, kb_uid, item_id))
 
         def close(self):
@@ -67,7 +67,7 @@ def test_reconcile_knowledge_orphans_only_deletes_stale_chunk_doc_for_live_item(
     monkeypatch.setattr(script, "delete_vectors_by_item", lambda item_id: milvus_deleted.append(item_id))
 
     class _FakeGraph:
-        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        def delete_item_sources_all_generations(self, tenant_id, kb_uid, item_id):
             graph_deleted.append((tenant_id, kb_uid, item_id))
 
         def close(self):

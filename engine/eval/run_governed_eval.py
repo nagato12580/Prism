@@ -36,6 +36,7 @@ from backend.app.models.knowledge_governance import (
 from backend.app.models.knowledge_item import KnowledgeChunk
 from engine.app.config import settings
 from engine.app.retrieval.hybrid import hybrid_search, RRF_K, VECTOR_WEIGHT, BM25_WEIGHT
+from engine.app.retrieval.contracts import SearchScope
 from engine.app.agent.tools.governed_knowledge_v2 import _query_governed_v2
 
 # ─── 配置 ──────────────────────────────────────────────
@@ -135,7 +136,10 @@ def main():
     parser = argparse.ArgumentParser(description="Prism Governed Knowledge V2 评测 (A/B 对比)")
     parser.add_argument("--dataset", type=str, default=str(DEFAULT_DATASET))
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--tenant-id", required=True); parser.add_argument("--kb-uid", required=True)
+    parser.add_argument("--index-generation", required=True); parser.add_argument("--graph-generation")
     args = parser.parse_args()
+    scope = SearchScope(tenant_id=args.tenant_id, kb_uid=args.kb_uid, index_generation=args.index_generation, graph_generation=args.graph_generation)
 
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
@@ -173,7 +177,7 @@ def main():
 
         # ── A: baseline hybrid_search ──
         try:
-            a_hits = hybrid_search(question, top_k=max(K_VALUES))
+            a_hits = hybrid_search(question, scope, top_k=max(K_VALUES))
         except Exception as e:
             a_hits = []
             print(f"  [{i+1}/{len(queries)}] {qid} A-ERROR: {e}")

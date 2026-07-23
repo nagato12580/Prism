@@ -1,67 +1,42 @@
-# prism/engine/app/retrieval/es_search.py
-"""ES 全文检索：BM25 评分 + IK 中文分词 + topic 范围过滤。
+"""Natively scoped Elasticsearch BM25 retrieval."""
+import os
 
-ES match 查询默认使用 BM25 算法，支持 IK 分词器处理中文文本。
-"""
-from ..es_client import get_es, CHUNKS_INDEX
-from ..config import settings
+from ..es_client import get_es
+from ..indexing.es_index import V2_INDEX_NAME
+from .contracts import Candidate, ChannelResult, SearchScope
 
 
-def es_fulltext_search(
-    query: str,
-    top_k: int = 10,
-    topic_ids: list[str] | None = None,
-    source_types: list[str] | None = None,
-) -> list[dict]:
-    """ES 全文检索（BM25），返回 [{chunk_id, item_id, score}]。
-
-    Args:
-        query: 检索查询文本
-        top_k: 返回结果数
-        topic_ids: 可选，限定检索的主题 ID 列表
-        source_types: 可选，限定来源类型列表（document/image/audio/video）
-    """
-    es = get_es()
-    filters: list[dict] = []
-    if topic_ids:
-        filters.append({"terms": {"topic_id": topic_ids}})
-    if source_types:
-        filters.append({"terms": {"source_type": source_types}})
-
-    body: dict = {
-        "size": top_k,
-        "query": {
-            "bool": {
-                "must": [
-                    {
-                        "match": {
-                            "content": {
-                                "query": query,
-                                "analyzer": "ik_smart",
-                            }
-                        }
-                    }
-                ],
-            }
-        },
-    }
-
-    if filters:
-        body["query"]["bool"]["filter"] = filters
+def es_fulltext_search(query: str, scope: SearchScope, top_k: int) -> ChannelResult:
+    filters = [
+        {"term": {"tenant_id": scope.tenant_id}},
+        {"term": {"kb_uid": scope.kb_uid}},
+        {"term": {"generation": scope.index_generation}},
+    ]
+    if scope.file_uids:
+        filters.append({"terms": {"file_uid": list(scope.file_uids)}})
+    if scope.source_types:
+        filters.append({"terms": {"source_type": list(scope.source_types)}})
+    try:
+        response = get_es().search(
+            index=os.getenv("PRISM_RETRIEVAL_ES_INDEX", V2_INDEX_NAME), routing=scope.kb_uid, size=top_k,
+            query={"bool": {
+                "must": [{"match": {"content": {"query": query}}}],
+                "filter": filters,
+            }},
+        )
+    except Exception:
+        return ChannelResult.failed("bm25", "FULLTEXT_INDEX_UNAVAILABLE", retryable=True)
 
     try:
-        resp = es.search(index=CHUNKS_INDEX, body=body)
+        candidates = []
+        for rank, hit in enumerate(response["hits"]["hits"], 1):
+            source = hit["_source"]
+            candidates.append(Candidate(
+                chunk_uid=source.get("chunk_uid", hit.get("_id", "")),
+                item_id=source.get("item_id", ""), file_uid=source.get("file_uid", ""),
+                channel="bm25", raw_score=float(hit.get("_score", 0.0)), raw_rank=rank,
+                metadata=dict(source),
+            ))
     except Exception:
-        return []
-
-    results = []
-    for hit in resp["hits"]["hits"]:
-        src = hit["_source"]
-        results.append(
-            {
-                "chunk_id": src.get("chunk_id", hit["_id"]),
-                "item_id": src.get("item_id", ""),
-                "score": float(hit["_score"]),
-            }
-        )
-    return results
+        return ChannelResult.failed("bm25", "FULLTEXT_RESPONSE_INVALID", retryable=False)
+    return ChannelResult.ok("bm25", candidates)

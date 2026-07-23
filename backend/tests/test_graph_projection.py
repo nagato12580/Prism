@@ -55,7 +55,7 @@ class FakeGraph:
             (start_label, start_id, rel_type, end_label, end_id, props or {})
         )
 
-    def delete_item_sources(self, tenant_id, kb_uid, item_id):
+    def delete_item_sources(self, tenant_id, kb_uid, graph_generation, item_id):
         pass
 
 

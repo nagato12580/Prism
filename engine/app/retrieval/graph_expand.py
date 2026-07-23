@@ -9,8 +9,60 @@ import logging
 
 from backend.app.models import EntityAlias, KnowledgeEntity
 from backend.app.services.entity_resolution import normalize_entity_key
+from .contracts import Candidate, ChannelResult, SearchScope
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def graph_search(
+    query: str, scope: SearchScope, graph_client, top_k: int, hops: int
+) -> ChannelResult:
+    """Retrieve graph-backed chunks using fully scoped Cypher at every stage."""
+    if not scope.graph_generation:
+        return ChannelResult.failed("graph", "GRAPH_GENERATION_REQUIRED", retryable=False)
+    params = {
+        "search_query": query, "tenant_id": scope.tenant_id, "kb_uid": scope.kb_uid,
+        "generation": scope.graph_generation, "file_uids": list(scope.file_uids),
+        "source_types": list(scope.source_types), "top_k": top_k, "hops": max(1, int(hops)),
+    }
+    seed_query = """
+    // seed_entities
+    MATCH (e:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $generation})
+    WHERE toLower(e.canonical_name) CONTAINS toLower($search_query)
+       OR EXISTS { MATCH (a:ScopedAlias {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $generation})-[:ALIAS_OF]->(e)
+                   WHERE toLower(a.surface_text) CONTAINS toLower($search_query) }
+    RETURN DISTINCT e.id AS entity_id LIMIT $top_k
+    """
+    path_query = f"""
+    // source_paths
+    MATCH p=(e:ScopedEntity {{tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $generation}})
+      -[:RELATED_TO|MENTIONED_IN*1..{max(1, int(hops))}]-(s:ScopedSource {{tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $generation}})
+    WHERE e.id IN $entity_ids
+      AND (size($file_uids) = 0 OR s.file_uid IN $file_uids)
+      AND (size($source_types) = 0 OR s.source_type IN $source_types)
+    RETURN DISTINCT s.chunk_uid AS chunk_uid, s.item_id AS item_id, s.file_uid AS file_uid,
+           s.source_type AS source_type, 1.0 / length(p) AS score,
+           [n IN nodes(p) | n.id] AS path
+    ORDER BY score DESC LIMIT $top_k
+    """
+    try:
+        seeds = graph_client._execute_read(seed_query, params)
+        seed_ids = [row["entity_id"] for row in seeds if row.get("entity_id")]
+        rows = graph_client._execute_read(path_query, {**params, "entity_ids": seed_ids})
+    except Exception:
+        logger.exception("[graph_search] scoped Cypher failed")
+        return ChannelResult.failed("graph", "GRAPH_INDEX_UNAVAILABLE", retryable=True)
+
+    try:
+        candidates = [Candidate(
+            chunk_uid=row["chunk_uid"], item_id=row.get("item_id") or "",
+            file_uid=row.get("file_uid") or "", channel="graph",
+            raw_score=float(row.get("score", 0.0)), raw_rank=rank,
+            metadata={**row, "kb_uid": scope.kb_uid, "graph_generation": scope.graph_generation},
+        ) for rank, row in enumerate(rows, 1)]
+    except Exception:
+        return ChannelResult.failed("graph", "GRAPH_RESPONSE_INVALID", retryable=False)
+    return ChannelResult.ok("graph", candidates)
 
 
 def match_seed_entities(db, query: str, limit: int = 10) -> list[str]:

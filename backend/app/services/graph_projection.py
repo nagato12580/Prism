@@ -9,6 +9,7 @@ from backend.app.models import (
     KnowledgeEntity,
     KnowledgeChunk,
     KnowledgeItem,
+    KnowledgeTopic,
     PKUCanonicalLink,
     PKURelation,
     PersonalAssetUnit,
@@ -447,7 +448,9 @@ def _relation_props(model, names):
     return {name: getattr(model, name) for name in names}
 
 
-def project_item_entities(db, graph, item_id: str, user_id: str = "default-user") -> int:
+def project_item_entities(
+    db, graph, item_id: str, user_id: str = "default-user", graph_generation: str | None = None
+) -> int:
     """Incrementally project one item's entities + mentions to Neo4j.
 
     Upserts the Source node per chunk, the Entity nodes, and MENTIONED_IN edges.
@@ -457,10 +460,17 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
     item = db.query(KnowledgeItem).filter_by(id=item_id).one_or_none()
     if item is None:
         return 0
+    if graph_generation is None:
+        topic = db.query(KnowledgeTopic).filter_by(
+            tenant_id=item.tenant_id, kb_uid=item.kb_uid
+        ).one_or_none()
+        graph_generation = topic.active_graph_generation if topic is not None else None
+    if not graph_generation:
+        raise ValueError("active graph generation is required for projection")
 
     # Clean this item's previous Source nodes/edges so re-ingest (fresh chunk
     # UUIDs) leaves no zombie Sources. Idempotent: delete then re-project.
-    graph.delete_item_sources(item.tenant_id, item.kb_uid, item_id)
+    graph.delete_item_sources_generation(item.tenant_id, item.kb_uid, graph_generation, item_id)
 
     mentions = (
         db.query(EntityMention)
@@ -481,10 +491,13 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
             if entity is None:
                 continue
             entity_cache[mention.entity_id] = entity
-            graph.upsert_entity(
+            graph.upsert_scoped_entity(
                 {
                     "id": entity.id,
                     "user_id": entity.user_id,
+                    "tenant_id": item.tenant_id,
+                    "kb_uid": item.kb_uid,
+                    "graph_generation": graph_generation,
                     "entity_type": entity.entity_type,
                     "canonical_name": entity.canonical_name,
                     "normalized_key": entity.normalized_key,
@@ -492,22 +505,39 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
                     "confidence": entity.confidence,
                 }
             )
+            for alias in db.query(EntityAlias).filter_by(entity_id=entity.id).all():
+                graph.upsert_scoped_alias({
+                    "id": f"{item.tenant_id}:{item.kb_uid}:{graph_generation}:{alias.id}",
+                    "key": alias.normalized_key, "surface_text": alias.alias,
+                    "entity_id": entity.id, "tenant_id": item.tenant_id,
+                    "kb_uid": item.kb_uid, "graph_generation": graph_generation,
+                })
 
         source_node = _source_node_for_mention(db, mention, user_id)
+        source_node["graph_generation"] = graph_generation
+        chunk = db.query(KnowledgeChunk).filter_by(id=mention.source_id).one_or_none()
+        if chunk is None:
+            # An internal mention without a live chunk cannot produce a public
+            # retrieval Candidate; do not fabricate a chunk UID from source_id.
+            continue
+        source_node["chunk_uid"] = chunk.chunk_uid
+        source_node["file_uid"] = chunk.file_uid
+        source_node["source_type"] = item.source_type or ""
         if source_node["id"] not in source_cache:
-            graph.upsert_source(source_node)
+            graph.upsert_scoped_source(source_node)
             source_cache.add(source_node["id"])
         chunk_ids.add(mention.source_id)
-        graph.relate(
-            "Entity",
+        graph.relate_scoped(
+            "ScopedEntity",
             mention.entity_id,
             "MENTIONED_IN",
-            "Source",
+            "ScopedSource",
             source_node["id"],
             _relation_props(
                 mention,
                 ["confidence", "evidence_span", "extraction_method", "source_kind", "source_id"],
             ),
+            scope={"tenant_id": item.tenant_id, "kb_uid": item.kb_uid, "graph_generation": graph_generation},
         )
         edges += 1
 
@@ -521,16 +551,17 @@ def project_item_entities(db, graph, item_id: str, user_id: str = "default-user"
         for relation in relations:
             if not relation.object_entity_id:
                 continue
-            graph.relate(
-                "Entity",
+            graph.relate_scoped(
+                "ScopedEntity",
                 relation.subject_entity_id,
                 "RELATED_TO",
-                "Entity",
+                "ScopedEntity",
                 relation.object_entity_id,
                 _relation_props(
                     relation,
                     ["predicate", "confidence", "evidence_span", "extraction_method"],
                 ),
+                scope={"tenant_id": item.tenant_id, "kb_uid": item.kb_uid, "graph_generation": graph_generation},
             )
             edges += 1
 

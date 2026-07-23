@@ -52,6 +52,32 @@ def test_milvus_generation_index_uses_native_full_scope_expression():
     assert 'chunk_uid == "chunk-a"' in expressions[1]
 
 
+def test_ensure_existing_milvus_collection_is_loaded_without_reconnecting(monkeypatch):
+    from engine.app.indexing import milvus_index
+    calls = []
+    collection = type("Existing", (), {"load": lambda self, timeout: calls.append(("load", timeout))})()
+    monkeypatch.setattr(milvus_index.connections, "has_connection", lambda alias: True)
+    monkeypatch.setattr(milvus_index.connections, "connect", lambda *a, **k: calls.append(("connect",)))
+    monkeypatch.setattr(milvus_index.utility, "has_collection", lambda name: True)
+    monkeypatch.setattr(milvus_index, "Collection", lambda name: collection)
+    assert milvus_index.ensure_collection() is collection
+    assert calls == [("load", 30)]
+
+
+def test_env_selected_milvus_search_connects_and_loads_collection(monkeypatch):
+    from engine.app.indexing import milvus_index
+    from engine.app.retrieval.contracts import SearchScope
+    calls = []
+    class Collection:
+        def load(self, timeout): calls.append(("load", timeout))
+        def search(self, **kwargs): return [[]]
+    monkeypatch.setenv("PRISM_RETRIEVAL_MILVUS_COLLECTION", "isolated")
+    monkeypatch.setattr(milvus_index, "_connect", lambda: calls.append(("connect",)))
+    monkeypatch.setattr(milvus_index, "Collection", lambda name: Collection())
+    milvus_index.search_index(query_embedding=[0.1], scope=SearchScope(tenant_id="t", kb_uid="k", index_generation="g"), top_k=1)
+    assert calls == [("connect",), ("load", 30)]
+
+
 class FakeES:
     def __init__(self):
         self.bulk_operations = None

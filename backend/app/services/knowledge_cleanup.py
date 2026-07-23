@@ -140,7 +140,7 @@ class KnowledgeCleanupService:
             ),
         ).delete(synchronize_session=False)
         if self.graph_client is not None:
-            self.graph_client.delete_item_sources(tenant_id, kb_uid, item_id)
+            self.graph_client.delete_item_sources_all_generations(tenant_id, kb_uid, item_id)
 
     def run(self, file_uid: str, *, job_id: str) -> CleanupResult:
         job = self._job(job_id)

@@ -1,5 +1,6 @@
 # engine/app/indexing/milvus_index.py
 import sys
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
@@ -19,6 +20,55 @@ def _scope_expr(scope) -> str:
         f'kb_uid == "{_literal(scope.kb_uid)}" and '
         f'generation == "{_literal(scope.generation)}"'
     )
+
+
+def _retrieval_scope_expr(scope) -> str:
+    parts = [
+        f'tenant_id == "{_literal(scope.tenant_id)}"',
+        f'kb_uid == "{_literal(scope.kb_uid)}"',
+        f'generation == "{_literal(scope.index_generation)}"',
+    ]
+    if scope.file_uids:
+        values = ", ".join(f'"{_literal(value)}"' for value in scope.file_uids)
+        parts.append(f"file_uid in [{values}]")
+    if scope.source_types:
+        values = ", ".join(f'"{_literal(value)}"' for value in scope.source_types)
+        parts.append(f"source_type in [{values}]")
+    return " and ".join(parts)
+
+
+def search_index(*, query_embedding, scope, top_k):
+    """Search the generation collection with server-side tenant/KB filters."""
+    collection_name = os.getenv("PRISM_RETRIEVAL_MILVUS_COLLECTION")
+    if collection_name:
+        _connect()
+        collection = Collection(collection_name)
+        collection.load(timeout=30)
+    else:
+        collection = ensure_collection()
+    rows = collection.search(
+        data=[query_embedding],
+        anns_field="embedding",
+        param={"metric_type": DEFAULT_PROFILE.metric, "params": {"nprobe": 32}},
+        limit=top_k,
+        expr=_retrieval_scope_expr(scope),
+        output_fields=["chunk_uid", "item_id", "file_uid", "kb_uid", "source_type", "content"],
+        timeout=15,
+    )
+    results = []
+    for hit in rows[0] if rows else []:
+        entity = getattr(hit, "entity", None) or hit.get("entity", hit)
+        get = entity.get if hasattr(entity, "get") else lambda key, default=None: getattr(entity, key, default)
+        score = getattr(hit, "distance", None)
+        if score is None and hasattr(hit, "get"):
+            score = hit.get("distance", hit.get("score", 0.0))
+        results.append({
+            "chunk_uid": get("chunk_uid"), "item_id": get("item_id"),
+            "file_uid": get("file_uid"), "kb_uid": get("kb_uid"),
+            "source_type": get("source_type"), "content": get("content"),
+            "score": float(score or 0.0),
+        })
+    return results
 
 
 class MilvusGenerationIndex:
@@ -79,7 +129,8 @@ class MilvusGenerationIndex:
 
 def _connect(host: str = "127.0.0.1", port: int = 19530):
     try:
-        connections.connect("default", host=host, port=port)
+        if not connections.has_connection("default"):
+            connections.connect("default", host=host, port=port)
     except Exception:
         raise RuntimeError("MILVUS_UNAVAILABLE")
 
@@ -93,7 +144,9 @@ def ensure_collection(
     profile = profile or DEFAULT_PROFILE
     _connect(host, port)
     if utility.has_collection(profile.collection_name):
-        return Collection(profile.collection_name)
+        collection = Collection(profile.collection_name)
+        collection.load(timeout=30)
+        return collection
     from pymilvus import CollectionSchema, DataType, FieldSchema
     fields = [
         FieldSchema("id", DataType.VARCHAR, max_length=100, is_primary=True),

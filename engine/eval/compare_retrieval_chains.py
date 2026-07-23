@@ -36,6 +36,9 @@ from engine.app.agent.tools.governed_knowledge_v2 import _query_governed_v2
 from engine.app.config import settings
 from engine.app.retrieval.page_index import PageIndexService
 from engine.app.retrieval.hybrid import BM25_WEIGHT, RRF_K, VECTOR_WEIGHT, hybrid_search
+from engine.app.retrieval.contracts import SearchScope
+
+_EVAL_SCOPE: SearchScope | None = None
 
 DEFAULT_DATASET = Path(__file__).resolve().parent / "golden_dataset.json"
 EVALUATION_ROOT = _project_root / "evaluation"
@@ -182,7 +185,7 @@ def _traditional_hybrid(query: str, top_k: int) -> list[dict[str, Any]]:
             "score": float(hit.get("score") or 0.0),
             "source": "traditional_hybrid",
         }
-        for hit in hybrid_search(query, top_k=top_k)
+        for hit in hybrid_search(query, _EVAL_SCOPE, top_k=top_k)
     ]
 
 
@@ -600,6 +603,7 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def main() -> None:
+    global _EVAL_SCOPE
     parser = argparse.ArgumentParser(description="Compare Prism retrieval chains")
     parser.add_argument("--dataset", type=str, default=str(DEFAULT_DATASET), help="Golden dataset path")
     parser.add_argument(
@@ -616,7 +620,10 @@ def main() -> None:
         help="Retrieval chains to evaluate",
     )
     parser.add_argument("--verbose", action="store_true", help="Write verbose JSON with retrieved chunk text")
+    parser.add_argument("--tenant-id", required=True); parser.add_argument("--kb-uid", required=True)
+    parser.add_argument("--index-generation", required=True); parser.add_argument("--graph-generation")
     args = parser.parse_args()
+    _EVAL_SCOPE = SearchScope(tenant_id=args.tenant_id, kb_uid=args.kb_uid, index_generation=args.index_generation, graph_generation=args.graph_generation)
 
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():

@@ -1,23 +1,23 @@
-# prism/engine/app/retrieval/vector_search.py
-"""Milvus 向量检索，支持 item_id 后置过滤。"""
-from ..ingestion.vectorizer import embed_query
-from ..milvus_client import search_vectors
+"""Natively scoped dense retrieval."""
+
+from ..indexing.milvus_index import search_index
+from .contracts import Candidate, ChannelResult, SearchScope
 
 
 def vector_search(
-    query: str,
-    top_k: int = 10,
-    allowed_item_ids: set[str] | None = None,
-) -> list[dict]:
-    """语义向量检索，返回 [{chunk_id, item_id, score}]。
-
-    allowed_item_ids 不为空时，先召回 top_k * 3 再后置过滤到 top_k。
-    """
-    query_emb = embed_query(query)
-    fetch_k = max(top_k * 3, top_k) if allowed_item_ids else top_k
-    results = search_vectors(query_emb, top_k=fetch_k)
-
-    if allowed_item_ids:
-        results = [r for r in results if r["item_id"] in allowed_item_ids]
-
-    return results[:top_k]
+    query_embedding: list[float], scope: SearchScope, top_k: int
+) -> ChannelResult:
+    try:
+        rows = search_index(query_embedding=query_embedding, scope=scope, top_k=top_k)
+    except Exception:
+        return ChannelResult.failed("dense", "VECTOR_INDEX_UNAVAILABLE", retryable=True)
+    try:
+        candidates = [Candidate(
+            chunk_uid=row["chunk_uid"], item_id=row.get("item_id") or "",
+            file_uid=row.get("file_uid") or "", channel="dense",
+            raw_score=float(row.get("score", 0.0)), raw_rank=rank,
+            metadata={**row, "kb_uid": row.get("kb_uid") or scope.kb_uid},
+        ) for rank, row in enumerate(rows, 1)]
+    except Exception:
+        return ChannelResult.failed("dense", "VECTOR_RESPONSE_INVALID", retryable=False)
+    return ChannelResult.ok("dense", candidates)

@@ -118,17 +118,26 @@ class FakeGraph:
         self.upserted_entities = []
         self.relations = []
 
-    def delete_item_sources(self, tenant_id, kb_uid, item_id):
+    def delete_item_sources_generation(self, tenant_id, kb_uid, graph_generation, item_id):
         pass
 
     def upsert_source(self, data):
         self.upserted_sources.append(data)
 
+    upsert_scoped_source = upsert_source
+
     def upsert_entity(self, data):
         self.upserted_entities.append(data)
 
-    def relate(self, start_label, start_id, rel_type, end_label, end_id, props=None):
+    upsert_scoped_entity = upsert_entity
+
+    def upsert_scoped_alias(self, data):
+        pass
+
+    def relate(self, start_label, start_id, rel_type, end_label, end_id, props=None, **scope):
         self.relations.append((start_label, start_id, rel_type, end_label, end_id))
+
+    relate_scoped = relate
 
 
 def _sqlite_session():
@@ -146,8 +155,9 @@ def test_project_item_entities_upserts_source_entity_and_mentioned_in():
     try:
         db.add(KnowledgeItem(id="i1", tenant_id="tenant-a", kb_uid="kb-a", user_id="default-user", title="doc"))
         db.add(
-            KnowledgeChunk(
-                id="c1",
+                KnowledgeChunk(
+                    id="c1",
+                    chunk_uid="public-c1",
                 tenant_id="tenant-a", kb_uid="kb-a", file_uid="file-a",
                 item_id="i1",
                 chunk_text="x",
@@ -182,11 +192,12 @@ def test_project_item_entities_upserts_source_entity_and_mentioned_in():
         db.commit()
 
         fake = FakeGraph()
-        edges = project_item_entities(db, fake, item_id="i1", user_id="default-user")
+        edges = project_item_entities(db, fake, item_id="i1", user_id="default-user", graph_generation="gg1")
 
         assert any(s["item_id"] == "i1" for s in fake.upserted_sources)
+        assert any(s["chunk_uid"] == "public-c1" for s in fake.upserted_sources)
         assert any(e["id"] == "e1" for e in fake.upserted_entities)
-        assert ("Entity", "e1", "MENTIONED_IN", "Source", "document_chunk:c1") in fake.relations
+        assert ("ScopedEntity", "e1", "MENTIONED_IN", "ScopedSource", "document_chunk:c1") in fake.relations
         assert edges == 1
     finally:
         db.close()
@@ -199,17 +210,25 @@ class FakeGraphWithDelete:
         self.relations = []
         self.deleted_item_ids = []
 
-    def delete_item_sources(self, tenant_id, kb_uid, item_id):
+    def delete_item_sources_generation(self, tenant_id, kb_uid, graph_generation, item_id):
         self.deleted_item_ids.append((tenant_id, kb_uid, item_id))
 
     def upsert_source(self, data):
         self.upserted_sources.append(data)
 
+    upsert_scoped_source = upsert_source
+
     def upsert_entity(self, data):
         self.upserted_entities.append(data)
 
-    def relate(self, start_label, start_id, rel_type, end_label, end_id, props=None):
+    upsert_scoped_entity = upsert_entity
+
+    def upsert_scoped_alias(self, data): pass
+
+    def relate(self, start_label, start_id, rel_type, end_label, end_id, props=None, **scope):
         self.relations.append((start_label, start_id, rel_type, end_label, end_id))
+
+    relate_scoped = relate
 
 
 def test_project_item_entities_deletes_old_sources_before_projecting():
@@ -233,7 +252,7 @@ def test_project_item_entities_deletes_old_sources_before_projecting():
         db.commit()
 
         fake = FakeGraphWithDelete()
-        project_item_entities(db, fake, item_id="i1", user_id="default-user")
+        project_item_entities(db, fake, item_id="i1", user_id="default-user", graph_generation="gg1")
 
         # cleanup MUST run first, scoped to this item_id
         assert fake.deleted_item_ids == [("tenant-a", "kb-a", "i1")]
@@ -342,7 +361,7 @@ def test_project_item_entities_projects_relation_as_related_to():
         db.add(EntityRelation(id="r1", subject_entity_id="e1", predicate="uses", object_entity_id="e2", relation_key="rk1", source_kind="document_chunk", source_id="c1", confidence=0.85, extraction_method="llm_stage_a:INFERRED"))
         db.commit()
         fake = FakeGraphWithDelete()
-        project_item_entities(db, fake, item_id="i1", user_id="default-user")
-        assert ("Entity", "e1", "RELATED_TO", "Entity", "e2") in fake.relations
+        project_item_entities(db, fake, item_id="i1", user_id="default-user", graph_generation="gg1")
+        assert ("ScopedEntity", "e1", "RELATED_TO", "ScopedEntity", "e2") in fake.relations
     finally:
         db.close()

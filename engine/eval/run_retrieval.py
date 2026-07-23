@@ -21,6 +21,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from engine.app.retrieval.hybrid import hybrid_search, RRF_K, VECTOR_WEIGHT, BM25_WEIGHT
+from engine.app.retrieval.contracts import SearchScope
 from engine.app.config import settings
 
 # ─── 配置 ──────────────────────────────────────────────
@@ -126,7 +127,10 @@ def main():
         action="store_true",
         help="同时输出 detailed_verbose.json，包含检索结果的 chunk 正文",
     )
+    parser.add_argument("--tenant-id", required=True); parser.add_argument("--kb-uid", required=True)
+    parser.add_argument("--index-generation", required=True); parser.add_argument("--graph-generation")
     args = parser.parse_args()
+    scope = SearchScope(tenant_id=args.tenant_id, kb_uid=args.kb_uid, index_generation=args.index_generation, graph_generation=args.graph_generation)
 
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
@@ -165,7 +169,7 @@ def main():
             relevant_ids = set(q["relevant_child_ids"])
 
         try:
-            hits = hybrid_search(question, top_k=max(K_VALUES))
+            hits = hybrid_search(question, scope, top_k=max(K_VALUES))
         except Exception as e:
             print(f"  [{i + 1}/{len(queries)}] {qid} ERROR: {e}")
             failures.append({"query_id": qid, "question": question, "error": str(e)})

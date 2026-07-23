@@ -5,7 +5,7 @@ from neo4j import GraphDatabase
 from backend.app.config import settings
 
 
-ALLOWED_NODE_LABELS = {"CKP", "PKU", "Source", "Entity", "Alias"}
+ALLOWED_NODE_LABELS = {"CKP", "PKU", "Source", "Entity", "Alias", "ScopedSource", "ScopedEntity", "ScopedAlias"}
 ALLOWED_RELATIONSHIP_TYPES = {
     "HAS_CHILD",
     "SUPPORTED_BY",
@@ -87,6 +87,18 @@ class GraphClient:
         if entity_id:
             self.relate("Alias", alias_data["id"], "ALIAS_OF", "Entity", entity_id)
 
+    def upsert_scoped_entity(self, data: dict[str, Any]) -> None:
+        self._upsert_scoped_node("ScopedEntity", data, ["user_id", "entity_type", "canonical_name", "normalized_key", "status", "confidence"])
+
+    def upsert_scoped_source(self, data: dict[str, Any]) -> None:
+        self._upsert_scoped_node("ScopedSource", data, ["chunk_uid", "file_uid", "source_type", "source_kind", "source_id", "item_id", "title"])
+
+    def upsert_scoped_alias(self, data: dict[str, Any]) -> None:
+        alias = dict(data)
+        self._upsert_scoped_node("ScopedAlias", alias, ["key", "surface_text", "entity_id"])
+        if alias.get("entity_id"):
+            self.relate_scoped("ScopedAlias", alias["id"], "ALIAS_OF", "ScopedEntity", alias["entity_id"], scope=alias)
+
     def relate(
         self,
         start_label: str,
@@ -111,13 +123,39 @@ class GraphClient:
             {"start_id": start_id, "end_id": end_id, "props": props or {}},
         )
 
-    def delete_item_sources(self, tenant_id: str, kb_uid: str, item_id: str) -> None:
+    def relate_scoped(self, start_label, start_id, rel_type, end_label, end_id, props=None, *, scope):
+        self._validate_label(start_label); self._validate_label(end_label); self._validate_relationship_type(rel_type)
+        params = {"start_id": start_id, "end_id": end_id, "props": props or {},
+                  "tenant_id": scope["tenant_id"], "kb_uid": scope["kb_uid"], "graph_generation": scope["graph_generation"]}
+        query = f"""MATCH (a:{start_label} {{id: $start_id, tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation}})
+        MATCH (b:{end_label} {{id: $end_id, tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation}})
+        MERGE (a)-[r:{rel_type}]->(b) SET r += $props"""
+        self._execute_write(query, params)
+
+    def delete_item_sources_generation(self, tenant_id: str, kb_uid: str, graph_generation: str, item_id: str) -> None:
         """Delete scoped :Source nodes for one item. Idempotent; no legacy fallback."""
         query = """
-        MATCH (s:Source {tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id})
+        MATCH (s:ScopedSource {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation, item_id: $item_id})
         DETACH DELETE s
         """
-        self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id})
+        self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "graph_generation": graph_generation, "item_id": item_id})
+
+    def delete_item_sources(self, tenant_id: str, kb_uid: str, item_id: str) -> None:
+        self._execute_write(
+            "MATCH (s:Source {tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id}) DETACH DELETE s",
+            {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id},
+        )
+
+    def delete_item_sources_all_generations(self, tenant_id: str, kb_uid: str, item_id: str) -> None:
+        """Destructive item/KB cleanup path, intentionally removes every generation."""
+        self._execute_write(
+            "MATCH (s:ScopedSource {tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id}) DETACH DELETE s",
+            {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id},
+        )
+        self._execute_write(
+            "MATCH (s:Source {tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id}) DETACH DELETE s",
+            {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id},
+        )
 
     def _execute_read(self, query: str, params: dict[str, Any] | None = None) -> list[dict]:
         with self.driver.session(database=self.database) as session:
@@ -272,6 +310,15 @@ class GraphClient:
         MERGE (n:{label} {{id: $id}})
         SET n += {{{assignments}}}
         """
+        self._execute_write(query, data)
+
+    def _upsert_scoped_node(self, label: str, data: dict[str, Any], fields: list[str]) -> None:
+        self._validate_label(label)
+        for key in ("tenant_id", "kb_uid", "graph_generation"):
+            if not data.get(key): raise ValueError(f"{label} requires {key}")
+        assignments = ", ".join(f"{field}: ${field}" for field in fields)
+        query = f"""MERGE (n:{label} {{id: $id, tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation}})
+        SET n += {{{assignments}}}"""
         self._execute_write(query, data)
 
     def _execute_write(self, query: str, params: dict[str, Any]) -> None:

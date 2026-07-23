@@ -10,9 +10,27 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.database import Base
 from backend.app.models import KnowledgeChunk, KnowledgeItem, PersonalAssetUnit
 from engine.app.retrieval.unified import unified_search, make_unified_search
+from engine.app.retrieval.contracts import SearchScope
+
+SCOPE = SearchScope(tenant_id="tenant-test", kb_uid="kb-test", index_generation="gen-test", graph_generation="graph-test")
 
 
-def _hybrid(query, top_k, **kw):
+def test_production_graph_client_wires_only_scoped_graph_search(monkeypatch):
+    from engine.app.retrieval import unified as module
+    from engine.app.retrieval.contracts import ChannelResult
+    scope = SearchScope(tenant_id="t", kb_uid="k", index_generation="g", graph_generation="gg")
+    seen = {}
+    class ProductionGraph:
+        def _execute_read(self, *args, **kwargs): return []
+    monkeypatch.setattr(module, "hybrid_search", lambda *a, **k: [])
+    monkeypatch.setattr(module, "graph_search", lambda query, actual_scope, client, top_k, hops: seen.update(scope=actual_scope, client=client) or ChannelResult.ok("graph", []))
+    monkeypatch.setattr(module, "match_seed_entities", lambda *a, **k: (_ for _ in ()).throw(AssertionError("legacy graph path called")))
+    graph = ProductionGraph()
+    module.unified_search("q", 5, db=None, graph_client=graph, scope=scope)
+    assert seen == {"scope": scope, "client": graph}
+
+
+def _hybrid(query, scope, top_k, **kw):
     # pretend hybrid returns 2 chunks
     return [{"chunk_id": "c_vec", "item_id": "i1", "score": 0.6},
             {"chunk_id": "c_bm",  "item_id": "i1", "score": 0.4}]
@@ -34,7 +52,7 @@ def _rerank(query, cands, top_n, **kw):
 @patch("engine.app.retrieval.unified.hybrid_search", _hybrid)
 @patch("engine.app.retrieval.unified.match_seed_entities", lambda db, q, **k: ["e1"])
 def test_unified_search_merges_and_reranks():
-    out = unified_search("q", top_k=5, mode="fast", db=object(), graph_client=object())
+    out = unified_search("q", top_k=5, mode="fast", db=object(), graph_client=object(), scope=SCOPE)
     ids = [o["chunk_id"] for o in out]
     assert set(ids) == {"c_vec", "c_bm", "c_graph"}   # hybrid + graph merged
     assert ids[0] == "c_graph"                          # rerank put graph hit first
@@ -81,7 +99,7 @@ def test_build_agent_runner_uses_unified_search_with_mode(monkeypatch):
     assert captured["mode"] == "deep"
 
 
-def _hybrid_overlap(query, top_k, **kw):
+def _hybrid_overlap(query, scope, top_k, **kw):
     # same chunk appears in both hybrid and graph
     return [{"chunk_id": "c_shared", "item_id": "i1", "score": 0.8},
             {"chunk_id": "c_only",  "item_id": "i1", "score": 0.5}]
@@ -98,7 +116,7 @@ def _expand_overlap(db, graph, seeds, mode, hops, max_candidates, **kw):
 @patch("engine.app.retrieval.unified.match_seed_entities", lambda db, q, **k: ["e1"])
 def test_unified_search_merges_markers_when_chunk_overlaps():
     """When a chunk appears in both hybrid and graph results, source_marker is merged."""
-    out = unified_search("q", top_k=10, mode="fast", db=object(), graph_client=object())
+    out = unified_search("q", top_k=10, mode="fast", db=object(), graph_client=object(), scope=SCOPE)
     by_id = {o["chunk_id"]: o for o in out}
     # c_shared: appears in both → marker should show graph contribution
     assert "c_shared" in by_id
@@ -150,12 +168,12 @@ def _expand_overlap_with_graph_rag(db, graph, seeds, mode, hops, max_candidates,
 
 @patch("engine.app.retrieval.unified.expand_candidates", _expand_overlap_with_graph_rag)
 @patch("engine.app.retrieval.unified.rerank", lambda q, c, **kw: c)
-@patch("engine.app.retrieval.unified.hybrid_search", lambda q, top_k, **kw: [
+@patch("engine.app.retrieval.unified.hybrid_search", lambda q, scope, top_k, **kw: [
     {"chunk_id": "c_shared", "item_id": "i1", "score": 0.8, "text": "Hybrid evidence"}
 ])
 @patch("engine.app.retrieval.unified.match_seed_entities", lambda db, q, **k: ["e1"])
 def test_unified_search_preserves_graph_rag_metadata_when_hybrid_and_graph_overlap():
-    out = unified_search("q", top_k=10, mode="fast", db=object(), graph_client=object())
+    out = unified_search("q", top_k=10, mode="fast", db=object(), graph_client=object(), scope=SCOPE)
 
     assert len(out) == 1
     assert out[0]["chunk_id"] == "c_shared"
@@ -215,10 +233,10 @@ def test_unified_search_preserves_graph_rag_metadata_when_hybrid_and_graph_overl
     }
 ])
 @patch("engine.app.retrieval.unified.rerank", _rerank)
-@patch("engine.app.retrieval.unified.hybrid_search", lambda q, top_k, **kw: [])
+@patch("engine.app.retrieval.unified.hybrid_search", lambda q, scope, top_k, **kw: [])
 @patch("engine.app.retrieval.unified.match_seed_entities", lambda db, q, **k: ["e1"])
 def test_unified_search_restores_graph_marker_after_rerank_override():
-    out = unified_search("q", top_k=5, mode="fast", db=object(), graph_client=object())
+    out = unified_search("q", top_k=5, mode="fast", db=object(), graph_client=object(), scope=SCOPE)
 
     assert len(out) == 1
     assert out[0]["source_marker"] == "graph_1hop"
@@ -255,7 +273,7 @@ def _expand_asset_unit(db, graph, seeds, mode, hops, max_candidates, **kw):
 
 @patch("engine.app.retrieval.unified.expand_candidates", _expand_asset_unit)
 @patch("engine.app.retrieval.unified.rerank", lambda q, c, **kw: c)
-@patch("engine.app.retrieval.unified.hybrid_search", lambda q, top_k, **kw: [])
+@patch("engine.app.retrieval.unified.hybrid_search", lambda q, scope, top_k, **kw: [])
 @patch("engine.app.retrieval.unified.match_seed_entities", lambda db, q, **k: ["e1"])
 def test_unified_search_preserves_personal_asset_unit_graph_hits():
     db = _test_session()
@@ -272,7 +290,7 @@ def test_unified_search_preserves_personal_asset_unit_graph_hits():
         )
         db.commit()
 
-        out = unified_search("LoRA", top_k=5, mode="fast", db=db, graph_client=object())
+        out = unified_search("LoRA", top_k=5, mode="fast", db=db, graph_client=object(), scope=SCOPE)
     finally:
         db.close()
 
@@ -286,17 +304,17 @@ def test_unified_search_preserves_personal_asset_unit_graph_hits():
 
 @patch("engine.app.retrieval.unified.expand_candidates", lambda *args, **kwargs: [])
 @patch("engine.app.retrieval.unified.rerank", lambda q, c, **kw: c)
-@patch("engine.app.retrieval.unified.hybrid_search", lambda q, top_k, **kw: [
+@patch("engine.app.retrieval.unified.hybrid_search", lambda q, scope, top_k, **kw: [
     {"chunk_id": "chunk-live", "item_id": "item-live", "score": 0.8},
     {"chunk_id": "chunk-stale", "item_id": "item-stale", "score": 0.7},
 ])
 def test_unified_search_filters_stale_document_chunks_from_retrieval():
     db = _test_session()
     try:
-        db.add(KnowledgeItem(id="item-live", title="Live item", user_id="default-user"))
+        db.add(KnowledgeItem(id="item-live", tenant_id="tenant-test", kb_uid="kb-test", title="Live item", user_id="default-user"))
         db.add(
             KnowledgeChunk(
-                id="chunk-live",
+                    id="internal-chunk-row", chunk_uid="chunk-live", tenant_id="tenant-test", kb_uid="kb-test", file_uid="file-test", generation="gen-test",
                 item_id="item-live",
                 chunk_text="Live chunk text",
                 chunk_type="child",
@@ -304,7 +322,7 @@ def test_unified_search_filters_stale_document_chunks_from_retrieval():
         )
         db.commit()
 
-        out = unified_search("stale?", top_k=5, mode="fast", db=db, graph_client=None)
+        out = unified_search("stale?", top_k=5, mode="fast", db=db, graph_client=None, scope=SCOPE)
     finally:
         db.close()
 

@@ -7,6 +7,26 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./_answer_import.db")
 from engine.app.chat import answer
 
 
+def test_load_chunks_resolves_public_chunk_uid_not_internal_id(monkeypatch):
+    class Chunk:
+        id = "internal-row-id"; chunk_uid = "public-chunk-uid"; parent_id = None
+        item_id = "item-1"; chunk_text = "public text"
+    class Query:
+        def __init__(self, model): self.model = model
+        def filter(self, *args): return self
+        def all(self):
+            name = getattr(self.model, "__name__", "")
+            if name == "KnowledgeChunk": return [Chunk()]
+            return []
+    class DB:
+        def query(self, model, *rest): return Query(model)
+        def close(self): pass
+    monkeypatch.setattr(answer, "_Session", lambda: DB())
+    result = answer._load_chunks(["public-chunk-uid"])
+    assert result["public-chunk-uid"]["text"] == "public text"
+    assert "internal-row-id" not in result
+
+
 class FakeRunner:
     def stream(self, query, history, trace_recorder=None):
         yield json.dumps({"type": "agent_status", "data": {"label": query}}) + "\n"
@@ -123,7 +143,7 @@ def test_build_agent_runner_enables_deep_search_tool_when_requested(monkeypatch)
         captured["overrides"] = overrides
         return []
 
-    monkeypatch.setattr(answer, "_resolve_allowed_item_ids", lambda topic_id: None)
+    monkeypatch.setattr(answer, "_resolve_search_scope", lambda topic_id, source_types=None: None)
     monkeypatch.setattr(answer, "build_enabled_tools", fake_build_enabled_tools)
     monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
 
@@ -137,7 +157,7 @@ def test_build_agent_runner_does_not_advertise_deep_search_when_disabled(monkeyp
     class FakeModel:
         pass
 
-    monkeypatch.setattr(answer, "_resolve_allowed_item_ids", lambda topic_id: None)
+    monkeypatch.setattr(answer, "_resolve_search_scope", lambda topic_id, source_types=None: None)
     monkeypatch.setattr(answer, "build_enabled_tools", lambda ctx, overrides=None: [])
     monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
 

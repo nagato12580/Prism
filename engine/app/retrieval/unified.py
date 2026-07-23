@@ -6,8 +6,9 @@ Returns the same SearchHit shape as hybrid_search ({chunk_id, item_id, score,
 import logging
 
 from ..config import settings
-from .graph_expand import expand_candidates, match_seed_entities
+from .graph_expand import graph_search, expand_candidates, match_seed_entities
 from .hybrid import RRF_K, hybrid_search
+from .contracts import SearchScope
 from .rerank import rerank
 
 logger = logging.getLogger("uvicorn.error")
@@ -51,8 +52,8 @@ def _filter_stale_hits(db, hits: list[dict]) -> list[dict]:
         if chunk_ids:
             live_chunk_ids = {
                 row[0]
-                for row in db.query(KnowledgeChunk.id)
-                .filter(KnowledgeChunk.id.in_(chunk_ids))
+                for row in db.query(KnowledgeChunk.chunk_uid)
+                .filter(KnowledgeChunk.chunk_uid.in_(chunk_ids))
                 .all()
             }
         if asset_unit_ids:
@@ -258,13 +259,14 @@ def unified_search(
     topic_ids: list[str] | None = None,
     source_types: list[str] | None = None,
     allowed_item_ids: set[str] | None = None,
+    scope: SearchScope | None = None,
 ) -> list[dict]:
     """Hybrid recall + graph expansion + RRF fusion + rerank. Returns SearchHit list."""
     # 1) hybrid recall (vector + BM25 via existing RRF inside hybrid_search)
     try:
-        hybrid_hits = hybrid_search(
-            query, top_k=top_k, topic_ids=topic_ids, source_types=source_types, allowed_item_ids=allowed_item_ids
-        ) or []
+        if scope is None:
+            raise ValueError("SearchScope is required for hybrid retrieval")
+        hybrid_hits = hybrid_search(query, scope, top_k=top_k) or []
     except Exception as exc:
         logger.warning("[unified] hybrid_failed err=%s", exc)
         hybrid_hits = []
@@ -272,17 +274,22 @@ def unified_search(
 
     # 2) graph expansion -> extra chunk candidates
     graph_hits: list[dict] = []
-    if graph_client is not None and db is not None:
+    if graph_client is not None and scope is not None and scope.graph_generation:
         try:
-            seeds = match_seed_entities(db, query, limit=settings.GRAPH_EXPAND_SEED_ENTITIES)
             hops = settings.GRAPH_EXPAND_FAST_HOPS if mode == "fast" else settings.GRAPH_EXPAND_DEEP_HOPS
-            graph_hits = expand_candidates(
-                db, graph_client, seeds, mode=mode, hops=hops,
-                max_candidates=settings.GRAPH_EXPAND_MAX_CANDIDATES,
-                neighbors_per_node=settings.GRAPH_EXPAND_NEIGHBORS_PER_NODE,
-                community_members=settings.GRAPH_EXPAND_COMMUNITY_MEMBERS,
-                god_neighbors=settings.GRAPH_EXPAND_GOD_NEIGHBORS,
-            )
+            if not hasattr(graph_client, "_execute_read"):  # legacy test/dev adapter only
+                seeds = match_seed_entities(db, query, limit=settings.GRAPH_EXPAND_SEED_ENTITIES)
+                graph_hits = expand_candidates(db, graph_client, seeds, mode=mode, hops=hops,
+                    max_candidates=settings.GRAPH_EXPAND_MAX_CANDIDATES,
+                    neighbors_per_node=settings.GRAPH_EXPAND_NEIGHBORS_PER_NODE,
+                    community_members=settings.GRAPH_EXPAND_COMMUNITY_MEMBERS,
+                    god_neighbors=settings.GRAPH_EXPAND_GOD_NEIGHBORS)
+            else:
+                graph_result = graph_search(query, scope, graph_client, top_k, hops)
+                if graph_result.health != "failed":
+                    graph_hits = [{"chunk_id": c.chunk_uid, "item_id": c.item_id,
+                                   "score": c.raw_score, "source_marker": "graph_scoped",
+                                   **c.metadata} for c in graph_result.candidates]
         except Exception as exc:
             logger.warning("[unified] graph_expand_failed err=%s", exc)
     graph_hits = _filter_stale_hits(db, graph_hits)
@@ -319,6 +326,7 @@ def make_unified_search(
     topic_ids: list[str] | None = None,
     source_types: list[str] | None = None,
     allowed_item_ids: set[str] | None = None,
+    scope: SearchScope | None = None,
 ):
     """Return a SearchFn(query, top_k) closed over scope filters + graph client.
 
@@ -341,6 +349,7 @@ def make_unified_search(
             return unified_search(
                 query, top_k, mode=mode, db=db, graph_client=graph_client,
                 topic_ids=topic_ids, source_types=source_types, allowed_item_ids=allowed_item_ids,
+                scope=scope,
             )
         finally:
             if db is not None:

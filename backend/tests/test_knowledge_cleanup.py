@@ -127,7 +127,7 @@ def test_cleanup_graph_step_uses_scoped_document_facts_and_projects_delete(db_se
 
     class Graph:
         calls = []
-        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        def delete_item_sources_all_generations(self, tenant_id, kb_uid, item_id):
             self.calls.append((tenant_id, kb_uid, item_id))
 
     graph = Graph()
@@ -155,7 +155,7 @@ def test_graph_failure_rolls_back_mysql_facts_and_keeps_es_checkpoint(db_session
     mention_id = mention.id
 
     class FailingGraph:
-        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        def delete_item_sources_all_generations(self, tenant_id, kb_uid, item_id):
             raise RuntimeError("neo4j unavailable")
 
     cleanup = KnowledgeCleanupService(db_session, FakeExternalIndex(), FakeExternalIndex(), FakeStorage(), graph_client=FailingGraph())

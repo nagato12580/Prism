@@ -51,7 +51,7 @@ def test_purge_item_derived_artifacts_deletes_document_entity_rows_and_calls_ext
     monkeypatch.setattr(cleanup, "clear_document_item_governance", lambda db, item_id: cleared_governance.append(item_id))
 
     class _FakeGraph:
-        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        def delete_item_sources_all_generations(self, tenant_id, kb_uid, item_id):
             deleted_graph.append((tenant_id, kb_uid, item_id))
 
         def close(self):
@@ -85,7 +85,7 @@ def test_purge_item_derived_artifacts_handles_item_without_chunks(db_session, mo
     monkeypatch.setattr(cleanup, "clear_document_item_governance", lambda db, item_id: None)
 
     class _FakeGraph:
-        def delete_item_sources(self, tenant_id, kb_uid, item_id):
+        def delete_item_sources_all_generations(self, tenant_id, kb_uid, item_id):
             deleted_graph.append((tenant_id, kb_uid, item_id))
 
         def close(self):
