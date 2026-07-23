@@ -134,6 +134,7 @@ def _chunk_columns() -> list[sa.Column]:
     return [
         sa.Column("id", sa.CHAR(36), primary_key=True),
         sa.Column("chunk_uid", sa.CHAR(36), nullable=False),
+        sa.Column("tenant_id", sa.CHAR(36), nullable=False),
         sa.Column("kb_uid", sa.CHAR(36), nullable=False),
         sa.Column("file_uid", sa.CHAR(36), nullable=False),
         sa.Column("item_id", sa.CHAR(36), nullable=True),
@@ -281,7 +282,7 @@ REQUIRED_COLUMNS = {
     "knowledge_topic": ["kb_uid", "tenant_id", "owner_user_id", "status", "version"],
     "knowledge_file": ["file_uid", "kb_uid", "tenant_id", "parse_status", "index_status", "graph_status", "parsed_content_version"],
     "knowledge_item": ["tenant_id", "kb_uid", "content_version"],
-    "knowledge_chunk": ["chunk_uid", "kb_uid", "file_uid", "generation"],
+    "knowledge_chunk": ["chunk_uid", "tenant_id", "kb_uid", "file_uid", "generation"],
     "knowledge_job": ["tenant_id", "kb_uid", "idempotency_key", "status", "priority", "attempt", "attempts", "max_attempts", "stage", "progress_current", "progress_total", "retryable"],
 }
 
@@ -690,6 +691,7 @@ def _backfill_legacy_rows() -> None:
         "LEFT JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file WHERE item_id IS NOT NULL "
         "GROUP BY item_id) f ON f.item_id = i.id WHERE "
         "(c.kb_uid IS NOT NULL AND c.kb_uid <> i.kb_uid) OR "
+        "(c.tenant_id IS NOT NULL AND c.tenant_id <> i.tenant_id) OR "
         "(f.item_id IS NOT NULL AND c.file_uid IS NOT NULL AND c.file_uid <> f.file_uid)",
         "item/file/topic",
     )
@@ -699,11 +701,12 @@ def _backfill_legacy_rows() -> None:
             "LEFT JOIN (SELECT item_id, MIN(file_uid) file_uid FROM knowledge_file "
             "WHERE item_id IS NOT NULL GROUP BY item_id) f ON f.item_id = i.id SET "
             "c.kb_uid = i.kb_uid, "
+            "c.tenant_id = i.tenant_id, "
             "c.file_uid = COALESCE(f.file_uid, c.file_uid), "
             "c.generation = COALESCE(c.generation, '0')"
         )
     )
-    _require_resolved("knowledge_chunk", ["chunk_uid", "kb_uid", "file_uid", "generation"])
+    _require_resolved("knowledge_chunk", ["chunk_uid", "tenant_id", "kb_uid", "file_uid", "generation"])
     _reject_scope_conflicts(
         "knowledge_job",
         "SELECT COUNT(*) FROM knowledge_job j LEFT JOIN knowledge_file f ON j.resource_id = f.id "

@@ -39,6 +39,7 @@ def test_create_knowledge_item_with_chunk(db_session):
     db_session.commit()
 
     chunk = KnowledgeChunk(
+        tenant_id=TENANT_ID,
         kb_uid=KB_UID,
         file_uid=FILE_UID,
         item_id=item.id,
@@ -483,6 +484,7 @@ def test_file_item_and_chunk_use_public_scope_and_stage_defaults(db_session):
     db_session.add(resource)
     db_session.flush()
     parent = KnowledgeChunk(
+        tenant_id=TENANT_ID,
         kb_uid=topic.kb_uid,
         file_uid=resource.file_uid,
         item_id=item.id,
@@ -492,6 +494,7 @@ def test_file_item_and_chunk_use_public_scope_and_stage_defaults(db_session):
     db_session.add(parent)
     db_session.flush()
     child = KnowledgeChunk(
+        tenant_id=TENANT_ID,
         kb_uid=topic.kb_uid,
         file_uid=resource.file_uid,
         item_id=item.id,
@@ -555,7 +558,7 @@ def test_knowledge_foundation_metadata_and_database_contract(db_session):
             "unique": "uq_knowledge_file_file_uid",
         },
         "knowledge_chunk": {
-            "required": {"chunk_uid", "kb_uid", "file_uid", "generation"},
+            "required": {"chunk_uid", "tenant_id", "kb_uid", "file_uid", "generation"},
             "unique": "uq_knowledge_chunk_uid_generation",
         },
         "knowledge_job": {

@@ -92,6 +92,7 @@ class KnowledgeChunk(Base):
 
     id = Column(CHAR(36), primary_key=True, default=uuid4_str)
     chunk_uid = Column(CHAR(36), nullable=False, default=uuid4_str)
+    tenant_id = Column(CHAR(36), nullable=False)
     kb_uid = Column(CHAR(36), nullable=False)
     file_uid = Column(CHAR(36), nullable=False)
     item_id = Column(CHAR(36), ForeignKey("knowledge_item.id", ondelete="CASCADE"), nullable=True)
