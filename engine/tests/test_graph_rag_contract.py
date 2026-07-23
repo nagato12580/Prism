@@ -22,7 +22,10 @@ def test_unified_search_returns_graph_rag_hit_contract(monkeypatch):
     monkeypatch.setattr(mod, "match_seed_entities", lambda *args, **kwargs: ["e1"])
     monkeypatch.setattr(mod, "rerank", lambda query, candidates, top_n: candidates)
 
-    out = mod.unified_search("MiniMind-O", top_k=5, mode="fast", db=object(), graph_client=_GraphForContractTest())
+    out = mod.unified_search(
+        "MiniMind-O", top_k=5, mode="fast", db=object(),
+        graph_client=_GraphForContractTest(), allow_legacy_unscoped=True,
+    )
 
     assert len(out) == 1
     first = out[0]

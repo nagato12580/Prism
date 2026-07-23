@@ -1,32 +1,47 @@
-"""Scoped dense + BM25 retrieval and RRF compatibility adapter."""
-from ..ingestion.vectorizer import embed_query
-from .contracts import SearchScope
-from .es_search import es_fulltext_search
-from .vector_search import vector_search
+"""Pure rank-fusion helpers for retrieval orchestrators."""
+
+from .contracts import ChannelResult
 
 RRF_K = 60
 VECTOR_WEIGHT = 0.6
 BM25_WEIGHT = 0.4
+GRAPH_WEIGHT = 0.5
 
 
-def hybrid_search(query: str, scope: SearchScope, top_k: int = 10) -> list[dict]:
-    """Fuse only natively-scoped channels; no SQL/post-filter fallback."""
-    try:
-        dense = vector_search(embed_query(query), scope, top_k * 3)
-    except Exception:
-        from .contracts import ChannelResult
-        dense = ChannelResult.failed("dense", "EMBEDDING_UNAVAILABLE", retryable=True)
-    bm25 = es_fulltext_search(query, scope, top_k * 2)
-    if dense.health == "failed" and bm25.health == "failed":
-        raise RuntimeError("RETRIEVAL_CHANNELS_UNAVAILABLE")
-    scores, meta = {}, {}
-    for weight, result in ((VECTOR_WEIGHT, dense), (BM25_WEIGHT, bm25)):
-        if result.health == "failed":
-            continue
-        for rank, candidate in enumerate(result.candidates):
-            key = candidate.chunk_uid
-            scores[key] = scores.get(key, 0.0) + weight / (RRF_K + rank + 1)
-            meta.setdefault(key, candidate)
-    merged = [{"chunk_id": key, "item_id": meta[key].item_id, "file_uid": meta[key].file_uid,
-               "score": score, "raw_score": meta[key].raw_score} for key, score in scores.items()]
-    return sorted(merged, key=lambda item: item["score"], reverse=True)[:top_k]
+def weighted_rrf(
+    results: list[ChannelResult], weights: dict[str, float], k: int = RRF_K
+) -> list[dict]:
+    """Fuse precomputed channel results without performing any retrieval."""
+    healthy = [result for result in results if result.health != "failed"]
+    active = {
+        result.channel: weights[result.channel]
+        for result in healthy
+        if result.channel in weights
+    }
+    total = sum(active.values()) or 1.0
+    normalized = {name: value / total for name, value in active.items()}
+
+    merged: dict[str, dict] = {}
+    for result in healthy:
+        weight = normalized.get(result.channel, 0.0)
+        for candidate in result.candidates:
+            row = merged.setdefault(
+                candidate.chunk_uid,
+                {
+                    "chunk_uid": candidate.chunk_uid,
+                    "item_id": candidate.item_id,
+                    "file_uid": candidate.file_uid,
+                    "rrf_score": 0.0,
+                    "channels": {},
+                    "metadata": {},
+                },
+            )
+            row["rrf_score"] += weight / (k + candidate.raw_rank)
+            row["channels"][result.channel] = {
+                "raw_rank": candidate.raw_rank,
+                "raw_score": candidate.raw_score,
+            }
+            for key, value in candidate.metadata.items():
+                if row["metadata"].get(key) in (None, "") and value not in (None, ""):
+                    row["metadata"][key] = value
+    return sorted(merged.values(), key=lambda row: row["rrf_score"], reverse=True)

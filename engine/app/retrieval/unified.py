@@ -7,15 +7,15 @@ import logging
 
 from ..config import settings
 from .graph_expand import graph_search, expand_candidates, match_seed_entities
-from .hybrid import RRF_K, hybrid_search
-from .contracts import SearchScope
+from .hybrid import BM25_WEIGHT, GRAPH_WEIGHT, RRF_K, VECTOR_WEIGHT, weighted_rrf
+from .contracts import ChannelResult, SearchScope
+from .es_search import es_fulltext_search
+from .vector_search import vector_search
+from ..ingestion.vectorizer import embed_query
 from .rerank import rerank
 
 logger = logging.getLogger("uvicorn.error")
 
-VECTOR_WEIGHT = 0.6
-BM25_WEIGHT = 0.4
-GRAPH_WEIGHT = 0.5   # graph-expanded hits weighted slightly below vector
 COMMUNITY_WEIGHT = 0.45
 SURPRISING_WEIGHT = 0.42
 GOD_WEIGHT = 0.48
@@ -25,6 +25,66 @@ GRAPH_MARKER_WEIGHTS = {
     "surprising": SURPRISING_WEIGHT,
     "god": GOD_WEIGHT,
 }
+
+CHANNEL_WEIGHTS = {
+    "dense": VECTOR_WEIGHT,
+    "bm25": BM25_WEIGHT,
+    "graph": GRAPH_WEIGHT,
+}
+
+
+def hybrid_search(
+    query: str,
+    top_k: int = 10,
+    topic_ids: list[str] | None = None,
+    source_types: list[str] | None = None,
+    allowed_item_ids: set[str] | None = None,
+) -> list[dict]:
+    """Best-effort adapter for legacy callers that have no authorized scope.
+
+    Scoped production retrieval never calls this function. It intentionally
+    stays in this module as a monkeypatch-compatible migration seam.
+    """
+    try:
+        from .bm25_search import bm25_search
+
+        rows = bm25_search(query, top_k=top_k)
+    except Exception:
+        return []
+    if allowed_item_ids:
+        rows = [row for row in rows if row.get("item_id") in allowed_item_ids]
+    return rows[:top_k]
+
+
+def recall(
+    query: str,
+    query_embedding: list[float],
+    scope: SearchScope,
+    *,
+    graph_client=None,
+    top_k: int = 30,
+    hops: int = 1,
+) -> dict:
+    """Call each enabled raw channel once and fuse their results once."""
+    dense = vector_search(query_embedding, scope, top_k)
+    bm25 = es_fulltext_search(query, scope, top_k)
+    if scope.graph_generation and graph_client is not None:
+        graph = graph_search(query, scope, graph_client, top_k, hops)
+    else:
+        graph = ChannelResult.failed("graph", "GRAPH_UNAVAILABLE", retryable=False)
+
+    channels = [dense, bm25, graph]
+    fused = weighted_rrf(channels, CHANNEL_WEIGHTS)
+    failed = [result for result in channels if result.health == "failed"]
+    if fused:
+        status = "degraded" if failed else "ok"
+    elif dense.health == "failed" and bm25.health == "failed" and graph.health == "failed":
+        status = "unavailable"
+    elif failed:
+        status = "degraded"
+    else:
+        status = "no_hits"
+    return {"status": status, "results": fused, "channels": channels}
 
 
 def _filter_stale_hits(db, hits: list[dict]) -> list[dict]:
@@ -249,6 +309,69 @@ def _enrich_graph_hit(db, hit: dict) -> dict:
     }
 
 
+def _legacy_unscoped_search(
+    query: str,
+    top_k: int,
+    *,
+    mode: str,
+    db,
+    graph_client,
+    topic_ids: list[str] | None,
+    source_types: list[str] | None,
+    allowed_item_ids: set[str] | None,
+) -> list[dict]:
+    """Preserve the pre-scope adapter without entering scoped production."""
+    hybrid_hits = hybrid_search(
+        query,
+        top_k=top_k,
+        topic_ids=topic_ids,
+        source_types=source_types,
+        allowed_item_ids=allowed_item_ids,
+    ) or []
+    hybrid_hits = _filter_stale_hits(db, hybrid_hits)
+
+    graph_hits: list[dict] = []
+    if graph_client is not None:
+        hops = settings.GRAPH_EXPAND_FAST_HOPS if mode == "fast" else settings.GRAPH_EXPAND_DEEP_HOPS
+        seeds = match_seed_entities(db, query, limit=settings.GRAPH_EXPAND_SEED_ENTITIES)
+        graph_hits = expand_candidates(
+            db,
+            graph_client,
+            seeds,
+            mode=mode,
+            hops=hops,
+            max_candidates=settings.GRAPH_EXPAND_MAX_CANDIDATES,
+            neighbors_per_node=settings.GRAPH_EXPAND_NEIGHBORS_PER_NODE,
+            community_members=settings.GRAPH_EXPAND_COMMUNITY_MEMBERS,
+            god_neighbors=settings.GRAPH_EXPAND_GOD_NEIGHBORS,
+        )
+    graph_hits = _filter_stale_hits(db, graph_hits)
+
+    scores: dict[str, float] = {}
+    meta: dict[str, dict] = {}
+    for rank, hit in enumerate(hybrid_hits, 1):
+        key = _hit_key(hit)
+        scores[key] = scores.get(key, 0.0) + VECTOR_WEIGHT / (RRF_K + rank)
+        meta.setdefault(key, dict(hit))
+    for rank, hit in enumerate(graph_hits, 1):
+        enriched = _enrich_graph_hit(db, hit)
+        key = _hit_key(enriched)
+        scores[key] = scores.get(key, 0.0) + _graph_marker_weight(enriched) / (RRF_K + rank)
+        if key in meta:
+            _merge_source_marker(meta[key], enriched)
+            _merge_missing_fields(meta[key], enriched)
+        else:
+            meta[key] = dict(enriched)
+
+    candidates = []
+    for key, score in sorted(scores.items(), key=lambda item: item[1], reverse=True):
+        hit = {**meta[key], "score": score}
+        hit["graph_rag"] = _build_graph_rag_payload(hit)
+        candidates.append(hit)
+    reranked = rerank(query, candidates, top_n=max(top_k, settings.RERANK_TOP_N))
+    return [_restore_graph_source_marker(hit) for hit in reranked[:top_k]]
+
+
 def unified_search(
     query: str,
     top_k: int,
@@ -260,60 +383,54 @@ def unified_search(
     source_types: list[str] | None = None,
     allowed_item_ids: set[str] | None = None,
     scope: SearchScope | None = None,
+    allow_legacy_unscoped: bool = False,
 ) -> list[dict]:
-    """Hybrid recall + graph expansion + RRF fusion + rerank. Returns SearchHit list."""
-    # 1) hybrid recall (vector + BM25 via existing RRF inside hybrid_search)
+    """Compatibility SearchHit adapter over the single-fusion recall path."""
+    if scope is None:
+        if not allow_legacy_unscoped:
+            logger.warning("[unified] unscoped_retrieval_rejected")
+            return []
+        return _legacy_unscoped_search(
+            query,
+            top_k,
+            mode=mode,
+            db=db,
+            graph_client=graph_client,
+            topic_ids=topic_ids,
+            source_types=source_types,
+            allowed_item_ids=allowed_item_ids,
+        )
     try:
-        if scope is None:
-            raise ValueError("SearchScope is required for hybrid retrieval")
-        hybrid_hits = hybrid_search(query, scope, top_k=top_k) or []
+        embedding = embed_query(query)
     except Exception as exc:
-        logger.warning("[unified] hybrid_failed err=%s", exc)
-        hybrid_hits = []
-    hybrid_hits = _filter_stale_hits(db, hybrid_hits)
-
-    # 2) graph expansion -> extra chunk candidates
-    graph_hits: list[dict] = []
-    if graph_client is not None and scope is not None and scope.graph_generation:
-        try:
-            hops = settings.GRAPH_EXPAND_FAST_HOPS if mode == "fast" else settings.GRAPH_EXPAND_DEEP_HOPS
-            if not hasattr(graph_client, "_execute_read"):  # legacy test/dev adapter only
-                seeds = match_seed_entities(db, query, limit=settings.GRAPH_EXPAND_SEED_ENTITIES)
-                graph_hits = expand_candidates(db, graph_client, seeds, mode=mode, hops=hops,
-                    max_candidates=settings.GRAPH_EXPAND_MAX_CANDIDATES,
-                    neighbors_per_node=settings.GRAPH_EXPAND_NEIGHBORS_PER_NODE,
-                    community_members=settings.GRAPH_EXPAND_COMMUNITY_MEMBERS,
-                    god_neighbors=settings.GRAPH_EXPAND_GOD_NEIGHBORS)
-            else:
-                graph_result = graph_search(query, scope, graph_client, top_k, hops)
-                if graph_result.health != "failed":
-                    graph_hits = [{"chunk_id": c.chunk_uid, "item_id": c.item_id,
-                                   "score": c.raw_score, "source_marker": "graph_scoped",
-                                   **c.metadata} for c in graph_result.candidates]
-        except Exception as exc:
-            logger.warning("[unified] graph_expand_failed err=%s", exc)
-    graph_hits = _filter_stale_hits(db, graph_hits)
-
-    # 3) RRF fusion of hybrid + graph candidates
-    scores: dict[str, float] = {}
-    meta: dict[str, dict] = {}
-    for rank, h in enumerate(hybrid_hits):
-        key = _hit_key(h)
-        scores[key] = scores.get(key, 0.0) + VECTOR_WEIGHT / (RRF_K + rank + 1)  # hybrid already fused; treat as primary
-        meta.setdefault(key, dict(h))
-    for rank, h in enumerate(graph_hits):
-        enriched = _enrich_graph_hit(db, h)
-        key = _hit_key(enriched)
-        scores[key] = scores.get(key, 0.0) + _graph_marker_weight(enriched) / (RRF_K + rank + 1)
-        if key in meta:
-            # Merge source_marker so graph contribution is visible even when
-            # the same source appeared in hybrid results.
-            _merge_source_marker(meta[key], enriched)
-            _merge_missing_fields(meta[key], enriched)
-        else:
-            meta[key] = {**enriched, "score": 0.0}
-    merged = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    candidates = [{**meta[key], "score": sc, "graph_rag": _build_graph_rag_payload(meta[key])} for key, sc in merged]
+        logger.warning("[unified] embedding_failed err=%s", exc)
+        embedding = []
+    hops = settings.GRAPH_EXPAND_FAST_HOPS if mode == "fast" else settings.GRAPH_EXPAND_DEEP_HOPS
+    recalled = recall(
+        query,
+        embedding,
+        scope,
+        graph_client=graph_client,
+        top_k=max(top_k, settings.RERANK_TOP_N),
+        hops=hops,
+    )
+    candidates = []
+    for row in recalled["results"]:
+        metadata = dict(row.get("metadata") or {})
+        hit = {
+            **metadata,
+            "chunk_id": row["chunk_uid"],
+            "item_id": row["item_id"],
+            "file_uid": row["file_uid"],
+            "score": row["rrf_score"],
+            "channels": row["channels"],
+        }
+        if "graph" in row["channels"] and not hit.get("source_marker"):
+            hit["source_marker"] = "graph_scoped"
+        hit = _enrich_graph_hit(db, hit)
+        hit["graph_rag"] = _build_graph_rag_payload(hit)
+        candidates.append(hit)
+    candidates = _filter_stale_hits(db, candidates)
 
     # 4) rerank (degrades gracefully if unavailable)
     top_n = max(top_k, settings.RERANK_TOP_N)

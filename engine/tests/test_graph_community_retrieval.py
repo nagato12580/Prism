@@ -42,7 +42,7 @@ def test_deep_unified_search_uses_community_and_surprising_candidates(monkeypatc
     monkeypatch.setattr(mod, "rerank", lambda query, candidates, top_n: candidates)
     monkeypatch.setattr(mod, "_filter_stale_hits", lambda db, hits: hits)
 
-    out = mod.unified_search("query", top_k=5, mode="deep", db=object(), graph_client=_FakeDeepGraph())
+    out = mod.unified_search("query", top_k=5, mode="deep", db=object(), graph_client=_FakeDeepGraph(), allow_legacy_unscoped=True)
 
     by_chunk = {item["chunk_id"]: item for item in out}
     markers = {item["source_marker"] for item in out}
@@ -70,7 +70,7 @@ def test_unified_search_scores_graph_hits_with_marker_specific_weights(monkeypat
     )
     monkeypatch.setattr(mod, "rerank", lambda query, candidates, top_n: candidates)
 
-    out = mod.unified_search("query", top_k=10, mode="deep", db=object(), graph_client=object())
+    out = mod.unified_search("query", top_k=10, mode="deep", db=object(), graph_client=object(), allow_legacy_unscoped=True)
     by_chunk = {item["chunk_id"]: item for item in out}
 
     assert by_chunk["c_graph"]["score"] == pytest.approx(0.5 / (mod.RRF_K + 1))

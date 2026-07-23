@@ -13,7 +13,6 @@ from ..agent.tools import ToolContext, build_enabled_tools
 from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
-from ..retrieval.hybrid import hybrid_search
 from ..retrieval.unified import make_unified_search
 
 
