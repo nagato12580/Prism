@@ -416,6 +416,7 @@ def unified_search(
     scope: SearchScope | None = None,
     allow_legacy_unscoped: bool = False,
     graph_hops: int | None = None,
+    diagnostics: dict | None = None,
 ) -> list[dict]:
     """Compatibility SearchHit adapter over the single-fusion recall path."""
     if scope is None:
@@ -448,6 +449,11 @@ def unified_search(
         top_k=max(top_k, settings.RERANK_TOP_N),
         hops=hops,
     )
+    channel_warnings = [
+        result.problem.model_dump()
+        for result in recalled["channels"]
+        if result.problem is not None
+    ]
     candidates = []
     for row in recalled["results"]:
         metadata = dict(row.get("metadata") or {})
@@ -474,6 +480,12 @@ def unified_search(
     reranked = rerank(query, candidates, top_n=top_n, warnings=rerank_warnings)
     if rerank_warnings:
         reranked = [{**hit, "warnings": list(rerank_warnings)} for hit in reranked]
+    if diagnostics is not None:
+        warnings = [*channel_warnings, *rerank_warnings]
+        status = recalled["status"]
+        if rerank_warnings and status in {"ok", "no_hits"}:
+            status = "degraded"
+        diagnostics.update({"status": status, "warnings": warnings})
     return [_restore_graph_source_marker(hit) for hit in reranked[:top_k]]
 
 

@@ -1,7 +1,14 @@
 # prism/backend/app/schemas/knowledge.py
 from datetime import datetime
-from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from typing import Annotated, Literal, Optional
+
+
+MAX_RETRIEVAL_FILTER_ITEMS = 100
+MAX_RETRIEVAL_FILE_UID_LENGTH = 128
+MAX_RETRIEVAL_SOURCE_TYPE_LENGTH = 64
+RetrievalFileUid = Annotated[str, StringConstraints(min_length=1, max_length=MAX_RETRIEVAL_FILE_UID_LENGTH)]
+RetrievalSourceType = Annotated[str, StringConstraints(min_length=1, max_length=MAX_RETRIEVAL_SOURCE_TYPE_LENGTH)]
 
 
 class KnowledgeItemCreate(BaseModel):
@@ -139,3 +146,73 @@ class KnowledgeResourceOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class KnowledgeRetrievalFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_uids: tuple[RetrievalFileUid, ...] = Field(default=(), max_length=MAX_RETRIEVAL_FILTER_ITEMS)
+    source_types: tuple[RetrievalSourceType, ...] = Field(default=(), max_length=MAX_RETRIEVAL_FILTER_ITEMS)
+
+
+class KnowledgeRetrievalConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    top_k: int = Field(default=10, ge=1, le=100)
+    graph_hops: int | None = Field(default=None, ge=1, le=3)
+
+
+class KnowledgeRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, max_length=2000)
+    mode: Literal["fast", "deep"] = "fast"
+    filters: KnowledgeRetrievalFilters = Field(default_factory=KnowledgeRetrievalFilters)
+    config: KnowledgeRetrievalConfig = Field(default_factory=KnowledgeRetrievalConfig)
+
+
+class PublicChannelScore(BaseModel):
+    raw_score: float
+    raw_rank: int
+
+
+class PublicChannelProblem(BaseModel):
+    code: str
+    message: str = ""
+    retryable: bool = False
+
+
+class PublicEvidence(BaseModel):
+    evidence_id: None = None
+    kb_uid: str
+    file_uid: str
+    item_id: str | None = None
+    chunk_uid: str
+    parent_chunk_uid: str | None = None
+    display_title: str
+    original_filename: str | None = None
+    excerpt: str
+    page_start: int | None = None
+    page_end: int | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    channel_scores: dict[str, PublicChannelScore] = Field(default_factory=dict)
+    rrf_score: float
+    rerank_score: float | None = None
+    rerank_model: str | None = None
+    retrieval_channels: tuple[Literal["dense", "bm25", "graph"], ...] = ()
+    graph_path: tuple[dict, ...] = ()
+    graph_explanation: str | None = None
+    evidence_type: Literal["chunk", "graph_path", "entity"]
+    index_generation: str
+    degradation_flags: tuple[str, ...] = ()
+
+
+class KnowledgeRetrievalResponse(BaseModel):
+    status: Literal["ok", "no_hits", "degraded"]
+    evidence: list[PublicEvidence] = Field(default_factory=list)
+    warnings: list[PublicChannelProblem] = Field(default_factory=list)
+
+
+class EngineRetrievalEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["ok", "no_hits", "degraded", "unavailable", "invalid_request"]
+    evidence: list[PublicEvidence]
+    warnings: list[PublicChannelProblem]
