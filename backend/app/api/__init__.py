@@ -13,6 +13,7 @@ from .unified_graph import router as unified_graph_router
 from .graph_exports import router as graph_exports_router
 from .knowledge_bases import router as knowledge_bases_router
 from .knowledge_files import router as knowledge_files_router
+from .agent_tools import router as agent_tools_router
 
 
 def register_routers(app):
@@ -29,4 +30,5 @@ def register_routers(app):
     api_prefix.include_router(traces_router)
     api_prefix.include_router(knowledge_bases_router)
     api_prefix.include_router(knowledge_files_router)
+    api_prefix.include_router(agent_tools_router)
     app.include_router(api_prefix)
