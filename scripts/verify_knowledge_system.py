@@ -272,18 +272,21 @@ class Verifier:
 
     def _verify_milvus(self):
         try:
-            from pymilvus import Collection, connections
-            connections.connect("default", host="127.0.0.1", port="19530")
-            col = Collection("prism_knowledge_dev")
-            col.load()
-            results = col.query(expr=f'kb_uid == "{self.kb_uid}"', limit=10,
-                                output_fields=["chunk_uid", "file_uid", "kb_uid"])
-            check("Milvus has chunks for this KB", len(results) > 0)
-            if results:
-                check("Milvus kb_uid matches", results[0].get("kb_uid") == self.kb_uid)
-                check("Milvus file_uid matches", results[0].get("file_uid") == self.file_uid)
-                self._milvus_chunk_count = len(results)
-            connections.disconnect("default")
+            from pymilvus import MilvusClient
+            mc = MilvusClient(uri="http://127.0.0.1:19530")
+            col_name = "prism_knowledge"
+            if mc.has_collection(col_name):
+                results = mc.query(
+                    collection_name=col_name,
+                    filter=f'item_id == "{self.item_id}"',
+                    output_fields=["chunk_id", "item_id"],
+                    limit=10,
+                )
+                check("Milvus has vectors for this item", len(results) > 0)
+                if results:
+                    check("Milvus item_id matches", results[0].get("item_id") == self.item_id)
+            else:
+                check("Milvus collection exists", False)
         except Exception as exc:
             check(f"Milvus verification error", False)
             print(f"  [INFO] Milvus error: {exc}")
@@ -291,15 +294,18 @@ class Verifier:
     def _verify_es(self):
         try:
             from elasticsearch import Elasticsearch
-            es = Elasticsearch(["http://127.0.0.1:9200"])
-            body = {"query": {"term": {"topic_id": self.kb_uid}}}
-            resp = es.search(index="_all", body=body, size=10) if hasattr(es, 'indices') else {"hits": {"hits": []}}
-            hits = resp.get("hits", {}).get("hits", [])
-            check("ES has documents for this KB", len(hits) > 0)
-            if hits:
-                src = hits[0].get("_source", {})
-                check("ES topic_id matches", src.get("topic_id") == self.kb_uid)
-                self._es_hit_count = len(hits)
+            es = Elasticsearch(["http://127.0.0.1:9200"], request_timeout=10)
+            es_index = "prism_chunks"
+            if es.indices.exists(index=es_index):
+                body = {"query": {"term": {"topic_id": self.kb_uid}}, "size": 10}
+                resp = es.search(index=es_index, body=body)
+                hits = resp.get("hits", {}).get("hits", [])
+                check("ES has documents for this KB", len(hits) > 0)
+                if hits:
+                    src = hits[0].get("_source", {})
+                    check("ES topic_id matches", src.get("topic_id") == self.kb_uid)
+            else:
+                check("ES index exists", False)
             es.transport.close()
         except Exception as exc:
             check(f"ES verification error", False)
@@ -312,10 +318,10 @@ class Verifier:
             driver = GraphDatabase.driver(uri, auth=("neo4j", "password"))
             with driver.session() as session:
                 result = session.run(
-                    "MATCH (n) WHERE n.kb_uid = $kb OR n.topic_id = $kb RETURN n LIMIT 10",
+                    "MATCH (doc:Document) WHERE doc.kb_uid = $kb RETURN doc LIMIT 10",
                     kb=self.kb_uid)
                 records = list(result)
-                check("Neo4j has nodes for this KB", len(records) > 0)
+                check("Neo4j has Document nodes for this KB", len(records) > 0)
             driver.close()
         except Exception as exc:
             check(f"Neo4j verification error", False)

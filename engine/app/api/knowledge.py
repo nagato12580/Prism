@@ -93,29 +93,24 @@ def process_file(req: ProcessRequest):
         # Write to Milvus
         milvus_count = 0
         try:
-            connections.connect("default", host=engine_settings.MILVUS_HOST, port=engine_settings.MILVUS_PORT)
-            col_name = "prism_knowledge_dev"
-            if utility.has_collection(col_name):
-                col = Collection(col_name)
-                dim = 1024
+            from pymilvus import MilvusClient
+            mc = MilvusClient(uri=f"http://{engine_settings.MILVUS_HOST}:{engine_settings.MILVUS_PORT}")
+            col_name = "prism_knowledge"
+            if mc.has_collection(col_name):
                 import numpy as np
+                dim = engine_settings.EMBEDDING_DIM
                 data_rows = []
-                for i, c in enumerate(chunk_list):
+                for c in chunk_list:
                     vec = np.random.randn(dim).astype(np.float32).tolist()
                     data_rows.append({
-                        "id": f"{c['chunk_uid']}:0",
-                        "kb_uid": file_row.kb_uid,
-                        "file_uid": file_row.file_uid,
-                        "chunk_uid": c["chunk_uid"],
-                        "generation": "0",
-                        "text": c["chunk_text"],
+                        "id": c["chunk_uid"],
+                        "chunk_id": c["chunk_uid"],
+                        "item_id": item_id,
                         "embedding": vec,
                     })
-                col.insert(data_rows)
-                col.flush()
+                mc.insert(collection_name=col_name, data=data_rows)
                 milvus_count = len(data_rows)
-                logger.info("[knowledge.process] Milvus: inserted %s vectors", milvus_count)
-            connections.disconnect("default")
+                logger.info("[knowledge.process] Milvus: inserted %s vectors into %s", milvus_count, col_name)
         except Exception as exc:
             logger.warning("[knowledge.process] Milvus write skipped: %s", exc)
 
