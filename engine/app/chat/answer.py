@@ -32,17 +32,26 @@ def _strip_tool_guidance(prompt: str, disabled_tools: set[str]) -> str:
     return "\n".join(kept)
 
 
-def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
+def _load_chunks(chunk_ids: list[str], scope=None) -> dict[str, dict[str, str]]:
     """加载 chunk 文本和所属文档名。
 
     Small-to-big 检索：命中子块时返回父块完整内容。
+    This is intentionally called after unified child-text reranking: parent
+    expansion changes final evidence context, not the provider payload.
     Returns: {chunk_id: {"text": str, "doc_name": str}}
     """
     from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem, KnowledgeFile
 
     db = _Session()
     try:
-        chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.chunk_uid.in_(chunk_ids)).all()
+        chunks_query = db.query(KnowledgeChunk).filter(KnowledgeChunk.chunk_uid.in_(chunk_ids))
+        if scope is not None:
+            chunks_query = chunks_query.filter(
+                KnowledgeChunk.tenant_id == scope.tenant_id,
+                KnowledgeChunk.kb_uid == scope.kb_uid,
+                KnowledgeChunk.generation == scope.index_generation,
+            )
+        chunks = chunks_query.all()
         if not chunks:
             return {}
 
@@ -50,7 +59,14 @@ def _load_chunks(chunk_ids: list[str]) -> dict[str, dict[str, str]]:
         parent_ids_needed = {c.parent_id for c in chunks if c.parent_id and c.parent_id not in chunk_ids}
         parent_chunks = {}
         if parent_ids_needed:
-            parents = db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(parent_ids_needed)).all()
+            parents_query = db.query(KnowledgeChunk).filter(KnowledgeChunk.id.in_(parent_ids_needed))
+            if scope is not None:
+                parents_query = parents_query.filter(
+                    KnowledgeChunk.tenant_id == scope.tenant_id,
+                    KnowledgeChunk.kb_uid == scope.kb_uid,
+                    KnowledgeChunk.generation == scope.index_generation,
+                )
+            parents = parents_query.all()
             parent_chunks = {p.id: p for p in parents}
 
         # 收集所有需要的 item_ids（含父块）
@@ -267,7 +283,7 @@ def build_agent_runner(
 
     rag_runner = AgenticRagRunner(
         search=_scoped_search,
-        load_chunks=_load_chunks,
+        load_chunks=lambda chunk_ids: _load_chunks(chunk_ids, scope=scope),
         judge=_judge_rag,
         max_iterations=3,
         top_k=8,

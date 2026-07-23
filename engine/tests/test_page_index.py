@@ -20,8 +20,11 @@ def _session_with_document():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    item_scope = {"tenant_id": "tenant-test", "kb_uid": "kb-test"}
+    chunk_scope = {**item_scope, "file_uid": "file-test", "generation": "gen-test"}
     item = KnowledgeItem(
         id="item-1",
+        **item_scope,
         title="Attention Residuals",
         content="full document text",
         source_type="file",
@@ -29,6 +32,8 @@ def _session_with_document():
     )
     parent_1 = KnowledgeChunk(
         id="parent-1",
+        chunk_uid="parent-public-1",
+        **chunk_scope,
         item_id="item-1",
         chunk_text="# Introduction\nAttention residuals are shortcuts.",
         chunk_index=0,
@@ -37,6 +42,8 @@ def _session_with_document():
     )
     child_1 = KnowledgeChunk(
         id="child-1",
+        chunk_uid="child-public-1",
+        **chunk_scope,
         item_id="item-1",
         chunk_text="Attention residuals are shortcuts on page one.",
         chunk_index=0,
@@ -46,6 +53,8 @@ def _session_with_document():
     )
     child_2 = KnowledgeChunk(
         id="child-2",
+        chunk_uid="child-public-2",
+        **chunk_scope,
         item_id="item-1",
         chunk_text="Residual analysis continues on page two.",
         chunk_index=1,
@@ -55,6 +64,8 @@ def _session_with_document():
     )
     parent_2 = KnowledgeChunk(
         id="parent-2",
+        chunk_uid="parent-public-2",
+        **chunk_scope,
         item_id="item-1",
         chunk_text="# Experiments\nResults compare residual layers.",
         chunk_index=1,
@@ -63,6 +74,8 @@ def _session_with_document():
     )
     child_3 = KnowledgeChunk(
         id="child-3",
+        chunk_uid="child-public-3",
+        **chunk_scope,
         item_id="item-1",
         chunk_text="Experiments compare residual layers on page three.",
         chunk_index=0,

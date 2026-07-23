@@ -163,6 +163,37 @@ def _hit_key(hit: dict) -> str:
     return f"unknown:{id(hit)}"
 
 
+def _load_child_texts(db, hits: list[dict], scope: SearchScope) -> list[dict]:
+    """Attach child text by public chunk_uid before cross-encoder reranking."""
+    if db is None or not hits:
+        return hits
+    from backend.app.models import KnowledgeChunk
+
+    chunk_uids = [str(hit["chunk_id"]) for hit in hits if hit.get("chunk_id")]
+    if not chunk_uids:
+        return hits
+    try:
+        rows = (
+            db.query(KnowledgeChunk.chunk_uid, KnowledgeChunk.chunk_text)
+            .filter(
+                KnowledgeChunk.chunk_uid.in_(chunk_uids),
+                KnowledgeChunk.tenant_id == scope.tenant_id,
+                KnowledgeChunk.kb_uid == scope.kb_uid,
+                KnowledgeChunk.generation == scope.index_generation,
+            )
+            .all()
+        )
+    except Exception as exc:
+        logger.warning("[unified] child_text_load_failed err=%s", exc)
+        return hits
+    texts = {str(chunk_uid): text for chunk_uid, text in rows}
+    return [
+        {**hit, "text": texts[str(hit["chunk_id"])]}
+        if hit.get("chunk_id") and str(hit["chunk_id"]) in texts else hit
+        for hit in hits
+    ]
+
+
 def _merge_source_marker(existing: dict, incoming: dict) -> None:
     marker = incoming.get("source_marker")
     if not marker:
@@ -431,10 +462,15 @@ def unified_search(
         hit["graph_rag"] = _build_graph_rag_payload(hit)
         candidates.append(hit)
     candidates = _filter_stale_hits(db, candidates)
+    candidates = _load_child_texts(db, candidates, scope)
 
-    # 4) rerank (degrades gracefully if unavailable)
+    # Rerank child text here; the answer layer expands selected hits to parent
+    # context later (small-to-big).
     top_n = max(top_k, settings.RERANK_TOP_N)
-    reranked = rerank(query, candidates, top_n=top_n)
+    rerank_warnings: list[dict] = []
+    reranked = rerank(query, candidates, top_n=top_n, warnings=rerank_warnings)
+    if rerank_warnings:
+        reranked = [{**hit, "warnings": list(rerank_warnings)} for hit in reranked]
     return [_restore_graph_source_marker(hit) for hit in reranked[:top_k]]
 
 
