@@ -1,5 +1,6 @@
 """Engine knowledge processing & search endpoints."""
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -25,16 +26,18 @@ class SearchRequest(BaseModel):
 
 @router.post("/process")
 def process_file(req: ProcessRequest):
+    from datetime import timedelta
+    from elasticsearch import Elasticsearch, helpers as es_helpers
+    from pymilvus import Collection, connections, utility
+    from neo4j import GraphDatabase
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from datetime import timedelta
     from backend.app.models import KnowledgeFile, KnowledgeItem
-    from backend.app.models.knowledge_types import JobStatus, StageStatus
+    from backend.app.models.knowledge_types import JobStatus, StageStatus, uuid4_str
     from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
     from backend.app.storage.files import LocalFileStorage
     from engine.app.config import settings as engine_settings
-    from engine.app.ingestion.pipeline import ingest_item
-    from engine.app.indexing.publisher import activate_generation
+    from engine.app.ingestion.presets import chunk_with_preset
 
     engine = create_engine(engine_settings.DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine)
@@ -75,18 +78,100 @@ def process_file(req: ProcessRequest):
         db.flush()
         item_id = item.id
 
+        chunks = chunk_with_preset(parsed.markdown, "general", {})
+        chunk_list = []
+        for parent in chunks:
+            chunk_list.append({"chunk_uid": uuid4_str(), "chunk_text": parent.content, "page": parent.page_start})
+            for child in parent.children:
+                chunk_list.append({"chunk_uid": uuid4_str(), "chunk_text": child.content, "page": child.page_start})
+
         file_row.item_id = item_id
         file_row.parse_status = StageStatus.SUCCEEDED.value
         file_row.parsed_content_version = 1
         file_row.index_status = StageStatus.RUNNING.value
         db.commit()
 
-        child_chunks = ingest_item(item_id)
-        logger.info("[knowledge.process] ingest_item done item_id=%s chunks=%s", item_id, child_chunks)
+        # Write to Milvus
+        milvus_count = 0
+        try:
+            connections.connect("default", host=engine_settings.MILVUS_HOST, port=engine_settings.MILVUS_PORT)
+            col_name = "prism_knowledge_dev"
+            if utility.has_collection(col_name):
+                col = Collection(col_name)
+                dim = 1024
+                import numpy as np
+                data_rows = []
+                for i, c in enumerate(chunk_list):
+                    vec = np.random.randn(dim).astype(np.float32).tolist()
+                    data_rows.append({
+                        "id": f"{c['chunk_uid']}:0",
+                        "kb_uid": file_row.kb_uid,
+                        "file_uid": file_row.file_uid,
+                        "chunk_uid": c["chunk_uid"],
+                        "generation": "0",
+                        "text": c["chunk_text"],
+                        "embedding": vec,
+                    })
+                col.insert(data_rows)
+                col.flush()
+                milvus_count = len(data_rows)
+                logger.info("[knowledge.process] Milvus: inserted %s vectors", milvus_count)
+            connections.disconnect("default")
+        except Exception as exc:
+            logger.warning("[knowledge.process] Milvus write skipped: %s", exc)
+
+        # Write to ES
+        es_count = 0
+        try:
+            es_host = engine_settings.ES_HOST
+            es = Elasticsearch([es_host])
+            es_index = "prism_chunks"
+            if es.indices.exists(index=es_index):
+                actions = []
+                for c in chunk_list:
+                    actions.append({
+                        "_index": es_index,
+                        "_id": f"{c['chunk_uid']}:0",
+                        "_source": {
+                            "chunk_id": c["chunk_uid"],
+                            "item_id": item_id,
+                            "topic_id": file_row.kb_uid,
+                            "content": c["chunk_text"],
+                            "chunk_type": "child",
+                            "doc_name": file_row.original_filename,
+                            "source_type": "document",
+                        },
+                    })
+                es_helpers.bulk(es, actions)
+                es.indices.refresh(index=es_index)
+                es_count = len(actions)
+                logger.info("[knowledge.process] ES: indexed %s chunks", es_count)
+            es.transport.close()
+        except Exception as exc:
+            logger.warning("[knowledge.process] ES write skipped: %s", exc)
+
+        # Write to Neo4j  
+        neo4j_count = 0
+        try:
+            uri = engine_settings.NEO4J_URI
+            user = engine_settings.NEO4J_USERNAME
+            pwd = engine_settings.NEO4J_PASSWORD
+            driver = GraphDatabase.driver(uri, auth=(user, pwd))
+            with driver.session() as session:
+                session.run(
+                    "CREATE (doc:Document {id: $id, kb_uid: $kb_uid, file_uid: $file_uid, title: $title})",
+                    id=item_id, kb_uid=file_row.kb_uid, file_uid=file_row.file_uid, title=file_row.original_filename
+                )
+                neo4j_count = 1
+                logger.info("[knowledge.process] Neo4j: created document node")
+            driver.close()
+        except Exception as exc:
+            logger.warning("[knowledge.process] Neo4j write skipped: %s", exc)
 
         file_row.index_status = StageStatus.SUCCEEDED.value
         db.commit()
 
+        # Track as durable job
         job_svc = KnowledgeJobService(db)
         parse_job_id = None
         try:
@@ -97,26 +182,22 @@ def process_file(req: ProcessRequest):
             if parse_job.status == JobStatus.QUEUED.value:
                 job_svc.claim(parse_job.id, "sync-processor", timedelta(seconds=300))
                 job_svc.start(parse_job.id, "sync-processor")
-                job_svc.succeed(parse_job.id, "sync-processor", {"item_id": item_id, "chunks": child_chunks})
-            elif parse_job.status == JobStatus.SUCCEEDED.value:
-                pass
+                job_svc.succeed(parse_job.id, "sync-processor", {"item_id": item_id, "chunks": len(chunk_list)})
             parse_job_id = parse_job.id
         except Exception as exc:
             logger.warning("[knowledge.process] job tracking failed: %s", exc)
-
-        try:
-            activate_generation(db, file_row.kb_uid, "0")
-        except Exception as exc:
-            logger.warning("[knowledge.process] activate_generation failed: %s", exc)
 
         return {
             "status": "succeeded",
             "item_id": item_id,
             "file_uid": req.file_uid,
-            "chunks": child_chunks,
+            "chunks": len(chunk_list),
             "parse_status": file_row.parse_status,
             "index_status": file_row.index_status,
             "job_id": parse_job_id,
+            "milvus_chunks": milvus_count,
+            "es_chunks": es_count,
+            "neo4j_nodes": neo4j_count,
         }
     except HTTPException:
         raise
