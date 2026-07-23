@@ -23,6 +23,7 @@ from engine.app.ingestion.pipeline import ingest_item
 from . import redis_queue
 from .knowledge_handlers import handle_delete, handle_parse
 from .evaluation_handlers import handle_evaluation
+from .enrichment_handlers import JOB_TYPES as ENRICHMENT_JOB_TYPES, handle_enrichment
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
@@ -114,6 +115,8 @@ def dispatch_typed_job(db, job_id, worker_id):
         )
     if job.job_type == "evaluation":
         return handle_evaluation(job_id, worker_id, db, KnowledgeJobService(db))
+    if job.job_type in ENRICHMENT_JOB_TYPES:
+        return handle_enrichment(job_id, worker_id, db, KnowledgeJobService(db), publisher=_publish_typed_job_id)
     return None
 
 
@@ -126,7 +129,7 @@ def run_ingest_queue_job(job_id, *, worker_id):
     db = _Session()
     try:
         job_type = db.query(KnowledgeJob.job_type).filter(KnowledgeJob.id == job_id).scalar()
-        if job_type in {"parse", "delete", "evaluation"}:
+        if job_type in {"parse", "delete", "evaluation", *ENRICHMENT_JOB_TYPES}:
             return dispatch_typed_job(db, job_id, worker_id)
     finally:
         db.close()
@@ -318,32 +321,84 @@ def recover_expired_evaluation_jobs():
         _EVALUATION_REAPER_LOCK.release()
 
 
+def _lock_reaper_topic(db, candidate):
+    return (
+        db.query(KnowledgeTopic)
+        .filter_by(tenant_id=candidate.tenant_id, kb_uid=candidate.kb_uid)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+    )
+
+
+def _lock_expired_job(db, job_id: str, now):
+    return (
+        db.query(KnowledgeJob)
+        .filter(
+            KnowledgeJob.id == job_id,
+            KnowledgeJob.job_type.in_({"evaluation", *ENRICHMENT_JOB_TYPES}),
+            KnowledgeJob.status.in_({"claimed", "running"}),
+            KnowledgeJob.lease_expires_at.is_not(None),
+            KnowledgeJob.lease_expires_at <= now,
+        )
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+    )
+
+
 def _recover_expired_evaluation_jobs():
     """Requeue typed evaluation jobs whose worker lease expired."""
     now = local_now()
     db = _Session()
-    recovered = []
+    recovered_ids = []
     try:
-        jobs = (
-            db.query(KnowledgeJob)
+        candidates = (
+            db.query(
+                KnowledgeJob.id,
+                KnowledgeJob.job_type,
+                KnowledgeJob.tenant_id,
+                KnowledgeJob.kb_uid,
+            )
             .filter(
-                KnowledgeJob.job_type == "evaluation",
+                KnowledgeJob.job_type.in_({"evaluation", *ENRICHMENT_JOB_TYPES}),
                 KnowledgeJob.status.in_({"claimed", "running"}),
                 KnowledgeJob.lease_expires_at.is_not(None),
                 KnowledgeJob.lease_expires_at <= now,
             )
-            .with_for_update()
+            .order_by(
+                KnowledgeJob.tenant_id,
+                KnowledgeJob.kb_uid,
+                KnowledgeJob.id,
+            )
             .all()
         )
-        for job in jobs:
+        for candidate in candidates:
+            topic = None
+            if candidate.job_type in ENRICHMENT_JOB_TYPES:
+                topic = _lock_reaper_topic(db, candidate)
+            job = _lock_expired_job(db, candidate.id, now)
+            if job is None:
+                db.rollback()
+                continue
             if job.cancel_requested_at is not None:
                 job.status = "canceled"
                 job.finished_at = now
                 job.lease_owner = None
                 job.lease_expires_at = None
-                run = db.get(EvaluationRun, job.resource_id)
-                if run is not None:
-                    run.status = "canceled"
+                if job.job_type == "evaluation":
+                    run = db.get(EvaluationRun, job.resource_id)
+                    if run is not None:
+                        run.status = "canceled"
+                elif job.job_type in ENRICHMENT_JOB_TYPES:
+                    from engine.app.knowledge.enrichment import mark_topic_enrichment_stale
+                    if topic is not None:
+                        mark_topic_enrichment_stale(
+                            topic,
+                            reason="generation_canceled",
+                            increment_input_revision=False,
+                        )
+                db.commit()
                 continue
             if job.status == "running" and job.attempt >= job.max_attempts:
                 job.status = "failed"
@@ -351,10 +406,18 @@ def _recover_expired_evaluation_jobs():
                 job.error_message = "Evaluation worker lease expired"
                 job.retryable = False
                 job.finished_at = now
-                run = db.get(EvaluationRun, job.resource_id)
-                if run is not None:
-                    run.status = "failed"
-                    run.error_message = "evaluation run failed"
+                if job.job_type == "evaluation":
+                    run = db.get(EvaluationRun, job.resource_id)
+                    if run is not None:
+                        run.status = "failed"
+                        run.error_message = "evaluation run failed"
+                elif job.job_type in ENRICHMENT_JOB_TYPES:
+                    if topic is not None:
+                        attribute = "mindmap" if job.job_type == "mindmap_generation" else "sample_questions"
+                        value = dict(getattr(topic, attribute) or {})
+                        value.update({"status": "failed", "error": "generation_failed"})
+                        setattr(topic, attribute, value)
+                db.commit()
                 continue
             job.status = "queued"
             job.stage = "recovered"
@@ -362,14 +425,16 @@ def _recover_expired_evaluation_jobs():
             job.lease_expires_at = None
             job.heartbeat_at = now
             job.available_at = now
-            recovered.append(job)
-            run = db.get(EvaluationRun, job.resource_id)
-            if run is not None:
-                run.status = "queued"
-        db.commit()
-        for job in recovered:
+            recovered_ids.append(job.id)
+            if job.job_type == "evaluation":
+                run = db.get(EvaluationRun, job.resource_id)
+                if run is not None:
+                    run.status = "queued"
+            db.commit()
+        for job_id in recovered_ids:
+            job = db.get(KnowledgeJob, job_id)
             _publish_job_and_mark_enqueued(db, job)
-        return len(recovered)
+        return len(recovered_ids)
     except Exception:
         db.rollback()
         raise
@@ -682,5 +747,6 @@ class KnowledgeWorkerManager:
         while not self._stop.wait(EVALUATION_REAPER_INTERVAL_SECONDS):
             try:
                 recover_expired_evaluation_jobs()
+                republish_due_queued_jobs()
             except Exception as exc:
                 logger.exception("[knowledge.worker] evaluation lease sweep failed error=%s", exc)

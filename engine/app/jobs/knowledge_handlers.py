@@ -175,9 +175,22 @@ def handle_parse(
         file_row.parsed_content_version = next_version
         file_row.parse_status = StageStatus.SUCCEEDED.value
         file_row.index_status = StageStatus.PENDING.value
-        db_session.commit()
 
-        job_svc.succeed(job_id, worker_id, {"item_id": item.id, "chunks_created": len(chunks)})
+        from engine.app.knowledge.enrichment import mark_enrichment_stale
+        mark_enrichment_stale(
+            db_session,
+            file_row.kb_uid,
+            reason="file_content_changed",
+            commit=False,
+        )
+
+        job_svc.succeed(
+            job_id,
+            worker_id,
+            {"item_id": item.id, "chunks_created": len(chunks)},
+            commit=False,
+        )
+        db_session.commit()
         if job.payload and job.payload.get("auto_index"):
             index_job = job_svc.create(
                 JobCommand(

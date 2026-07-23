@@ -39,11 +39,20 @@ def chat(
     model: str | None = None,
     api_base: str | None = None,
     api_key: str | None = None,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
 ) -> str:
     """非流式聊天，返回完整回答。"""
     selected_model = model or settings.LLM_MODEL
     selected_api_base = api_base or settings.LLM_API_BASE
     selected_api_key = api_key or settings.LLM_API_KEY
     client = _get_override_client(selected_api_base, selected_api_key) if api_base or api_key else _get_client()
+    if timeout_seconds is not None or max_retries is not None:
+        options = {}
+        if timeout_seconds is not None:
+            options["timeout"] = timeout_seconds
+        if max_retries is not None:
+            options["max_retries"] = max_retries
+        client = client.with_options(**options)
     resp = client.chat.completions.create(model=selected_model, messages=messages)
     return resp.choices[0].message.content

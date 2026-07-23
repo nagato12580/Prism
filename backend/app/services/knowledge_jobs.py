@@ -123,18 +123,30 @@ class KnowledgeJobService:
         self.db.commit()
         return self.db.get(KnowledgeJob, job_id) if rowcount == 1 else None
 
-    def _checked_update(self, job_id: str, worker_id: str, filters: list, values: dict) -> KnowledgeJob:
-        now = local_now()
+    def _checked_update(
+        self,
+        job_id: str,
+        worker_id: str,
+        filters: list,
+        values: dict,
+        *,
+        commit: bool = True,
+    ) -> KnowledgeJob:
         q = self.db.query(KnowledgeJob).filter(KnowledgeJob.id == job_id)
         for f in filters:
             q = q.filter(f)
         rowcount = q.update(values, synchronize_session="fetch")
-        self.db.commit()
         if rowcount != 1:
             raise InvalidJobTransition(
                 f"Cannot update job {job_id} as {worker_id}"
             )
-        return self.db.get(KnowledgeJob, job_id)
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
+        job = self.db.get(KnowledgeJob, job_id)
+        self.db.refresh(job)
+        return job
 
     def _lease_not_expired(self, now=None):
         if now is None:
@@ -208,129 +220,130 @@ class KnowledgeJobService:
             raise InvalidJobTransition(f"Cannot set progress for job {job_id} as {worker_id}")
         return self.db.get(KnowledgeJob, job_id)
 
-    def succeed(self, job_id: str, worker_id: str, result: dict[str, Any]) -> KnowledgeJob:
+    def succeed(
+        self,
+        job_id: str,
+        worker_id: str,
+        result: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> KnowledgeJob:
         now = local_now()
-        rowcount = (
+        return self._checked_update(
+            job_id,
+            worker_id,
+            [
+                KnowledgeJob.status == JobStatus.RUNNING.value,
+                KnowledgeJob.lease_owner == worker_id,
+                self._lease_not_expired(now),
+            ],
+            {
+                KnowledgeJob.status: JobStatus.SUCCEEDED.value,
+                KnowledgeJob.result: result,
+                KnowledgeJob.finished_at: now,
+                KnowledgeJob.heartbeat_at: now,
+            },
+            commit=commit,
+        )
+
+    def fail(
+        self,
+        job_id: str,
+        worker_id: str,
+        error_code: str,
+        error_message: str,
+        retryable: bool,
+        *,
+        commit: bool = True,
+    ) -> KnowledgeJob:
+        now = local_now()
+        current = (
             self.db.query(KnowledgeJob)
             .filter(
                 KnowledgeJob.id == job_id,
                 KnowledgeJob.status == JobStatus.RUNNING.value,
                 KnowledgeJob.lease_owner == worker_id,
+                self._lease_not_expired(now),
             )
-            .update(
-                {
-                    KnowledgeJob.status: JobStatus.SUCCEEDED.value,
-                    KnowledgeJob.result: result,
-                    KnowledgeJob.finished_at: now,
-                    KnowledgeJob.heartbeat_at: now,
-                },
-                synchronize_session="fetch",
-            )
+            .with_for_update()
+            .one_or_none()
         )
-        self.db.commit()
-        if rowcount != 1:
-            raise InvalidJobTransition(f"Cannot mark job {job_id} succeeded as {worker_id}")
-        return self.db.get(KnowledgeJob, job_id)
-
-    def fail(self, job_id: str, worker_id: str, error_code: str, error_message: str, retryable: bool) -> KnowledgeJob:
-        now = local_now()
-        current = self.db.get(KnowledgeJob, job_id)
         if current is None:
-            raise InvalidJobTransition(f"Job {job_id} not found")
+            raise InvalidJobTransition(f"Cannot fail job {job_id} as {worker_id}")
         exhausted = current.attempt >= current.max_attempts
         if retryable and not exhausted:
-            rowcount = (
-                self.db.query(KnowledgeJob)
-                .filter(
-                    KnowledgeJob.id == job_id,
-                    KnowledgeJob.status == JobStatus.RUNNING.value,
-                    KnowledgeJob.lease_owner == worker_id,
-                )
-                .update(
-                    {
-                        KnowledgeJob.status: JobStatus.QUEUED.value,
-                        KnowledgeJob.error_code: error_code,
-                        KnowledgeJob.error_message: error_message,
-                        KnowledgeJob.retryable: True,
-                        KnowledgeJob.lease_owner: None,
-                        KnowledgeJob.lease_expires_at: None,
-                        KnowledgeJob.heartbeat_at: now,
-                    },
-                    synchronize_session="fetch",
-                )
-            )
+            values = {
+                KnowledgeJob.status: JobStatus.QUEUED.value,
+                KnowledgeJob.error_code: error_code,
+                KnowledgeJob.error_message: error_message,
+                KnowledgeJob.retryable: True,
+                KnowledgeJob.lease_owner: None,
+                KnowledgeJob.lease_expires_at: None,
+                KnowledgeJob.heartbeat_at: now,
+            }
         else:
-            rowcount = (
-                self.db.query(KnowledgeJob)
-                .filter(
-                    KnowledgeJob.id == job_id,
-                    KnowledgeJob.status == JobStatus.RUNNING.value,
-                    KnowledgeJob.lease_owner == worker_id,
-                )
-                .update(
-                    {
-                        KnowledgeJob.status: JobStatus.FAILED.value,
-                        KnowledgeJob.error_code: error_code,
-                        KnowledgeJob.error_message: error_message,
-                        KnowledgeJob.retryable: False,
-                        KnowledgeJob.finished_at: now,
-                        KnowledgeJob.heartbeat_at: now,
-                    },
-                    synchronize_session="fetch",
-                )
-            )
-        self.db.commit()
-        if rowcount != 1:
-            raise InvalidJobTransition(f"Cannot fail job {job_id} as {worker_id}")
-        return self.db.get(KnowledgeJob, job_id)
+            values = {
+                KnowledgeJob.status: JobStatus.FAILED.value,
+                KnowledgeJob.error_code: error_code,
+                KnowledgeJob.error_message: error_message,
+                KnowledgeJob.retryable: False,
+                KnowledgeJob.finished_at: now,
+                KnowledgeJob.heartbeat_at: now,
+            }
+        return self._checked_update(
+            job_id,
+            worker_id,
+            [
+                KnowledgeJob.status == JobStatus.RUNNING.value,
+                KnowledgeJob.lease_owner == worker_id,
+                self._lease_not_expired(now),
+            ],
+            values,
+            commit=commit,
+        )
 
-    def request_cancel(self, job_id: str, canceled_by: str) -> KnowledgeJob:
+    def request_cancel(
+        self,
+        job_id: str,
+        canceled_by: str,
+        *,
+        commit: bool = True,
+    ) -> KnowledgeJob:
         now = local_now()
-        rowcount = (
-            self.db.query(KnowledgeJob)
-            .filter(
-                KnowledgeJob.id == job_id,
+        return self._checked_update(
+            job_id,
+            canceled_by,
+            [
                 KnowledgeJob.status.in_({
                     JobStatus.QUEUED.value,
                     JobStatus.CLAIMED.value,
                     JobStatus.RUNNING.value,
                 }),
-            )
-            .update(
-                {
-                    KnowledgeJob.cancel_requested_at: now,
-                    KnowledgeJob.canceled_by: canceled_by,
-                },
-                synchronize_session="fetch",
-            )
+            ],
+            {
+                KnowledgeJob.cancel_requested_at: now,
+                KnowledgeJob.canceled_by: canceled_by,
+            },
+            commit=commit,
         )
-        self.db.commit()
-        if rowcount != 1:
-            raise InvalidJobTransition(f"Cannot request cancel for job {job_id}")
-        return self.db.get(KnowledgeJob, job_id)
 
-    def cancel(self, job_id: str, worker_id: str) -> KnowledgeJob:
+    def cancel(self, job_id: str, worker_id: str, *, commit: bool = True) -> KnowledgeJob:
         now = local_now()
-        rowcount = (
-            self.db.query(KnowledgeJob)
-            .filter(
-                KnowledgeJob.id == job_id,
+        return self._checked_update(
+            job_id,
+            worker_id,
+            [
                 KnowledgeJob.lease_owner == worker_id,
                 KnowledgeJob.status.in_({JobStatus.CLAIMED.value, JobStatus.RUNNING.value}),
-            )
-            .update(
-                {
-                    KnowledgeJob.status: JobStatus.CANCELED.value,
-                    KnowledgeJob.finished_at: now,
-                    KnowledgeJob.heartbeat_at: now,
-                },
-                synchronize_session="fetch",
-            )
+                self._lease_not_expired(now),
+            ],
+            {
+                KnowledgeJob.status: JobStatus.CANCELED.value,
+                KnowledgeJob.finished_at: now,
+                KnowledgeJob.heartbeat_at: now,
+            },
+            commit=commit,
         )
-        self.db.commit()
-        if rowcount != 1:
-            raise InvalidJobTransition(f"Cannot cancel job {job_id} as {worker_id}")
-        return self.db.get(KnowledgeJob, job_id)
 
     def reconcile_queued(self, kb_uid: str | None = None, publisher: RedisPublisher | None = None) -> list[str]:
         now = local_now()

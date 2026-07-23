@@ -72,6 +72,7 @@ class KnowledgeUploadService:
             actor.tenant_id, topic.kb_uid, file_uid,
             request.filename, request.content,
         )
+        storage_uri = None
         try:
             duplicate = (
                 self.db.query(KnowledgeFile)
@@ -103,7 +104,7 @@ class KnowledgeUploadService:
                 chunk_config_snapshot=request.chunk_config,
             )
             self.db.add(file_row)
-            self.db.commit()
+            self.db.flush()
             job = self.jobs.create(
                 JobCommand(
                     "parse",
@@ -113,7 +114,16 @@ class KnowledgeUploadService:
                     {"auto_index": request.auto_index},
                 ),
                 f"{topic.kb_uid}:{file_uid}:parse:v0",
+                commit=False,
             )
+            from engine.app.knowledge.enrichment import mark_enrichment_stale
+            mark_enrichment_stale(
+                self.db,
+                topic.kb_uid,
+                reason="file_added",
+                commit=False,
+            )
+            self.db.commit()
             if self.publisher:
                 try:
                     self.publisher.publish(job.id)
@@ -122,8 +132,14 @@ class KnowledgeUploadService:
                     self.db.rollback()
             return file_row, job
         except Exception:
+            self.db.rollback()
             if staged.path.exists():
                 staged.path.unlink(missing_ok=True)
+            if storage_uri is not None:
+                try:
+                    self.storage.delete(storage_uri)
+                except Exception:
+                    pass
             raise
 
 

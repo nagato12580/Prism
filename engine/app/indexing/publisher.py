@@ -6,6 +6,7 @@ from backend.app.models import KnowledgeChunk, KnowledgeFile, KnowledgeTopic
 from backend.app.utils.time import local_now
 from engine.app.indexing.profiles import EmbeddingProfile
 from engine.app.ingestion.vectorizer import embed_texts
+from engine.app.knowledge.enrichment import mark_topic_enrichment_stale
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,8 @@ class GenerationPublisher:
             )
             if updated != 1:
                 raise RuntimeError("active generation changed concurrently")
+            self.db.refresh(topic)
+            mark_topic_enrichment_stale(topic, reason="active_index_generation_changed")
             self.db.commit()
             return IndexBuildResult("succeeded", len(rows))
         except Exception as exc:
@@ -147,11 +150,13 @@ def activate_generation(
             active_index_generation=expected_old,
             deleted_at=None,
         )
+        .with_for_update()
         .one_or_none()
     )
     if topic is None:
         raise RuntimeError("active generation changed concurrently")
     topic.active_index_generation = generation
+    mark_topic_enrichment_stale(topic, reason="active_index_generation_changed")
     db.commit()
     db.refresh(topic)
     return topic

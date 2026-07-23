@@ -24,7 +24,8 @@ def handler_db():
     session.close()
 
 
-def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path):
+def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch):
+    from engine.app.jobs import knowledge_handlers
     from engine.app.jobs.knowledge_handlers import handle_parse
     import os
 
@@ -61,6 +62,23 @@ def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path):
     job = job_svc.create(command, "handler-parse-1")
     handler_db.commit()
 
+    original_chunk = knowledge_handlers.chunk_with_preset
+    original_commit = handler_db.commit
+    transaction = {"counting": False, "commits": 0}
+
+    def tracked_chunk(*args, **kwargs):
+        result = original_chunk(*args, **kwargs)
+        transaction["counting"] = True
+        return result
+
+    def tracked_commit():
+        if transaction["counting"]:
+            transaction["commits"] += 1
+        return original_commit()
+
+    monkeypatch.setattr(knowledge_handlers, "chunk_with_preset", tracked_chunk)
+    monkeypatch.setattr(handler_db, "commit", tracked_commit)
+
     result = handle_parse(job.id, "w1", handler_db, job_svc)
     assert result["status"] == "completed"
     assert "item_id" in result
@@ -68,7 +86,12 @@ def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path):
     assert chunks
     assert all(chunk.item_id == result["item_id"] for chunk in chunks)
     assert {chunk.chunk_type for chunk in chunks} == {"parent", "child"}
+    handler_db.refresh(topic)
+    assert topic.mindmap["input_revision"] == 1
+    assert topic.sample_questions["input_revision"] == 1
+    assert transaction["commits"] == 1
 
+    transaction["counting"] = False
     repeated = handle_parse(job.id, "w1", handler_db, job_svc)
     assert repeated["status"] == "skipped"
     assert handler_db.query(KnowledgeItem).count() == 1

@@ -1,6 +1,7 @@
 # backend/app/api/knowledge_files.py
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api.errors import ApiProblem
@@ -21,6 +22,12 @@ from backend.app.services.knowledge_uploads import (
 from backend.app.storage.files import LocalFileStorage
 
 router = APIRouter(prefix="/knowledge-bases/{kb_uid}/files", tags=["knowledge-files"])
+
+
+class FileMetadataUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    relative_path: str | None = Field(default=None, max_length=1024)
 
 
 def _get_storage() -> LocalFileStorage:
@@ -200,6 +207,38 @@ def get_file(
     return _public_file(file_row)
 
 
+@router.patch("/{file_uid}")
+def update_file_metadata(
+    kb_uid: str,
+    file_uid: str,
+    body: FileMetadataUpdate,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    file_row = _require_file(db, actor, kb_uid, file_uid, manage=True)
+    from engine.app.knowledge.enrichment import (
+        mark_enrichment_stale,
+        safe_display_name,
+        safe_relative_path,
+    )
+    title = safe_display_name(body.title or file_row.title or file_row.original_filename)
+    relative_path = safe_relative_path(
+        body.relative_path if body.relative_path is not None else file_row.relative_path,
+        fallback_basename=title,
+    )
+    file_row.title = title
+    file_row.original_filename = title
+    file_row.relative_path = relative_path
+    mark_enrichment_stale(
+        db, kb_uid, reason="file_renamed",
+        renamed=[{"file_uid": file_uid, "title": title, "relative_path": relative_path}],
+        commit=False,
+    )
+    db.commit()
+    db.refresh(file_row)
+    return _public_file(file_row)
+
+
 @router.get("/{file_uid}/preview")
 def preview_file(
     kb_uid: str,
@@ -277,6 +316,14 @@ def delete_file(
     )
     file_row.deleted_at = local_now()
     file_row.last_job_id = job.id
+    from engine.app.knowledge.enrichment import mark_enrichment_stale
+    mark_enrichment_stale(
+        db,
+        kb_uid,
+        reason="file_deleted",
+        deleted_file_uids=[file_uid],
+        commit=False,
+    )
     db.commit()
     _publish_job(db, job)
     db.refresh(job)

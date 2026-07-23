@@ -109,6 +109,58 @@ def test_job_state_transitions_through_valid_paths(db_session):
         service.succeed(job.id, "worker-1", result={"again": True})
 
 
+@pytest.mark.parametrize("transition", ["succeed", "cancel", "retry"])
+def test_terminal_transitions_support_outer_transaction_rollback(db_session, transition):
+    from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
+
+    service = KnowledgeJobService(db_session)
+    job = service.create(JobCommand("parse", "tenant-a", "kb-a", None, {}), f"no-commit-{transition}")
+    service.claim(job.id, "worker-1", timedelta(seconds=30))
+    service.start(job.id, "worker-1")
+
+    if transition == "succeed":
+        updated = service.succeed(job.id, "worker-1", {"ok": True}, commit=False)
+        assert updated.status == JobStatus.SUCCEEDED
+    elif transition == "cancel":
+        updated = service.cancel(job.id, "worker-1", commit=False)
+        assert updated.status == JobStatus.CANCELED
+    else:
+        updated = service.fail(job.id, "worker-1", "TEMP", "retry", True, commit=False)
+        assert updated.status == JobStatus.QUEUED
+
+    db_session.rollback()
+    db_session.expire_all()
+    assert db_session.get(type(job), job.id).status == JobStatus.RUNNING
+
+
+def test_terminal_transition_without_commit_still_checks_worker_and_status(db_session):
+    from backend.app.services.knowledge_jobs import InvalidJobTransition, JobCommand, KnowledgeJobService
+
+    service = KnowledgeJobService(db_session)
+    job = service.create(JobCommand("parse", "tenant-a", "kb-a", None, {}), "no-commit-guard")
+    service.claim(job.id, "worker-1", timedelta(seconds=30))
+    service.start(job.id, "worker-1")
+
+    with pytest.raises(InvalidJobTransition):
+        service.succeed(job.id, "worker-2", {"ok": False}, commit=False)
+
+    assert db_session.get(type(job), job.id).status == JobStatus.RUNNING
+
+
+def test_cancel_request_can_join_snapshot_transaction(db_session):
+    from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
+
+    service = KnowledgeJobService(db_session)
+    job = service.create(JobCommand("parse", "tenant-a", "kb-a", None, {}), "request-cancel-no-commit")
+
+    updated = service.request_cancel(job.id, "alice", commit=False)
+    assert updated.cancel_requested_at is not None
+
+    db_session.rollback()
+    db_session.expire_all()
+    assert db_session.get(type(job), job.id).cancel_requested_at is None
+
+
 def test_job_fail_respects_max_attempts(db_session):
     from backend.app.services.knowledge_jobs import InvalidJobTransition, JobCommand, KnowledgeJobService
 
