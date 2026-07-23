@@ -1,16 +1,5 @@
 # backend/tests/test_knowledge_bases_v1_api.py
-from fastapi.testclient import TestClient
-
-from backend.app.main import create_app
-
-
-def _client():
-    app = create_app()
-    return TestClient(app)
-
-
-def test_v1_create_and_list_use_actor_scope():
-    client = _client()
+def test_v1_create_and_list_use_actor_scope(client):
     created = client.post(
         "/api/v1/knowledge-bases",
         headers={"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"},
@@ -29,8 +18,7 @@ def test_v1_create_and_list_use_actor_scope():
     assert other.json()["items"] == []
 
 
-def test_v1_error_envelope_is_structured():
-    client = _client()
+def test_v1_error_envelope_is_structured(client):
     response = client.get("/api/v1/knowledge-bases/missing")
     assert response.status_code == 404
     body = response.json()
@@ -39,8 +27,7 @@ def test_v1_error_envelope_is_structured():
     assert body["error"]["trace_id"]
 
 
-def test_v1_get_and_update_kb():
-    client = _client()
+def test_v1_get_and_update_kb(client):
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
     created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "KB"})
     kb_uid = created.json()["kb_uid"]
@@ -58,8 +45,7 @@ def test_v1_get_and_update_kb():
     assert updated.json()["name"] == "KB v2"
 
 
-def test_v1_update_conflict_on_wrong_version():
-    client = _client()
+def test_v1_update_conflict_on_wrong_version(client):
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
     created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "KB"})
     kb_uid = created.json()["kb_uid"]
@@ -73,8 +59,7 @@ def test_v1_update_conflict_on_wrong_version():
     assert r1.json()["error"]["code"] == "VERSION_CONFLICT"
 
 
-def test_v1_forbidden_actor_cannot_access_others_kb():
-    client = _client()
+def test_v1_forbidden_actor_cannot_access_others_kb(client):
     alice_headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
     bob_headers = {"X-Prism-Actor": "bob", "X-Prism-Tenant": "tenant-a"}
     created = client.post("/api/v1/knowledge-bases", headers=alice_headers, json={"name": "Alice KB"})
@@ -85,8 +70,7 @@ def test_v1_forbidden_actor_cannot_access_others_kb():
     assert resp.json()["error"]["code"] == "KNOWLEDGE_ACCESS_DENIED"
 
 
-def test_v1_delete_kb_tombstones_resource():
-    client = _client()
+def test_v1_delete_kb_tombstones_resource(client):
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
     created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "Delete Me"})
     kb_uid = created.json()["kb_uid"]
@@ -95,18 +79,15 @@ def test_v1_delete_kb_tombstones_resource():
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "deleting"
 
-    # Should not appear in list after deletion
     listed = client.get("/api/v1/knowledge-bases", headers=headers)
     uids = [item["kb_uid"] for item in listed.json()["items"]]
     assert kb_uid not in uids
 
-    # Direct access should be not found
     resp = client.get(f"/api/v1/knowledge-bases/{kb_uid}", headers=headers)
     assert resp.status_code == 404
 
 
-def test_v1_list_supports_cursor_pagination():
-    client = _client()
+def test_v1_list_supports_cursor_pagination(client):
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
 
     import uuid
@@ -132,8 +113,7 @@ def test_v1_list_supports_cursor_pagination():
         assert item["kb_uid"] not in all_uids
 
 
-def test_v1_update_version_bumps_after_success():
-    client = _client()
+def test_v1_update_version_bumps_after_success(client):
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
     created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "VB"})
     body = created.json()
