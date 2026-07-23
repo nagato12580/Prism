@@ -207,8 +207,21 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| RT1: Scoped retrieval contract test | `54fc2d0` | 2/2 `test_retrieval.py` PASS (vector_search, bm25, hybrid, unified, rerank imports) |
-| RT2-8: Existing Prism retrieval stack preserved | (existing) | `engine/app/retrieval/` modules all import correctly |
+| RT1: Typed channel health and scope | `3550ab1` | Typed health distinguishes empty results from channel failure |
+| RT2: Native Dense/BM25/Graph scope | `884d905` | Real Milvus 2.4 + Elasticsearch + Neo4j cross-KB/file/source isolation gate PASS |
+| RT3: Single three-channel Weighted RRF | `421af4e` | Each channel and fusion execute exactly once |
+| RT4: Text rerank before parent expansion | `330ecb0` | Provider payload contains chunk text; fallback health is explicit |
+| RT5: Deep controls and cumulative Evidence | `7c49206` | Distinct rewrites, bounded controls, and cross-iteration Evidence PASS |
+| RT6: Evidence contract and retrieval APIs | `1071f95` | Public/private contracts distinguish no-hits, degraded, and unavailable |
+| RT7: Reproducible RAG evaluation | `13bc964` | Real MySQL migration gate and explicit Neo4j transaction timeout gate PASS |
+| RT8: Versioned mindmap/questions/export | `18b834f` | 79 focused PASS; 2 real-MySQL lock-order/race gates PASS; ZIP safety review APPROVED |
+
+**Retrieval Gate Record:**
+- focused retrieval/evaluation/enrichment suites: 190/190 PASS
+- real Milvus 2.4 + Elasticsearch + Neo4j cross-scope isolation: PASS (fresh no-volume Milvus gate instance)
+- real MySQL enrichment worker/cancel lock interleavings: 2/2 PASS
+- specification and final code-quality reviews: APPROVED; no Critical or Important findings remain
+- `compileall` and `git diff --check`: clean
 
 ### Plan 4: Agent (2026-07-22-knowledge-agent-tools-citations.md)
 
