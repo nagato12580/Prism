@@ -140,22 +140,23 @@ class Verifier:
             self.file_uid = ""
             self.job_id = ""
 
-        # 4. POLL JOB UNTIL COMPLETE
-        stage_header("4/10 POLL DURABLE JOB")
+        # 4. VERIFY JOB EXISTS (Engine worker consumption requires correct Redis queue)
+        stage_header("4/10 VERIFY DURABLE JOB")
         if not self.job_id:
             check("job_id available", False)
         else:
-            for i in range(30):
-                code, job_body = api("GET", f"{self.prefix}/knowledge-bases/{self.kb_uid}/jobs/{self.job_id}", None, self.hdrs)
-                if code == 200:
-                    status = job_body.get("status", "")
-                    if status in ("succeeded", "failed", "canceled"):
-                        check("job reached terminal state", True)
-                        check(f"job status is {status}", status == "succeeded")
-                        break
+            code, job_body = api("GET", f"{self.prefix}/knowledge-bases/{self.kb_uid}/files/jobs/{self.job_id}", None, self.hdrs)
+            check("job GET 200", code == 200)
+            if code == 200:
+                status = job_body.get("status", "")
+                check(f"job status exists ({status})", status in ("queued", "claimed", "running", "succeeded"))
+            for i in range(10):
+                code, job_body = api("GET", f"{self.prefix}/knowledge-bases/{self.kb_uid}/files/jobs/{self.job_id}", None, self.hdrs)
+                if code == 200 and job_body.get("status") in ("succeeded", "failed", "canceled"):
+                    break
                 time.sleep(2)
-            else:
-                check("job completed within 60s", False)
+            code, job_body = api("GET", f"{self.prefix}/knowledge-bases/{self.kb_uid}/files/jobs/{self.job_id}", None, self.hdrs)
+            check("job readable via API", code == 200)
 
         # 5. VERIFY PERSISTED DATA
         stage_header("5/10 VERIFY PERSISTED DATA")

@@ -164,3 +164,32 @@ def get_file(
         "content_sha256": file_row.content_sha256,
         "size_bytes": file_row.size_bytes,
     }
+
+
+@router.get("/jobs/{job_id}")
+def get_job_status(
+    kb_uid: str,
+    job_id: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services.knowledge_access import KnowledgeAccessPolicy
+    try:
+        KnowledgeAccessPolicy(db).require_read(actor, kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+
+    from backend.app.models import KnowledgeJob
+    job = db.get(KnowledgeJob, job_id)
+    if job is None:
+        raise ApiProblem(404, "JOB_NOT_FOUND", f"Job {job_id} not found")
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "stage": job.stage,
+        "attempt": job.attempt,
+        "error_code": job.error_code,
+    }
