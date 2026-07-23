@@ -55,6 +55,8 @@ def _create_memory_item(content="Vectorization should finish before governance. 
 
     session = Session()
     item = KnowledgeItem(
+        tenant_id="tenant-test",
+        kb_uid="kb-test",
         title="Fast vectorization",
         content=content,
         summary="",
@@ -267,7 +269,14 @@ def test_ingest_item_deletes_existing_milvus_vectors_by_old_child_chunk_ids_befo
     Session, item_id = _create_memory_item()
     session = Session()
     try:
-        old_child = KnowledgeChunk(item_id=item_id, chunk_text="old child", chunk_type="child")
+        old_child = KnowledgeChunk(
+            tenant_id="tenant-test",
+            kb_uid="kb-test",
+            file_uid=item_id,
+            item_id=item_id,
+            chunk_text="old child",
+            chunk_type="child",
+        )
         session.add(old_child)
         session.commit()
         old_child_id = old_child.id
@@ -297,6 +306,8 @@ def test_ingest_item_uses_positional_chunk_ids_for_duplicate_text(monkeypatch):
 
     session = Session()
     item = KnowledgeItem(
+        tenant_id="tenant-test",
+        kb_uid="kb-test",
         title="Duplicate chunk notes",
         content="The chunker is monkeypatched for this regression.",
         summary="",
@@ -391,6 +402,8 @@ def test_ingest_item_logs_progress_and_failures(monkeypatch, caplog):
 
     session = Session()
     item = KnowledgeItem(
+        tenant_id="tenant-test",
+        kb_uid="kb-test",
         title="Logging notes",
         content="Logging should reveal the failing ingestion stage.",
         source_type="manual",

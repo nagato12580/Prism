@@ -250,7 +250,7 @@ def _finalize_item_graph(chunk, db, item_id: str, user_id: str) -> None:
 
 def ingest_item(item_id: str, progress=None) -> int:
     """Process one knowledge item and return the number of child chunks."""
-    from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeItem
+    from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile, KnowledgeItem
     from backend.app.services.knowledge_governance import clear_document_item_governance
 
     started_at = time.monotonic()
@@ -261,6 +261,11 @@ def ingest_item(item_id: str, progress=None) -> int:
         if not item or not item.content:
             _log_stage(item_id, "empty_item")
             return 0
+
+        resource = db.query(KnowledgeFile).filter(KnowledgeFile.item_id == item_id).first()
+        # Legacy/manual items predate the durable File boundary.  Keep their
+        # GraphRAG path usable while assigning a stable, scoped chunk identity.
+        file_uid = resource.file_uid if resource is not None else item.id
 
         content = item.content
         item_summary = content[:200]
@@ -314,6 +319,9 @@ def ingest_item(item_id: str, progress=None) -> int:
         _report(progress, "store_mysql_chunks", 0, len(child_texts))
         for parent_index, pc in enumerate(parents):
             parent = KnowledgeChunk(
+                tenant_id=item.tenant_id,
+                kb_uid=item.kb_uid,
+                file_uid=file_uid,
                 item_id=item_id,
                 chunk_text=pc.content,
                 chunk_index=parent_index,
@@ -326,6 +334,9 @@ def ingest_item(item_id: str, progress=None) -> int:
 
             for child_index, child_text in enumerate(pc.children):
                 child = KnowledgeChunk(
+                    tenant_id=item.tenant_id,
+                    kb_uid=item.kb_uid,
+                    file_uid=file_uid,
                     item_id=item_id,
                     chunk_text=_chunk_content(child_text),
                     chunk_index=child_index,

@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -41,14 +42,21 @@ def worker_session(monkeypatch):
 
 
 def _topic(db, name="Worker Topic"):
-    topic = KnowledgeTopic(user_id="default-user", name=name)
+    topic = KnowledgeTopic(
+        tenant_id="tenant-test",
+        owner_user_id="default-user",
+        user_id="default-user",
+        name=name,
+    )
     db.add(topic)
     db.flush()
     return topic
 
 
-def _item(db, title="Worker Item", content="Useful extracted text for vectorization."):
+def _item(db, topic, title="Worker Item", content="Useful extracted text for vectorization."):
     item = KnowledgeItem(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
         title=title,
         content=content,
         source_type="upload",
@@ -60,8 +68,10 @@ def _item(db, title="Worker Item", content="Useful extracted text for vectorizat
 
 
 def _resource(db, topic, item=None, **kwargs):
-    item = item or _item(db)
+    item = item or _item(db, topic)
     fields = {
+        "tenant_id": topic.tenant_id,
+        "kb_uid": topic.kb_uid,
         "user_id": "default-user",
         "topic_id": topic.id,
         "item_id": item.id,
@@ -88,6 +98,10 @@ def _resource(db, topic, item=None, **kwargs):
 
 def _job(db, resource, job_type="ingest", status="queued", **kwargs):
     fields = {
+        "tenant_id": resource.tenant_id,
+        "kb_uid": resource.kb_uid,
+        "file_uid": resource.file_uid,
+        "idempotency_key": f"{resource.id}:{job_type}:{status}:{uuid4()}",
         "job_type": job_type,
         "resource_id": resource.id,
         "item_id": resource.item_id,
@@ -138,7 +152,7 @@ def test_claim_job_does_not_claim_delayed_queued_job(worker_session):
     assert claimed is None
     db.refresh(job)
     assert job.status == "queued"
-    assert job.locked_by == ""
+    assert job.locked_by is None
     assert job.locked_at is None
     assert job.attempts == 0
 
@@ -148,9 +162,9 @@ def test_mark_retry_or_failed_retries_then_exhausts(worker_session):
 
     db = worker_session()
     topic = _topic(db)
-    retry_resource = _resource(db, topic, item=_item(db, "Retry Item"))
+    retry_resource = _resource(db, topic, item=_item(db, topic, "Retry Item"))
     retry_job = _job(db, retry_resource, status="processing", attempts=1, locked_by="worker-1")
-    failed_resource = _resource(db, topic, item=_item(db, "Failed Item"))
+    failed_resource = _resource(db, topic, item=_item(db, topic, "Failed Item"))
     failed_job = _job(
         db,
         failed_resource,
@@ -389,7 +403,7 @@ def test_run_ingest_job_success_marks_done_and_enqueues_governance(worker_sessio
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="High quality extracted document text.")
+    item = _item(db, topic, content="High quality extracted document text.")
     resource = _resource(db, topic, item=item, processing_status="queued")
     job = _job(db, resource)
     db.commit()
@@ -449,7 +463,7 @@ def test_run_ingest_job_keeps_ingest_done_when_governance_push_fails(worker_sess
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="High quality extracted document text.")
+    item = _item(db, topic, content="High quality extracted document text.")
     resource = _resource(db, topic, item=item, processing_status="queued")
     job = _job(db, resource)
     db.commit()
@@ -490,7 +504,7 @@ def test_run_ingest_job_text_invalid_blocks_vectorization(worker_session, monkey
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="x" * 20)
+    item = _item(db, topic, content="x" * 20)
     resource = _resource(db, topic, item=item, content_text="x" * 20, page_count=1)
     job = _job(db, resource)
     db.commit()
@@ -526,7 +540,7 @@ def test_run_governance_job_success_updates_progress_and_marks_done(worker_sessi
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="High quality extracted document text.")
+    item = _item(db, topic, content="High quality extracted document text.")
     resource = _resource(
         db,
         topic,
@@ -582,7 +596,7 @@ def test_run_governance_job_progress_failure_does_not_fail_settlement(worker_ses
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="High quality extracted document text.")
+    item = _item(db, topic, content="High quality extracted document text.")
     resource = _resource(
         db,
         topic,
@@ -634,7 +648,7 @@ def test_run_governance_job_retry_failure_requeues_and_publishes(worker_session,
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="High quality extracted document text.")
+    item = _item(db, topic, content="High quality extracted document text.")
     resource = _resource(
         db,
         topic,
@@ -686,7 +700,7 @@ def test_run_governance_job_exhausted_failure_keeps_resource_searchable(worker_s
 
     db = worker_session()
     topic = _topic(db)
-    item = _item(db, content="High quality extracted document text.")
+    item = _item(db, topic, content="High quality extracted document text.")
     resource = _resource(
         db,
         topic,
@@ -776,7 +790,7 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     assert all(thread.started for thread in started)
     assert started[0].args == (
         worker.settings.KNOWLEDGE_INGEST_QUEUE,
-        worker.run_ingest_job,
+        worker.run_ingest_queue_job,
         started[0].args[2],
     )
     assert started[1].args == (

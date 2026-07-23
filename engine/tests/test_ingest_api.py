@@ -1,74 +1,44 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-import threading
-import time
 
+from backend.app.database import get_db
+from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeTopic
 from engine.app.api import ingest as ingest_api
 
 
-def test_ingest_api_returns_exception_detail(monkeypatch):
-    def fail(item_id):
-        raise RuntimeError("Lock wait timeout exceeded; try restarting transaction")
-
-    monkeypatch.setattr(ingest_api, "ingest_item", fail)
+def _client(db_session):
     app = FastAPI()
     app.include_router(ingest_api.router)
-    client = TestClient(app)
-
-    response = client.post("/ingest", json={"item_id": "item-1"})
-
-    assert response.status_code == 500
-    assert response.json()["detail"]["message"] == "Lock wait timeout exceeded; try restarting transaction"
+    app.dependency_overrides[get_db] = lambda: db_session
+    return TestClient(app)
 
 
-def test_ingest_api_serializes_concurrent_requests(monkeypatch):
-    calls = []
-    first_started = threading.Event()
-    release_first = threading.Event()
+def test_ingest_compatibility_adapter_creates_job_without_running_pipeline(db_session):
+    topic = KnowledgeTopic(tenant_id="tenant-a", owner_user_id="alice", name="KB")
+    db_session.add(topic)
+    db_session.flush()
+    item = KnowledgeItem(
+        tenant_id="tenant-a", kb_uid=topic.kb_uid, title="Item", content="text"
+    )
+    db_session.add(item)
+    db_session.flush()
+    db_session.add(KnowledgeFile(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        file_uid="file-1",
+        item_id=item.id,
+        original_filename="a.md",
+    ))
+    db_session.commit()
 
-    def fake_ingest(item_id):
-        calls.append(("start", item_id, time.monotonic()))
-        if item_id == "item-1":
-            first_started.set()
-            assert release_first.wait(timeout=2)
-        calls.append(("end", item_id, time.monotonic()))
-        return 1
+    response = _client(db_session).post("/ingest", json={"item_id": item.id})
 
-    monkeypatch.setattr(ingest_api, "ingest_item", fake_ingest)
-    app = FastAPI()
-    app.include_router(ingest_api.router)
-    client = TestClient(app)
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["job_type"] == "index"
 
-    first_response = {}
 
-    def post_first():
-        first_response["value"] = client.post("/ingest", json={"item_id": "item-1"})
+def test_ingest_compatibility_adapter_rejects_unknown_item(db_session):
+    response = _client(db_session).post("/ingest", json={"item_id": "missing"})
 
-    thread = threading.Thread(target=post_first)
-    thread.start()
-    assert first_started.wait(timeout=2)
-
-    second_done = threading.Event()
-    second_response = {}
-
-    def post_second():
-        second_response["value"] = client.post("/ingest", json={"item_id": "item-2"})
-        second_done.set()
-
-    second_thread = threading.Thread(target=post_second)
-    second_thread.start()
-    time.sleep(0.1)
-
-    assert not second_done.is_set()
-    release_first.set()
-    thread.join(timeout=2)
-    second_thread.join(timeout=2)
-
-    assert first_response["value"].status_code == 200
-    assert second_response["value"].status_code == 200
-    assert [event[:2] for event in calls] == [
-        ("start", "item-1"),
-        ("end", "item-1"),
-        ("start", "item-2"),
-        ("end", "item-2"),
-    ]
+    assert response.status_code == 404

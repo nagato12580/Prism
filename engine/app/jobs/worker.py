@@ -13,11 +13,13 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.models import KnowledgeFile, KnowledgeJob
 from backend.app.services.document_text_quality import assess_document_text
 from backend.app.services.knowledge_governance import settle_document_item_to_governance
+from backend.app.services.knowledge_jobs import KnowledgeJobService
 from backend.app.utils.time import local_now
 from engine.app.config import settings
 from engine.app.ingestion.pipeline import ingest_item
 
 from . import redis_queue
+from .knowledge_handlers import handle_parse
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
@@ -26,6 +28,37 @@ logger = logging.getLogger("uvicorn.error")
 
 ACTIVE_STATUSES = {"queued", "processing"}
 NEEDS_REPUBLISH_STAGES = {"created", "retry", "recovered"}
+
+
+def dispatch_typed_job(db, job_id, worker_id):
+    job = db.query(KnowledgeJob).filter(KnowledgeJob.id == job_id).one_or_none()
+    if job is None:
+        return None
+    if job.job_type == "parse":
+        return handle_parse(
+            job_id,
+            worker_id,
+            db,
+            KnowledgeJobService(db),
+            publisher=_publish_typed_job_id,
+        )
+    return None
+
+
+def _publish_typed_job_id(job_id):
+    client = redis_queue.redis_client()
+    redis_queue.push_job(client, settings.KNOWLEDGE_INGEST_QUEUE, job_id)
+
+
+def run_ingest_queue_job(job_id, *, worker_id):
+    db = _Session()
+    try:
+        job_type = db.query(KnowledgeJob.job_type).filter(KnowledgeJob.id == job_id).scalar()
+        if job_type == "parse":
+            return dispatch_typed_job(db, job_id, worker_id)
+    finally:
+        db.close()
+    return run_ingest_job(job_id, worker_id=worker_id)
 
 
 class HardJobFailure(RuntimeError):
@@ -204,15 +237,19 @@ def recover_stale_jobs(stale_seconds=None):
         db.close()
 
 
-def republish_due_queued_jobs():
-    """Republish all queued jobs that are due (available_at <= now).
+def republish_due_queued_jobs(stale_seconds=None):
+    """Republish due jobs that were never published or whose publication is stale.
 
     This runs at engine startup and also serves as a recovery sweep: if a worker
     popped a job from Redis but failed to claim it (e.g. transient DB error), the
     job stays queued in MySQL but is lost from Redis.  This function republishes
-    every due queued job regardless of its stage, so no job is orphaned.
+    jobs in a pre-publication/recovery stage immediately.  Already-enqueued jobs
+    are republished only after the stale interval to avoid duplicate delivery on
+    every startup sweep.
     """
+    stale_seconds = stale_seconds or settings.KNOWLEDGE_JOB_STALE_SECONDS
     now = local_now()
+    stale_cutoff = now - timedelta(seconds=stale_seconds)
     db = _Session()
     try:
         jobs = (
@@ -220,6 +257,13 @@ def republish_due_queued_jobs():
             .filter(
                 KnowledgeJob.status == "queued",
                 or_(KnowledgeJob.available_at == None, KnowledgeJob.available_at <= now),
+                or_(
+                    KnowledgeJob.stage.in_(NEEDS_REPUBLISH_STAGES),
+                    and_(
+                        KnowledgeJob.stage == "enqueued",
+                        KnowledgeJob.created_at < stale_cutoff,
+                    ),
+                ),
             )
             .order_by(KnowledgeJob.available_at.asc(), KnowledgeJob.created_at.asc(), KnowledgeJob.id.asc())
             .all()
@@ -282,6 +326,13 @@ def enqueue_governance_job_from_worker(db, resource):
     )
     if job is None:
         job = KnowledgeJob(
+            tenant_id=resource.tenant_id,
+            kb_uid=resource.kb_uid,
+            file_uid=resource.file_uid,
+            idempotency_key=(
+                f"{resource.tenant_id}:{resource.kb_uid}:"
+                f"{resource.file_uid}:governance:{resource.item_id}"
+            ),
             job_type="governance",
             resource_id=resource.id,
             item_id=resource.item_id,
@@ -438,7 +489,7 @@ class KnowledgeWorkerManager:
             worker_id = _worker_id(f"ingest-{index}")
             thread = threading.Thread(
                 target=self._loop,
-                args=(settings.KNOWLEDGE_INGEST_QUEUE, run_ingest_job, worker_id),
+                args=(settings.KNOWLEDGE_INGEST_QUEUE, run_ingest_queue_job, worker_id),
                 daemon=True,
                 name=f"knowledge-ingest-worker-{index}",
             )
