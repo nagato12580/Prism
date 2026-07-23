@@ -110,33 +110,43 @@ def chunk_parent_child(
     parent_tokens: int | None = None,
     child_tokens: int | None = None,
     overlap_tokens: int | None = None,
+    separator: str | None = None,
 ) -> list[ParentChunk]:
-    """Split text into parent chunks and child chunks."""
+    """Split text into parent chunks and child chunks.
+
+    When *separator* is provided, the text is first split on that separator
+    to create coarse sections before sentence-level splitting.
+    """
     text = text.strip()
     if not text:
         return []
-    sentences = _split_sentences(text)
-    parent_content_chunks = _merge_to_chunks(
-        sentences,
-        parent_tokens if parent_tokens is not None else settings.PARENT_CHUNK_TOKENS,
-    )
+    if separator and separator in text:
+        sections = [s.strip() for s in text.split(separator) if s.strip()]
+    else:
+        sections = [text]
     result: list[ParentChunk] = []
-    for pc in parent_content_chunks:
-        parent = ParentChunk(pc.content, pc.page_start, pc.page_end)
-        child_sents = _split_sentences(pc.content)
-        parent.children = _merge_to_chunks(
-            child_sents,
-            child_tokens if child_tokens is not None else settings.CHILD_CHUNK_TOKENS,
-            (overlap_tokens / child_tokens if overlap_tokens is not None and child_tokens and child_tokens > 0 else 0)
-            if overlap_tokens is not None
-            else settings.CHILD_OVERLAP_RATIO,
+    for section in sections:
+        sentences = _split_sentences(section)
+        parent_content_chunks = _merge_to_chunks(
+            sentences,
+            parent_tokens if parent_tokens is not None else settings.PARENT_CHUNK_TOKENS,
         )
-        for child in parent.children:
-            if child.page_start is None:
-                child.page_start = parent.page_start
-            if child.page_end is None:
-                child.page_end = parent.page_end
-        result.append(parent)
+        for pc in parent_content_chunks:
+            parent = ParentChunk(pc.content, pc.page_start, pc.page_end)
+            child_sents = _split_sentences(pc.content)
+            parent.children = _merge_to_chunks(
+                child_sents,
+                child_tokens if child_tokens is not None else settings.CHILD_CHUNK_TOKENS,
+                (overlap_tokens / child_tokens if overlap_tokens is not None and child_tokens and child_tokens > 0 else 0)
+                if overlap_tokens is not None
+                else settings.CHILD_OVERLAP_RATIO,
+            )
+            for child in parent.children:
+                if child.page_start is None:
+                    child.page_start = parent.page_start
+                if child.page_end is None:
+                    child.page_end = parent.page_end
+            result.append(parent)
     return result
 
 
