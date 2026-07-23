@@ -228,9 +228,9 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| PC1: Frontend TypeScript + Vite build | `ad69215` | `tsc -b && vite build` PASS |
-| PC2: System verification script | `886faa2` | `scripts/verify_knowledge_system.py` PASS (create/upload/job/poll/isolate/search/delete/error) |
-| PC3: Playwright E2E tests | (pending) | `pnpm.cmd --dir frontend test:e2e` - Playwright config created, tests cover KB/create/upload/search/graph/delete |
+| PC1: Frontend TypeScript + Vite build | `ad69215` | `tsc -b && vite build` PASS (exit code 0) |
+| PC2: System verification script | `886faa2` → `ddce424` | `scripts/verify_knowledge_system.py` 41/41 ALL PASS — 11-stage rigorous checks |
+| PC3: Playwright E2E tests | `b65417c` → `bc9c609` | `pnpm.cmd --dir frontend test:e2e` — 1 passed (Playwright Chromium installed, real browser smoke) |
 | PC4: Frontend Node tests | `ad69215` | 21/21 `node --test frontend/tests/*.test.mjs` PASS |
 
 ### Final System Verification (2026-07-23)
@@ -239,7 +239,22 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 - Engine agent tools: 9/9 PASS
 - Real MySQL integration: 9/9 PASS
 - Real MySQL Alembic: fresh migration applied on `prism_test` and `prism`
-- Frontend: tsc + Vite build PASS, 21/21 node tests PASS
-- Infrastructure: MySQL (13306), Redis (16379), Milvus (19530), ES (9200), Neo4j (7687) all UP
-- Services: Backend (5175), Engine (5180), Frontend (5173) all running
-- Verification: `python scripts/verify_knowledge_system.py` ALL PASS
+- Frontend: tsc + Vite build PASS (exit code 0), 21/21 node tests PASS
+- Infrastructure: MySQL (13306), Redis (16379), Milvus (19530), ES (9200), Neo4j (7687) UP
+- Services: Backend (5175), Engine (5180), Frontend (5173) running
+- Verification: `python scripts/verify_knowledge_system.py` 41/41 ALL PASS
+  - durable job: succeeded
+  - parse_status: succeeded, index_status: succeeded
+  - search: returns unique marker text with chunk_id/item_id
+  - citation: persist + read-back with kb_uid/file_uid/chunk_uid verification
+  - Milvus: `prism_knowledge` collection data verified (row_count > 0)
+  - ES: `prism_chunks` index, topic_id match
+  - Neo4j: Document nodes with kb_uid match
+  - degraded: ES stopped, search via vector fallback succeeds, ES restored
+  - delete: KB/file 404, cross-store isolation
+- E2E: 1/1 passed (Playwright Chromium with `@playwright/test` ^1.61.1)
+
+Known gaps:
+- Embedding API (jina.ai) unreachable from this machine — process endpoint uses direct Milvus/ES/Neo4j writes
+- Engine async worker (Redis queued jobs) not tested in verification — sync process endpoint used
+- Plans RT2-8, GT2-8, IT5-6 inherited from existing Prism stack, not re-implemented
