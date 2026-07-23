@@ -54,6 +54,7 @@ def handle_parse(job_id: str, worker_id: str, db_session, job_svc: KnowledgeJobS
             tenant_id=file_row.tenant_id,
             kb_uid=file_row.kb_uid,
             title=file_row.original_filename,
+            content=parsed.markdown,
             normalized_markdown=parsed.markdown,
             content_version=1,
         )

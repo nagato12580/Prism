@@ -95,6 +95,7 @@ class Settings:
     PARENT_CHUNK_TOKENS: int = int(os.getenv("PARENT_CHUNK_TOKENS", "1536"))
     CHILD_OVERLAP_RATIO: float = float(os.getenv("CHILD_OVERLAP_RATIO", "0.1"))
 
+    KNOWLEDGE_STORAGE_ROOT: str = os.getenv("KNOWLEDGE_STORAGE_ROOT", str(Path(__file__).resolve().parent.parent.parent / "uploads_data"))
     ES_HOST: str = os.getenv("ES_HOST", "http://localhost:9200")
     ES_USERNAME: str = os.getenv("ES_USERNAME", "")
     ES_PASSWORD: str = os.getenv("ES_PASSWORD", "")

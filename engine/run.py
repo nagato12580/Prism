@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from engine.app.api.chat import router as chat_router
 from engine.app.api.ingest import router as ingest_router
+from engine.app.api.knowledge import router as knowledge_router
 from engine.app.api.wiki import router as wiki_router
 from engine.app.config import settings
 from engine.app.es_client import ensure_index
@@ -33,6 +34,7 @@ def create_app():
 
     prefixed = APIRouter(prefix="/api/v1")
     prefixed.include_router(ingest_router)
+    prefixed.include_router(knowledge_router)
     prefixed.include_router(chat_router)
     prefixed.include_router(wiki_router)
     app.include_router(prefixed)

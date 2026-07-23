@@ -1,6 +1,7 @@
 # prism/backend/app/models/__init__.py
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
 from .knowledge_job import KnowledgeJob
+from .knowledge_citation import KnowledgeCitation
 from .knowledge_types import JobStatus, ResourceStatus, StageStatus, uuid4_str
 from .chat import ChatSession, ChatMessage
 from .agent_trace import AgentTrace, AgentTraceEvidence, AgentTraceStep
@@ -33,6 +34,7 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeFile",
     "KnowledgeJob",
+    "KnowledgeCitation",
     "ResourceStatus",
     "StageStatus",
     "JobStatus",

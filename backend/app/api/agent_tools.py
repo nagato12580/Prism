@@ -25,6 +25,20 @@ class ToolResult(BaseModel):
     data: list[dict]
 
 
+def _call_engine_search(kb_uid: str, query: str, max_results: int) -> dict:
+    import urllib.request, json
+    from backend.app.config import settings
+    engine = getattr(settings, "ENGINE_BASE_URL", "http://127.0.0.1:5180")
+    url = f"{engine}/api/v1/knowledge/search"
+    body = json.dumps({"kb_uid": kb_uid, "query": query, "max_results": max_results}).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except Exception as exc:
+        return {"status": "error", "results": [], "error": str(exc)}
+
+
 @router.post("/search", response_model=ToolResult)
 def search_knowledge(body: ToolRequest, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
     try:
@@ -33,7 +47,10 @@ def search_knowledge(body: ToolRequest, actor: ActorContext = Depends(get_actor_
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", "KB not found")
     except KnowledgeAccessDenied:
         raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", "Access denied")
-    return ToolResult(tool="search", status="ok", data=[{"kb_uid": body.kb_uid, "query": body.query}])
+
+    engine_result = _call_engine_search(body.kb_uid, body.query, body.max_results)
+    hits = engine_result.get("results", [])
+    return ToolResult(tool="search", status="ok" if hits else "no_hits", data=hits)
 
 
 @router.post("/summarize", response_model=ToolResult)
