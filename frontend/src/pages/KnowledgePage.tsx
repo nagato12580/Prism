@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import React, { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import {
   knowledgeApi,
   type KnowledgeResource,
@@ -627,7 +627,7 @@ function TopicRow({
   onCancelEdit: () => void
   onDelete: () => void
 }) {
-  const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') onSaveEdit()
     if (event.key === 'Escape') onCancelEdit()
   }
@@ -806,7 +806,7 @@ function ResourceCard({
   const isActive = primaryStatus === 'queued' || primaryStatus === 'vectorizing' || primaryStatus === 'governance-running'
   const governanceProgressTotal = resource.governance_progress_total || 0
   const governanceProgressCurrent = resource.governance_progress_current || 0
-  const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') onSaveEdit()
     if (event.key === 'Escape') onCancelEdit()
   }

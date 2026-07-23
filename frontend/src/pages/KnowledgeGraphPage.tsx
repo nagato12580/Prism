@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
+import React, { type PointerEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Boxes,
   FileText,
@@ -708,7 +708,7 @@ export function KnowledgeGraphPage({
   useEffect(() => {
     if (!selected) return
 
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return
       closeInspector()
     }
@@ -1318,7 +1318,7 @@ function GraphNode({
   const nodeHitWidth = nodeLabelHitArea.width
   const nodeHitHeight = nodeLabelHitArea.height
   const nodeHitY = nodeLabelHitArea.y
-  const handleKeyDown = (event: KeyboardEvent<SVGGElement>) => {
+  const handleKeyDown = (event: React.KeyboardEvent<SVGGElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     onSelect()
