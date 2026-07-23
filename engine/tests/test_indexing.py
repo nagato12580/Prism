@@ -5,17 +5,17 @@ import pytest
 def test_embedding_profile_has_required_fields():
     from engine.app.indexing.profiles import EmbeddingProfile
 
-    profile = EmbeddingProfile("test", 768, "test_collection")
-    assert profile.name == "test"
+    profile = EmbeddingProfile("test", "model", 768, "COSINE", True)
+    assert profile.provider == "test"
     assert profile.dimension == 768
-    assert profile.collection_name == "test_collection"
+    assert profile.collection_name == profile.document_collection
 
 
 def test_default_profile_exists():
     from engine.app.indexing.profiles import DEFAULT_PROFILE
 
     assert DEFAULT_PROFILE.dimension == 1024
-    assert DEFAULT_PROFILE.name == "default"
+    assert DEFAULT_PROFILE.provider == "jina"
 
 
 def test_activate_generation_updates_topic(db_session):
@@ -26,7 +26,9 @@ def test_activate_generation_updates_topic(db_session):
     db_session.add(topic)
     db_session.commit()
 
-    updated = activate_generation(db_session, topic.kb_uid, "gen-1")
+    updated = activate_generation(
+        db_session, topic.kb_uid, "gen-1", expected_old=None
+    )
     assert updated.active_index_generation == "gen-1"
 
 
@@ -46,6 +48,6 @@ def test_mark_index_complete_updates_file(db_session):
     db_session.add(file_row)
     db_session.commit()
 
-    updated = mark_index_complete(db_session, "f1")
+    updated = mark_index_complete(db_session, "f1", "gen-1")
     assert updated.index_status == StageStatus.SUCCEEDED.value
-    assert updated.active_index_generation == "0"
+    assert updated.active_index_generation == "gen-1"
