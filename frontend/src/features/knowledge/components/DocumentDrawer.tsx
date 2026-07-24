@@ -1,0 +1,125 @@
+import { useEffect, useState } from 'react'
+import { Download, FileText, Loader2 } from 'lucide-react'
+import { filesApi, type KnowledgeFile } from '@/features/knowledge/api/files'
+import { ApiProblem } from '@/features/knowledge/api/client'
+import { Dialog } from '@/components/ui/Dialog'
+import { Tabs } from '@/components/ui/Tabs'
+import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
+import { LoadingState, ErrorState } from '@/components/ui/StateView'
+
+export function DocumentDrawer({
+  kbUid,
+  file,
+  onClose,
+}: {
+  kbUid: string
+  file: KnowledgeFile
+  onClose: () => void
+}) {
+  const [view, setView] = useState<'original' | 'markdown' | 'chunks' | 'history'>('markdown')
+  const [content, setContent] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    setContent(null)
+    // The backend exposes a single `preview` endpoint returning the stored text
+    // content (parsed text). There is no separate markdown/original/chunks
+    // variant in the current API; "original" triggers a binary download.
+    filesApi
+      .preview(kbUid, file.file_uid)
+      .then((res) => setContent(res.content))
+      .catch((e) => setError(e))
+      .finally(() => setLoading(false))
+  }, [kbUid, file.file_uid])
+
+  const download = () => {
+    filesApi
+      .download(kbUid, file.file_uid)
+      .then(({ blob, filename }) => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename ?? file.original_filename
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      })
+      .catch((e) => setError(e))
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      width="xl"
+      title={
+        <div className="flex items-center gap-2">
+          <FileText size={16} className="text-slate-400" />
+          <span className="truncate">{file.original_filename}</span>
+        </div>
+      }
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Badge tone="neutral">{file.media_type}</Badge>
+        <Badge tone={file.parse_status === 'succeeded' ? 'green' : 'amber'}>解析：{file.parse_status}</Badge>
+        <Badge tone={file.index_status === 'succeeded' ? 'green' : 'amber'}>索引：{file.index_status}</Badge>
+        <div className="ml-auto">
+          <Button size="sm" variant="secondary" onClick={download}>
+            <Download size={14} /> 下载原文件
+          </Button>
+        </div>
+      </div>
+
+      <Tabs
+        items={[
+          { key: 'markdown', label: '正文' },
+          { key: 'original', label: '原文件' },
+          { key: 'chunks', label: '分块' },
+          { key: 'history', label: '处理历史' },
+        ]}
+        active={view}
+        onChange={(k) => setView(k as typeof view)}
+      />
+
+      <div className="mt-3 max-h-[60vh] overflow-y-auto rounded-lg border border-[var(--prism-line)] bg-slate-50/40 p-4">
+        {view === 'original' ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-slate-500">
+            <FileText size={28} className="text-slate-300" />
+            <p>原文件需下载查看，点击右上角「下载原文件」</p>
+            <Button size="sm" variant="secondary" onClick={download}>
+              <Download size={14} /> 下载
+            </Button>
+          </div>
+        ) : view === 'chunks' ? (
+          <div className="text-xs text-slate-500">
+            当前后端预览接口返回完整正文，暂未提供独立分块视图。可在下方正文内容中查看。
+            {content ? <pre className="mt-2 whitespace-pre-wrap break-words text-slate-700">{content}</pre> : null}
+          </div>
+        ) : view === 'history' ? (
+          <div className="text-xs text-slate-500">
+            <p>解析状态：{file.parse_status}</p>
+            <p>索引状态：{file.index_status}</p>
+            <p>图谱状态：{file.graph_status}</p>
+            <p>大小：{Math.max(1, Math.round(file.size_bytes / 1024))} KB</p>
+            <p className="mt-2 text-slate-400">当前后端文件行未携带逐 Job 历史，详细任务历史请通过后端管理界面查看。</p>
+          </div>
+        ) : loading ? (
+          <LoadingState label="加载正文…" />
+        ) : error ? (
+          <ErrorState problem={error} />
+        ) : (
+          <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-700">
+            {content || '（空内容）'}
+          </pre>
+        )}
+      </div>
+    </Dialog>
+  )
+}
+
+export { Loader2, ApiProblem }
