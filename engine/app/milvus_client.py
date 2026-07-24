@@ -45,15 +45,37 @@ def connect() -> MilvusClient:
 
 
 def ensure_collection():
-    """确保集合存在，不存在则创建。"""
+    """确保集合存在，并保证向量字段上有可用索引。
+
+    pymilvus 2.4 的 ``create_collection(index_params=<dict>)`` 不会真正建索引
+    （会触发 ``'str' object has no attribute 'pop'``），因此先建集合，再单独、
+    幂等地为 ``embedding`` 字段创建 IVF_FLAT/COSINE 索引。
+    """
     client = _get_client()
-    if client.has_collection(COLLECTION_NAME):
+    if not client.has_collection(COLLECTION_NAME):
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            schema=_build_schema(),
+        )
+    _ensure_vector_index(client)
+
+
+def _ensure_vector_index(client: MilvusClient) -> None:
+    try:
+        indexes = client.list_indexes(collection_name=COLLECTION_NAME)
+    except Exception:
+        indexes = []
+    if indexes:
         return
-    client.create_collection(
-        collection_name=COLLECTION_NAME,
-        schema=_build_schema(),
-        index_params=_INDEX_PARAMS,
+    # pymilvus 2.4: create_index requires a prepared IndexParams object, not a dict.
+    index_params = MilvusClient.prepare_index_params()
+    index_params.add_index(
+        field_name=_INDEX_PARAMS["field_name"],
+        index_type=_INDEX_PARAMS["index_type"],
+        metric_type=_INDEX_PARAMS["metric_type"],
+        params=_INDEX_PARAMS["params"],
     )
+    client.create_index(collection_name=COLLECTION_NAME, index_params=index_params)
 
 
 def _load_collection():
