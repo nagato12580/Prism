@@ -163,6 +163,9 @@ class KnowledgeJobService:
             KnowledgeJob.attempt: KnowledgeJob.attempt + 1,
             KnowledgeJob.attempts: KnowledgeJob.attempts + 1,
             KnowledgeJob.started_at: now,
+            KnowledgeJob.error_code: None,
+            KnowledgeJob.error_message: None,
+            KnowledgeJob.retryable: False,
         }
         rowcount = (
             self.db.query(KnowledgeJob)

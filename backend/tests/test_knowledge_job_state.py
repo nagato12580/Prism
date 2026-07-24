@@ -109,6 +109,28 @@ def test_job_state_transitions_through_valid_paths(db_session):
         service.succeed(job.id, "worker-1", result={"again": True})
 
 
+def test_start_clears_previous_retry_error(db_session):
+    from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
+
+    service = KnowledgeJobService(db_session)
+    lease = timedelta(seconds=30)
+    job = service.create(
+        JobCommand("index", "tenant-a", "kb-a", "file-a", {}),
+        "idem-clear-error",
+    )
+    service.claim(job.id, "worker-1", lease)
+    service.start(job.id, "worker-1")
+    service.fail(job.id, "worker-1", "INDEX_ERROR", "previous failure", True)
+    service.claim(job.id, "worker-1", lease)
+
+    restarted = service.start(job.id, "worker-1")
+
+    assert restarted.status == JobStatus.RUNNING
+    assert restarted.error_code is None
+    assert restarted.error_message is None
+    assert restarted.retryable is False
+
+
 @pytest.mark.parametrize("transition", ["succeed", "cancel", "retry"])
 def test_terminal_transitions_support_outer_transaction_rollback(db_session, transition):
     from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
