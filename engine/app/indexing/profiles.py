@@ -33,5 +33,5 @@ class EmbeddingProfile:
 
 
 DEFAULT_PROFILE = EmbeddingProfile(
-    "jina", "jina-embeddings-v3", 1024, "COSINE", True
+    "siliconflow", "BAAI/bge-m3", 1024, "COSINE", True
 )

@@ -15,7 +15,8 @@ def test_default_profile_exists():
     from engine.app.indexing.profiles import DEFAULT_PROFILE
 
     assert DEFAULT_PROFILE.dimension == 1024
-    assert DEFAULT_PROFILE.provider == "jina"
+    assert DEFAULT_PROFILE.provider == "siliconflow"
+    assert DEFAULT_PROFILE.model == "BAAI/bge-m3"
 
 
 def test_activate_generation_updates_topic(db_session):

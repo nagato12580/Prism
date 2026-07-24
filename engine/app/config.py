@@ -6,6 +6,14 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 
+def _env(name: str, default: str = "", *fallback_names: str) -> str:
+    for key in (name, *fallback_names):
+        value = os.getenv(key)
+        if value:
+            return value
+    return default
+
+
 class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -85,9 +93,9 @@ class Settings:
     DEEP_SEARCH_JUDGE_MIN_OVERALL_SCORE: float = float(os.getenv("DEEP_SEARCH_JUDGE_MIN_OVERALL_SCORE", "0.72"))
     DEEP_SEARCH_JUDGE_MIN_SOURCE_EVIDENCE: int = int(os.getenv("DEEP_SEARCH_JUDGE_MIN_SOURCE_EVIDENCE", "1"))
 
-    EMBEDDING_API_BASE: str = os.getenv("EMBEDDING_API_BASE", "")
-    EMBEDDING_API_KEY: str = os.getenv("EMBEDDING_API_KEY", "")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "bge-m3")
+    EMBEDDING_API_BASE: str = _env("EMBEDDING_API_BASE", "https://api.siliconflow.cn/v1")
+    EMBEDDING_API_KEY: str = _env("EMBEDDING_API_KEY", "", "SILICONFLOW_API_KEY")
+    EMBEDDING_MODEL: str = _env("EMBEDDING_MODEL", "BAAI/bge-m3")
     EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024"))
     EMBEDDING_TIMEOUT_SECONDS: float = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
     EMBEDDING_MAX_RETRIES: int = int(os.getenv("EMBEDDING_MAX_RETRIES", "2"))

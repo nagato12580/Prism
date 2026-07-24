@@ -6,6 +6,14 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 
+def _env(name: str, default: str = "", *fallback_names: str) -> str:
+    for key in (name, *fallback_names):
+        value = os.getenv(key)
+        if value:
+            return value
+    return default
+
+
 class Settings:
     APP_TIMEZONE: str = os.getenv("APP_TIMEZONE", "Asia/Shanghai")
     DATABASE_TIME_ZONE: str = os.getenv("DATABASE_TIME_ZONE", "+08:00")
@@ -39,9 +47,9 @@ class Settings:
     PKU_TYPE_TIMEOUT: float = float(os.getenv("PKU_TYPE_TIMEOUT", "8"))
     PKU_TYPE_USE_OLLAMA: bool = os.getenv("PKU_TYPE_USE_OLLAMA", "1") != "0"
 
-    EMBEDDING_API_BASE: str = os.getenv("EMBEDDING_API_BASE", "")
-    EMBEDDING_API_KEY: str = os.getenv("EMBEDDING_API_KEY", "")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "bge-m3")
+    EMBEDDING_API_BASE: str = _env("EMBEDDING_API_BASE", "https://api.siliconflow.cn/v1")
+    EMBEDDING_API_KEY: str = _env("EMBEDDING_API_KEY", "", "SILICONFLOW_API_KEY")
+    EMBEDDING_MODEL: str = _env("EMBEDDING_MODEL", "BAAI/bge-m3")
     EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024"))
 
     ASR_PROVIDER: str = os.getenv("ASR_PROVIDER", "dashscope")
