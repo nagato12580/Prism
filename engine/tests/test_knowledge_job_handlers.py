@@ -86,6 +86,8 @@ def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch)
     assert chunks
     assert all(chunk.item_id == result["item_id"] for chunk in chunks)
     assert {chunk.chunk_type for chunk in chunks} == {"parent", "child"}
+    handler_db.refresh(file_row)
+    assert file_row.content_text == "# Title\nBody text"
     handler_db.refresh(topic)
     assert topic.mindmap["input_revision"] == 1
     assert topic.sample_questions["input_revision"] == 1

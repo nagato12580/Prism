@@ -173,6 +173,7 @@ def handle_parse(
                 db_session.add(child_chunk)
 
         file_row.parsed_content_version = next_version
+        file_row.content_text = parsed.markdown
         file_row.parse_status = StageStatus.SUCCEEDED.value
         file_row.index_status = StageStatus.PENDING.value
 
