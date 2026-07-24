@@ -323,3 +323,64 @@ Frontend
 ```
 
 Report the exact URLs, final commit range, test counts, real-service evidence, known non-blocking warnings, and any intentionally retained compatibility adapters.
+
+---
+
+## 9. 2026-07-24 前端原生适配续作记录
+
+**目标**：将前端升级为可实际使用**当前已完成后端能力**（Foundation/Ingestion/Retrieval Tasks 1–8、Agent Tasks 1–6、Graph Tasks 1–2）的产品界面，不伪造、不提前展示未完成的 Graph Tasks 3–8。
+
+**工作区说明（环境差异）**：任务指定的 `H:\...\.worktrees\knowledge-system-full` 在本机不存在（无 H 盘）。真实项目在 `E:\work_place\AIOne`，其主 worktree 已占用分支 `codex/knowledge-system-full` 且含用户未提交改动。因此本次在隔离 worktree `E:\work_place\AIOne\.kilo\worktrees\water-mercury`（分支 `knowledge-system-frontend-adaptation`，与 `codex/knowledge-system-full` 同 HEAD `a640738`）执行，绝不触碰父目录用户改动。
+
+### 已完成的前端能力
+
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| 类型化 API 客户端（KB/文件/Job/检索/Evidence/Mindmap/Eval/Export/Citation） | 完成 | `d06e86c` |
+| 深链路由 `/knowledge/:kbUid/{files,retrieval,graph,governance,mindmap,evaluation,settings}` + KnowledgeShell + Zustand 工作区 | 完成 | `482bede` |
+| 知识库主界面（列表/新建/删除/空/加载/错误/权限状态） | 完成 | `482bede` |
+| 文件工作台（多文件/文件夹上传、列表筛选、解析/索引/删除、只读文档抽屉） | 完成 | `482bede` |
+| 轮询式 Job 进度（后端无 SSE） | 完成 | `482bede` |
+| 检索实验台（真实参数、通道健康、no_hits/degraded/unavailable 区分） | 完成 | `482bede` |
+| Mindmap / Evaluation / Settings / 安全导出 | 完成 | `482bede` |
+| Chat 引用闭环（EvidenceDrawer、来源可点击跳转、修复匹配百分比违规） | 完成 | `4394372` |
+
+### 真实联调验证结果
+
+服务（真实远程 MySQL + 本地 ES/Milvus/Redis/Neo4j）：
+- Backend `http://127.0.0.1:5175` UP — `/knowledge-bases` 返回真实 KB（如 `e87309e4-…`），`/capabilities/parsers` 返回 PDF/DOCX/XLSX/PPTX/MD/TXT。
+- Engine `http://127.0.0.1:5180` UP。
+- Frontend `http://127.0.0.1:5173` UP（Vite dev）。
+
+### 测试数量和命令
+
+```text
+node --test frontend/tests/*.test.mjs          → 44/44 PASS
+tsc -b && vite build                            → exit 0
+playwright test --config=playwright.config.ts   → 4/4 PASS (真实联调, 快乐路径不 mock)
+```
+
+测试覆盖：API 契约（7）、客户端错误解析（4）、深链路由（5）、文件工作台行为（3）、检索实验室行为（4）、Chat 引用契约（4）、既有 17 个无回归。
+
+### 尚未实现且依赖 Graph Tasks 3–8 的页面
+
+- Graph 作用域可视化（仅展示真实 `active_graph_generation` + 诚实空状态，不做假图谱）
+- Graph 治理（rebuild-projection / re-extract 后端无端点，隐藏入口）
+- Graph replay / activation / re-extraction UI
+- Task 8/9 backfill / shadow / cutover / rollback（依赖完整 Graph + cutover 后端）
+- Job SSE 恢复（后端无事件流，改为轮询快照）
+
+### 已知限制
+
+- 后端 NDJSON 仍是 **legacy `{type,data}`**（无 seq/run_id），无 `CitationRegistry`；前端按真实格式解析，`[Kx]` 暂未做 token 级替换（后端 sources 为裸数组），来源以 EvidenceDrawer 可点击卡形式闭环，不伪造引用注册表。
+- 后端 Job 快照路由仅返回 `{id,job_type,status,stage,attempt,error_code}`，无 progress_current/progress_total；前端不伪造进度条，仅按文件 parse/index 状态列与终态刷新呈现。
+- 后端文件预览仅单一 `content`（无 markdown/original/chunks 变体）；抽屉分页/分块视图诚实说明限制。
+- 旧 `/knowledge`（KnowledgePage）与 `/graph`（全局图谱）保持兼容，未删除。
+- Chat 来源跳转仅当来源携带 kb_uid/file_uid 时生效；当前 legacy source 多数未携带，会明确提示「无法定位」。
+
+### 提交
+
+分支 `knowledge-system-frontend-adaptation`（base `a640738`）：
+`d06e86c` `482bede` `6ad3ec0` `4394372` `3338070`
+
+三端已启动并保持运行供人工验收。

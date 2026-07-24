@@ -247,12 +247,50 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 ### Plan 6: React/Cutover (2026-07-22-knowledge-react-product-cutover.md)
 
+> **2026-07-24 前端原生适配续作（覆盖当前已完成后端能力）：** 重新实现前端，使其严格匹配
+> 当前后端**真实**接口（已完成 Foundation/Ingestion/Retrieval Tasks 1–8、Agent Tasks 1–6、
+> Graph Tasks 1–2）。因后端仍存在的能力差异，下列任务按真实接口适配或诚实降级：
+>
+> - Task 1 类型化 API 客户端：完成（`d06e86c`）。严格对齐真实响应字段（PublicEvidence /
+>   KnowledgeBaseResponse / `_public_file` / KnowledgeJob 快照），ApiProblem 解析统一错误信封
+>   与 legacy `{detail}`，parseEvidence 白名单不泄露 `storage_uri`/`tenant_id`。
+> - Task 2 深链路由 + KnowledgeShell + Zustand：完成（`482bede`）。嵌套路由 `:kbUid` +
+>   tabs 全部进入 URL；403/404 显示权限/不存在状态；store 仅瞬时状态、不写存储。
+> - Task 3 文件工作台 + 只读抽屉：完成（随 `482bede`，行为测试 `6ad3ec0`）。多文件/文件夹
+>   上传（4 并发、relative_path、AbortController）；只读抽屉用真实单一 preview content；
+>   不泄露 `uploads_data`/`storage_uri`。
+> - Task 4 Job 进度：**后端无 SSE/事件流**，按真实轮询快照 `GET .../files/jobs/{job_id}`
+>   实现（随 `482bede`）。封顶退避（15s）；快照仅返回 `{id,job_type,status,stage,attempt,
+>   error_code}`，**不伪造** progress_current/progress_total。
+> - Task 5 检索实验台：完成（随 `482bede`，行为测试 `6ad3ec0`）。真实 `mode: fast/deep`、
+>   `top_k`、`graph_hops`；通道分数按原生含义标注；`no_hits/degraded/unavailable/
+>   invalid_request` 统一区分；证据详情不泄露私有字段。
+> - Task 6 Mindmap/Evaluation/Export/Graph：Mindmap/Eval/Settings/Export 按真实接口完成
+>   （随 `482bede`）。**Graph/Governance 作用域页面不做假图谱**——后端仅完成 Graph Tasks
+>   1–2（数据模型+Outbox 基础），无 status/build/rebuild-projection/re-extract 公开端点；
+>   仅展示真实 `active_graph_generation` 与诚实空状态；既有 `/graph` 全局图谱页保持兼容。
+> - Task 7 Chat 引用闭环：完成（`4394372`）。后端当前发 **legacy NDJSON `{type,data}`**
+>   （无 seq/run_id）、无 `CitationRegistry`；前端按真实 legacy 解析，来源渲染为可点击
+>   EvidenceDrawer，仅当来源携带 kb_uid/file_uid 时经公开路由跳转，否则明确提示无法定位
+>   （不伪造跳转）。修复既有「匹配百分比」契约违规，改为原生分数+相关度双标签。
+> - Task 8/9 backfill/cutover/rollback：**依赖 Graph 完整 + cutover 后端，本次不实施**。
+> - Task 10 移除 legacy 路径：部分——新增深链产品已上线；旧 `/knowledge`（KnowledgePage）
+>   与 `/graph`（全局图谱）**保持兼容**，未删除（避免破坏现有 GraphRAG 主链）。
+>
+> 验收（真实服务 Backend 5175 / Engine 5180 / Frontend 5173）：
+> - `node --test frontend/tests/*.test.mjs`：44/44 PASS
+> - `tsc -b && vite build`：exit 0
+> - `playwright test`：4/4 PASS（真实联调，快乐路径不 mock）：知识库索引加载真实列表、
+>   深链恢复工作区、聊天来源不伪造匹配百分比
+>
+> 提交：`d06e86c` `482bede` `6ad3ec0` `4394372` `3338070`（分支 `knowledge-system-frontend-adaptation`）
+
 | Task | Commit | Verification |
 |------|--------|-------------|
-| PC1: Frontend TypeScript + Vite build | `5674031` | `tsc -b && vite build` PASS (exit code 0) |
+| PC1: Frontend TypeScript + Vite build | `5674031` → `d06e86c` | `tsc -b && vite build` PASS (exit 0) |
 | PC2: System verification script | `886faa2` → `ddce424` | `scripts/verify_knowledge_system.py` 41/41 ALL PASS — 11-stage rigorous checks |
-| PC3: Playwright E2E tests | `b65417c` → `bc9c609` | `pnpm.cmd --dir frontend test:e2e` — 1 passed (Playwright Chromium installed, real browser smoke) |
-| PC4: Frontend Node tests | `5674031` | 21/21 `node --test frontend/tests/*.test.mjs` PASS |
+| PC3: Playwright E2E tests | `b65417c` → `bc9c609` → `3338070` | `playwright test` — 4/4 passed (real Backend/Engine/Frontend, no happy-path mocking) |
+| PC4: Frontend Node tests | `5674031` → `d06e86c` | 44/44 `node --test frontend/tests/*.test.mjs` PASS |
 
 ### Final System Verification (2026-07-23)
 
