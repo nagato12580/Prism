@@ -291,9 +291,15 @@ def download_file(
 def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: str, job_type: str):
     file_row = _require_file(db, actor, kb_uid, file_uid, manage=True)
     version = file_row.parsed_content_version or 0
+    base_key = f"{kb_uid}:{file_uid}:{job_type}:v{version}"
+    from backend.app.models import KnowledgeJob
+    existing = db.query(KnowledgeJob).filter_by(idempotency_key=base_key).one_or_none()
+    idempotency_key = base_key
+    if existing is not None and existing.status in {"succeeded", "failed", "canceled"}:
+        idempotency_key = f"{base_key}:retry:{existing.attempts + 1}:{existing.id}"
     job = KnowledgeJobService(db).create(
         JobCommand(job_type, actor.tenant_id, kb_uid, file_uid, {}),
-        f"{kb_uid}:{file_uid}:{job_type}:v{version}",
+        idempotency_key,
     )
     _publish_job(db, job)
     db.refresh(job)

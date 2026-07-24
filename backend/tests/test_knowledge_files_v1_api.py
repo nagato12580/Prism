@@ -181,6 +181,42 @@ def test_file_command_returns_durable_job(client, file_headers, command, job_typ
     assert response.json()["status"] == "queued"
 
 
+def test_index_command_requeues_after_failed_same_generation_job(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile, KnowledgeJob
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Retry Index KB"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    upload = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("retry.md", b"# Retry", "text/markdown")},
+    )
+    file_uid = upload.json()["file"]["file_uid"]
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
+    file_row.parsed_content_version = 1
+    failed = KnowledgeJob(
+        job_type="index",
+        tenant_id=file_row.tenant_id,
+        kb_uid=kb_uid,
+        file_uid=file_uid,
+        idempotency_key=f"{kb_uid}:{file_uid}:index:v1",
+        status="failed",
+    )
+    db_session.add(failed)
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}/index",
+        headers=file_headers,
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["id"] != failed.id
+
+
 def test_list_files_supports_filters_and_limit(client, file_headers):
     created = client.post(
         "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Filter KB"}

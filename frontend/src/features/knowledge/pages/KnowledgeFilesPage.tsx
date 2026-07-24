@@ -20,6 +20,7 @@ import { Progress } from '@/components/ui/Progress'
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateView'
 import { FileUploadPanel } from '@/features/knowledge/components/FileUploadPanel'
 import { DocumentDrawer } from '@/features/knowledge/components/DocumentDrawer'
+import { updateFileStage } from '@/features/knowledge/pages/fileStageUpdates'
 import { cn } from '@/lib/utils'
 
 type Ctx = { kb?: KnowledgeBase; reload: () => void }
@@ -130,11 +131,25 @@ const watchJob = useCallback(
 
   const triggerParse = (file: KnowledgeFile) => {
     if (!kbUid) return
-    filesApi.parse(kbUid, file.file_uid).then((job) => watchJob(job.id)).catch((e) => setError(e))
+    setItems((current) => updateFileStage(current, file.file_uid, 'parse_status', 'running'))
+    filesApi
+      .parse(kbUid, file.file_uid)
+      .then((job) => watchJob(job.id))
+      .catch((e) => {
+        setItems((current) => updateFileStage(current, file.file_uid, 'parse_status', 'failed'))
+        setError(e)
+      })
   }
   const triggerIndex = (file: KnowledgeFile) => {
     if (!kbUid) return
-    filesApi.index(kbUid, file.file_uid).then((job) => watchJob(job.id)).catch((e) => setError(e))
+    setItems((current) => updateFileStage(current, file.file_uid, 'index_status', 'running'))
+    filesApi
+      .index(kbUid, file.file_uid)
+      .then((job) => watchJob(job.id))
+      .catch((e) => {
+        setItems((current) => updateFileStage(current, file.file_uid, 'index_status', 'failed'))
+        setError(e)
+      })
   }
 
   const [confirmDelete, setConfirmDelete] = useState<KnowledgeFile | null>(null)
