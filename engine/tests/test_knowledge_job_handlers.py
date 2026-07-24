@@ -27,7 +27,6 @@ def handler_db():
 def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch):
     from engine.app.jobs import knowledge_handlers
     from engine.app.jobs.knowledge_handlers import handle_parse
-    import os
 
     # Setup storage
     root = tmp_path / "storage"
@@ -35,7 +34,7 @@ def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch)
     (root / "t1" / "kb-a" / "file-1").mkdir(parents=True)
     test_file = root / "t1" / "kb-a" / "file-1" / "test.md"
     test_file.write_text("# Title\nBody text", encoding="utf-8")
-    os.environ["KNOWLEDGE_STORAGE_ROOT"] = str(root)
+    monkeypatch.setattr(knowledge_handlers.settings, "KNOWLEDGE_STORAGE_ROOT", str(root))
 
     # Setup topic
     topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Handler KB")
@@ -98,8 +97,6 @@ def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch)
     assert repeated["status"] == "skipped"
     assert handler_db.query(KnowledgeItem).count() == 1
 
-    del os.environ["KNOWLEDGE_STORAGE_ROOT"]
-
 
 def test_worker_dispatches_typed_parse_job_to_parse_handler(handler_db, monkeypatch):
     from engine.app.jobs import worker
@@ -125,15 +122,15 @@ def test_worker_dispatches_typed_parse_job_to_parse_handler(handler_db, monkeypa
     assert called == [(job.id, "worker-1", handler_db)]
 
 
-def test_parse_auto_index_creates_and_publishes_index_job(handler_db, tmp_path):
+def test_parse_auto_index_creates_and_publishes_index_job(handler_db, tmp_path, monkeypatch):
+    from engine.app.jobs import knowledge_handlers
     from engine.app.jobs.knowledge_handlers import handle_parse
-    import os
 
     root = tmp_path / "storage"
     path = root / "t1" / "kb-a" / "file-auto" / "auto.md"
     path.parent.mkdir(parents=True)
     path.write_text("# Auto index", encoding="utf-8")
-    os.environ["KNOWLEDGE_STORAGE_ROOT"] = str(root)
+    monkeypatch.setattr(knowledge_handlers.settings, "KNOWLEDGE_STORAGE_ROOT", str(root))
     topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Auto KB")
     handler_db.add(topic)
     handler_db.flush()
@@ -159,18 +156,17 @@ def test_parse_auto_index_creates_and_publishes_index_job(handler_db, tmp_path):
     assert result["status"] == "completed"
     assert index_job.file_uid == file_row.file_uid
     assert published == [index_job.id]
-    del os.environ["KNOWLEDGE_STORAGE_ROOT"]
 
 
-def test_parse_honors_cancel_request_before_parsing(handler_db, tmp_path):
+def test_parse_honors_cancel_request_before_parsing(handler_db, tmp_path, monkeypatch):
+    from engine.app.jobs import knowledge_handlers
     from engine.app.jobs.knowledge_handlers import handle_parse
-    import os
 
     root = tmp_path / "storage"
     path = root / "t1" / "kb-a" / "file-cancel" / "cancel.md"
     path.parent.mkdir(parents=True)
     path.write_text("cancel me", encoding="utf-8")
-    os.environ["KNOWLEDGE_STORAGE_ROOT"] = str(root)
+    monkeypatch.setattr(knowledge_handlers.settings, "KNOWLEDGE_STORAGE_ROOT", str(root))
     topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Cancel KB")
     handler_db.add(topic)
     handler_db.flush()
@@ -193,7 +189,6 @@ def test_parse_honors_cancel_request_before_parsing(handler_db, tmp_path):
     assert result == {"status": "canceled"}
     assert handler_db.get(type(job), job.id).status == "canceled"
     assert handler_db.query(KnowledgeItem).count() == 0
-    del os.environ["KNOWLEDGE_STORAGE_ROOT"]
 
 
 def test_delete_handler_completes_checkpointed_cleanup(handler_db):

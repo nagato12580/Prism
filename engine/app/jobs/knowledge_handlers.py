@@ -1,6 +1,5 @@
 # engine/app/jobs/knowledge_handlers.py
 """Parse, chunk, and index handlers that execute as durable Engine jobs."""
-import os
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -9,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeChunk
 from backend.app.models.knowledge_types import StageStatus, uuid4_str
+from backend.app.config import settings
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.storage.files import LocalFileStorage
 from engine.app.ingestion.parsers import build_default_registry
@@ -88,7 +88,7 @@ def handle_parse(
             job_svc.cancel(job_id, worker_id)
             return {"status": "canceled"}
 
-        storage = LocalFileStorage(Path(os.environ.get("KNOWLEDGE_STORAGE_ROOT", "/tmp/prism-storage")))
+        storage = LocalFileStorage(Path(settings.KNOWLEDGE_STORAGE_ROOT))
         storage_path = Path(storage._resolve(file_row.storage_uri))
         content = storage_path.read_bytes()
 
