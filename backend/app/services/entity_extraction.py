@@ -154,6 +154,12 @@ def settle_entity_candidates(
     return settled_entities
 
 
+# Legacy/non-KB adapter retained until cutover. The knowledge extraction path
+# (engine graph pipeline) must route scoped writes through GraphFactWriter
+# (backend.app.services.graph_facts) instead of this function.
+settle_legacy_entity_candidates = settle_entity_candidates
+
+
 def _entity_candidate(
     entity_type: str,
     surface_text: str,
