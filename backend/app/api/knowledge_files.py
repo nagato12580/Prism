@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
+from uuid import uuid4
 
 from backend.app.api.errors import ApiProblem
 from backend.app.database import get_db
@@ -293,10 +294,28 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
     version = file_row.parsed_content_version or 0
     base_key = f"{kb_uid}:{file_uid}:{job_type}:v{version}"
     from backend.app.models import KnowledgeJob
-    existing = db.query(KnowledgeJob).filter_by(idempotency_key=base_key).one_or_none()
+    existing = (
+        db.query(KnowledgeJob)
+        .filter(
+            KnowledgeJob.kb_uid == kb_uid,
+            KnowledgeJob.file_uid == file_uid,
+            KnowledgeJob.job_type == job_type,
+            KnowledgeJob.idempotency_key.like(f"{base_key}%"),
+        )
+        .order_by(KnowledgeJob.created_at.desc(), KnowledgeJob.id.desc())
+        .all()
+    )
+    active = next(
+        (job for job in existing if job.status in {"queued", "claimed", "running"}),
+        None,
+    )
+    if active is not None:
+        return _job_snapshot(active)
+
     idempotency_key = base_key
-    if existing is not None and existing.status in {"succeeded", "failed", "canceled"}:
-        idempotency_key = f"{base_key}:retry:{existing.attempts + 1}:{existing.id}"
+    if existing:
+        latest = existing[0]
+        idempotency_key = f"{base_key}:retry:{len(existing) + 1}:{latest.id}:{uuid4()}"
     job = KnowledgeJobService(db).create(
         JobCommand(job_type, actor.tenant_id, kb_uid, file_uid, {}),
         idempotency_key,
