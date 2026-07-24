@@ -130,6 +130,35 @@ def test_preview_and_download_use_public_file_routes(client, file_headers):
     assert "attachment" in download.headers["content-disposition"]
 
 
+def test_preview_prefers_parsed_text_for_binary_documents(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "PDF Preview KB"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    raw_pdf_fragment = b"<< /Filter /FlateDecode /Length 900 >>\nstream\nx\x9cmUMo"
+    upload = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("paper.pdf", raw_pdf_fragment, "application/pdf")},
+    )
+    file_uid = upload.json()["file"]["file_uid"]
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
+    file_row.content_text = "[[PAGE:1]]\nAlignment-free sequence analysis uses graph embeddings."
+    file_row.parse_status = "succeeded"
+    db_session.commit()
+
+    preview = client.get(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}/preview",
+        headers=file_headers,
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["content"] == file_row.content_text
+    assert "FlateDecode" not in preview.json()["content"]
+
+
 @pytest.mark.parametrize("command,job_type", [("parse", "parse"), ("index", "index")])
 def test_file_command_returns_durable_job(client, file_headers, command, job_type):
     created = client.post(

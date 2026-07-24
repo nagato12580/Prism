@@ -23,6 +23,14 @@ from backend.app.storage.files import LocalFileStorage
 
 router = APIRouter(prefix="/knowledge-bases/{kb_uid}/files", tags=["knowledge-files"])
 
+TEXT_PREVIEW_MIME_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "application/markdown",
+}
+TEXT_PREVIEW_EXTENSIONS = {".txt", ".md", ".markdown"}
+
 
 class FileMetadataUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -90,6 +98,14 @@ def _publish_job(db: Session, job) -> None:
         KnowledgeJobService(db).stage_enqueued(job.id)
     except Exception:
         db.rollback()
+
+
+def _can_preview_original_as_text(file_row: KnowledgeFile) -> bool:
+    mime_type = (file_row.mime_type or "").split(";", 1)[0].strip().lower()
+    if mime_type in TEXT_PREVIEW_MIME_TYPES:
+        return True
+    filename = (file_row.original_filename or "").lower()
+    return any(filename.endswith(ext) for ext in TEXT_PREVIEW_EXTENSIONS)
 
 
 @router.post("", status_code=202)
@@ -247,6 +263,10 @@ def preview_file(
     db: Session = Depends(get_db),
 ):
     file_row = _require_file(db, actor, kb_uid, file_uid, manage=False)
+    if file_row.content_text:
+        return {"file_uid": file_uid, "content": file_row.content_text}
+    if not _can_preview_original_as_text(file_row):
+        return {"file_uid": file_uid, "content": ""}
     content = _get_storage().read_bytes(file_row.storage_uri)
     return {"file_uid": file_uid, "content": content.decode("utf-8", errors="replace")}
 
