@@ -265,6 +265,34 @@ def test_index_command_requeues_after_failed_retry_job(client, db_session, file_
     assert response.json()["id"] not in {base_failed.id, retry_failed.id}
 
 
+def test_index_command_records_new_job_on_file(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Last Job KB"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    upload = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("last-job.md", b"# Last job", "text/markdown")},
+    )
+    file_uid = upload.json()["file"]["file_uid"]
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
+    file_row.parsed_content_version = 1
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}/index",
+        headers=file_headers,
+    )
+
+    db_session.refresh(file_row)
+    assert response.status_code == 202
+    assert file_row.last_job_id == response.json()["id"]
+    assert file_row.index_status == "running"
+
+
 def test_list_files_supports_filters_and_limit(client, file_headers):
     created = client.post(
         "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Filter KB"}

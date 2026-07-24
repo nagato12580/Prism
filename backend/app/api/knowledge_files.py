@@ -320,6 +320,12 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
         JobCommand(job_type, actor.tenant_id, kb_uid, file_uid, {}),
         idempotency_key,
     )
+    file_row.last_job_id = job.id
+    if job_type == "parse":
+        file_row.parse_status = "running"
+    elif job_type == "index":
+        file_row.index_status = "running"
+    db.commit()
     _publish_job(db, job)
     db.refresh(job)
     return _job_snapshot(job)
