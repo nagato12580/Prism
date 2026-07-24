@@ -227,8 +227,16 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| AT1: Six typed authorized agent tools | `ecc94d1` | 9/9 `test_agent_tools.py` PASS (knowledge_search, asset_search, memory_search, clarify, datetime, web_search) |
-| AT2-6: Citation recording, stats, prompt rules | (existing) | Agent prompt NER rule test PASS; citation recording in ToolContext verified |
+| AT1: Sign/verify AuthorizedKnowledgeScope | `1117350` | 9 focused tests PASS; canonical JSON + HMAC, constant-time compare, expiry-at-deadline |
+| AT2: One typed ToolEnvelope contract | `b231c05` | 5 focused tests PASS; `ToolEnvelope.from_error`, frozen/extra-forbid schemas |
+| AT3: Six read-only authorized knowledge tools | `ad48b29` | 6 `test_knowledge_base_tools.py` PASS; kb scope guard before retrieval, safe-field DTOs, bounded regex/cursor |
+| AT4: Knowledge Skill + tool visibility | `641d13c` | 6 `test_knowledge_skill.py` PASS; `KNOWLEDGE_TOOL_NAMES`, `registered_tool_names()`, scope-gated prompt/tool binding |
+| AT5: Verifiable citations | `46f1fdf` | 7 `test_citation_validation.py` PASS; CitationRegistry K1… ids, validate valid/invalid, persisted evidence snapshot |
+| AT6: NDJSON v2 + Backend chat proxy | `e776bc0` | 5 `test_chat_event_contract_v2.py` + 3 `test_agent_chat_proxy.py` PASS; monotonic seq, error envelope, 403 before Engine |
+| Agent plan verification | above | 116 tests PASS across Tasks 1–6 (tools/skill/citations/events/proxy/regression) |
+
+> Supersedes the older "AT1 ecc94d1 / AT2-6 existing" Kilo entry. Tasks 3–6 are
+> now implemented and independently committed with TDD.
 
 ### Plan 5: Graph (2026-07-22-knowledge-graph-outbox-governance.md)
 
