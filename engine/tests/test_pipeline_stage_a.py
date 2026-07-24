@@ -80,6 +80,12 @@ def test_ingest_item_writes_stage_a_entities_and_mentions(monkeypatch):
         return result
 
     monkeypatch.setattr(pl, "extract_stage_a_parallel", fake_extract_stage_a_parallel)
+    # graph/pipeline.py has its own import (not affected by the pl
+    # monkeypatch above); graph ingest calls extract_source_graph which
+    # dispatches via that separate reference.  Patch both so all paths
+    # use the deterministic fake instead of calling the real LLM.
+    from engine.app.graph import pipeline as graph_pipeline
+    monkeypatch.setattr(graph_pipeline, "extract_stage_a_parallel", fake_extract_stage_a_parallel)
 
     count = pl.ingest_item(item_id)
 
@@ -142,6 +148,8 @@ def test_reingest_does_not_orphan_mentions(monkeypatch):
         return result
 
     monkeypatch.setattr(pl, "extract_stage_a_parallel", fake_extract_stage_a_parallel)
+    from engine.app.graph import pipeline as graph_pipeline
+    monkeypatch.setattr(graph_pipeline, "extract_stage_a_parallel", fake_extract_stage_a_parallel)
 
     # First ingest.
     pl.ingest_item(item_id)
@@ -203,14 +211,15 @@ def test_pipeline_invokes_graph_analysis_after_stage_a(monkeypatch):
     monkeypatch.setattr(pl, "delete_vectors_by_ids", lambda ids: None)
     monkeypatch.setattr(pl, "_delete_es_chunks_by_item", lambda item_id: None)
     monkeypatch.setattr(pl, "_bulk_index_chunks_es", lambda **kw: 0)
-    monkeypatch.setattr(pl, "extract_stage_a_parallel",
-                        lambda chunks, **kw: {cid: [EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x", confidence=1.0)] for cid, _ in chunks})
+    _fake_extract = lambda chunks, **kw: {cid: [EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x", confidence=1.0)] for cid, _ in chunks}
+    monkeypatch.setattr(pl, "extract_stage_a_parallel", _fake_extract)
+    import engine.app.graph.pipeline as graph_pipeline
+    monkeypatch.setattr(graph_pipeline, "extract_stage_a_parallel", _fake_extract)
 
     calls = {"n": 0}
     def _fake_run_analysis(db, graph, user_id, **kw):
         calls["n"] += 1
         return {"node_count": 0}
-    import engine.app.graph.pipeline as graph_pipeline
     monkeypatch.setattr(graph_pipeline, "run_analysis", _fake_run_analysis)
 
     # Ensure GRAPH_ANALYSIS_ENABLED is True for this test
@@ -231,8 +240,10 @@ def test_pipeline_graph_analysis_failure_does_not_break_ingestion(monkeypatch):
     monkeypatch.setattr(pl, "delete_vectors_by_ids", lambda ids: None)
     monkeypatch.setattr(pl, "_delete_es_chunks_by_item", lambda item_id: None)
     monkeypatch.setattr(pl, "_bulk_index_chunks_es", lambda **kw: 0)
-    monkeypatch.setattr(pl, "extract_stage_a_parallel",
-                        lambda chunks, **kw: {cid: [EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x", confidence=1.0)] for cid, _ in chunks})
+    _fake_extract4 = lambda chunks, **kw: {cid: [EntityCandidate(kind="entity", entity_type="concept", surface_text="x", normalized_key="x", confidence=1.0)] for cid, _ in chunks}
+    monkeypatch.setattr(pl, "extract_stage_a_parallel", _fake_extract4)
+    import engine.app.graph.pipeline as graph_pipeline
+    monkeypatch.setattr(graph_pipeline, "extract_stage_a_parallel", _fake_extract4)
     def _boom(*a, **kw):
         raise RuntimeError("graphify boom")
     import engine.app.graph.pipeline as graph_pipeline

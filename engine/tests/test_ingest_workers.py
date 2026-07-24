@@ -785,11 +785,12 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     assert recovered == [True]
     assert evaluation_recovered == [True]
     assert republished == [True]
-    assert len(started) == 3
+    assert len(started) == 4
     assert [thread.name for thread in started] == [
         "knowledge-evaluation-lease-reaper",
         "knowledge-ingest-worker-0",
         "knowledge-governance-worker-0",
+        "knowledge-graph-projector",
     ]
     assert all(thread.started for thread in started)
     assert started[0].args == ()

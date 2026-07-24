@@ -680,6 +680,45 @@ def run_governance_job(job_id, *, worker_id):
         db.close()
 
 
+from engine.app.graph.outbox_projector import GraphProjectionReceiptStore, OutboxProjectorLoop
+
+
+def _build_graph_projector(db):
+    """Construct a Neo4jOutboxProjector wired to a real GraphClient.
+
+    Returns None when the projector is disabled or Neo4j is unreachable so the
+    worker thread can no-op without crashing ingestion.
+    """
+    if not settings.GRAPH_PROJECTOR_ENABLED:
+        return None
+    try:
+        from backend.app.services.graph_client import GraphClient
+        from engine.app.graph.neo4j_projector import Neo4jOutboxProjector
+
+        graph = GraphClient()
+        return Neo4jOutboxProjector(graph, GraphProjectionReceiptStore(db))
+    except Exception as exc:
+        logger.warning("[knowledge.worker] graph_projector_init_failed error=%s", exc)
+        return None
+
+
+def _drain_graph_projector_batch(db, *, projector, worker_id: str) -> int:
+    """Claim + apply one batch of due neo4j receipts. Never raises.
+
+    The projector owns its GraphClient; on transient Neo4j failure each receipt
+    is rescheduled via the receipt store (retry/failed), so a single batch error
+    does not propagate.
+    """
+    if projector is None:
+        return 0
+    loop = OutboxProjectorLoop(projector, projector.receipts, worker_id=worker_id)
+    try:
+        return loop.run_batch(limit=settings.GRAPH_PROJECTOR_BATCH_LIMIT)
+    except Exception as exc:
+        logger.exception("[knowledge.worker] graph_projector_batch_failed error=%s", exc)
+        return 0
+
+
 class KnowledgeWorkerManager:
     def __init__(self):
         self._stop = threading.Event()
@@ -722,6 +761,19 @@ class KnowledgeWorkerManager:
             self._threads.append(thread)
             thread.start()
 
+        # Graph outbox projector: drains due neo4j receipts independently of
+        # the Redis job queues. Neo4j outage -> receipts retry, never breaks
+        # ingestion (failure isolation).
+        if settings.GRAPH_PROJECTOR_ENABLED:
+            projector_thread = threading.Thread(
+                target=self._graph_projector_loop,
+                args=(),
+                daemon=True,
+                name="knowledge-graph-projector",
+            )
+            self._threads.append(projector_thread)
+            projector_thread.start()
+
     def stop(self):
         self._stop.set()
         for thread in self._threads:
@@ -752,3 +804,29 @@ class KnowledgeWorkerManager:
                 republish_due_queued_jobs()
             except Exception as exc:
                 logger.exception("[knowledge.worker] evaluation lease sweep failed error=%s", exc)
+
+    def _graph_projector_loop(self):
+        """Periodically drain due graph outbox receipts to Neo4j.
+
+        Builds a fresh GraphClient per batch attempt so a Neo4j restart is
+        recovered on the next iteration; a persistent init failure just logs
+        and retries next tick.
+        """
+        interval = settings.GRAPH_PROJECTOR_INTERVAL_SECONDS
+        worker_id = _worker_id("graph-projector")
+        while not self._stop.wait(interval):
+            db = _Session()
+            try:
+                projector = _build_graph_projector(db)
+                try:
+                    _drain_graph_projector_batch(db, projector=projector, worker_id=worker_id)
+                finally:
+                    if projector is not None:
+                        try:
+                            projector.graph.close()
+                        except Exception:
+                            pass
+            except Exception as exc:
+                logger.exception("[knowledge.worker] graph_projector_loop error=%s", exc)
+            finally:
+                db.close()

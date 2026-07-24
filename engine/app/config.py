@@ -45,6 +45,11 @@ class Settings:
     NEO4J_DATABASE: str = os.getenv("NEO4J_DATABASE", "neo4j")
     ENTITY_GRAPH_ENABLED: bool = os.getenv("ENTITY_GRAPH_ENABLED", "0") == "1"
 
+    # ---- Graph outbox projector ----
+    GRAPH_PROJECTOR_ENABLED: bool = os.getenv("GRAPH_PROJECTOR_ENABLED", "1") not in ("0", "false", "False")
+    GRAPH_PROJECTOR_INTERVAL_SECONDS: float = float(os.getenv("GRAPH_PROJECTOR_INTERVAL_SECONDS", "2"))
+    GRAPH_PROJECTOR_BATCH_LIMIT: int = int(os.getenv("GRAPH_PROJECTOR_BATCH_LIMIT", "100"))
+
     ENGINE_HOST: str = os.getenv("ENGINE_HOST", "0.0.0.0")
     ENGINE_PORT: int = int(os.getenv("ENGINE_PORT", "5180"))
 
