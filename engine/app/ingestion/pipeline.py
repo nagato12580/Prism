@@ -16,6 +16,7 @@ from .chunker import chunk_parent_child
 from .vectorizer import embed_texts
 
 from ..graph.pipeline import run_graph_ingest_pipeline
+from ..extraction.stage_a import extract_stage_a_parallel
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 _Session = sessionmaker(bind=_engine)
@@ -155,16 +156,43 @@ def _bulk_index_chunks_es(
         raise
 
 
-def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
-    """Stage A: LLM-extract entities for every child chunk, settle to MySQL, project to Neo4j.
+def _resolve_graph_generation(db, item_id: str, tenant_id: str, kb_uid: str) -> str:
+    """Resolve the active graph generation for one item's KB.
 
-    Failures are logged and swallowed so graph/extraction issues never break ingestion.
+    Falls back to a stable per-KB legacy id when no generation is published
+    yet so scoped graph facts always have a non-empty generation bucket
+    (graph_search rejects an empty graph_generation).
+    """
+    from backend.app.models.knowledge_item import KnowledgeTopic
+
+    topic = (
+        db.query(KnowledgeTopic)
+        .filter_by(tenant_id=tenant_id, kb_uid=kb_uid)
+        .one_or_none()
+    )
+    if topic is not None and topic.active_graph_generation:
+        return topic.active_graph_generation
+    return f"legacy:{tenant_id}:{kb_uid}"
+
+
+def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
+    """Stage A: LLM-extract entities for every child chunk, settle scoped facts
+    + outbox events to MySQL. Neo4j projection is driven by the outbox
+    projectors, not here. Failures are logged and swallowed so graph/extraction
+    issues never break ingestion.
     """
     if not settings.ENTITY_EXTRACT_ENABLED:
         return
     try:
-        from backend.app.models import EntityMention, EntityRelation
-        from backend.app.models.knowledge_item import KnowledgeChunk
+        from backend.app.models import EntityMention, EntityRelation, KnowledgeItem
+        from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeFile
+
+        item = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+        if item is None:
+            return
+        resource = db.query(KnowledgeFile).filter(KnowledgeFile.item_id == item_id).first()
+        file_uid = resource.file_uid if resource is not None else item.id
+        graph_generation = _resolve_graph_generation(db, item_id, item.tenant_id, item.kb_uid)
 
         # Clean mentions/relations from any previous ingest of this item so
         # re-ingest (which creates fresh chunk UUIDs) doesn't leave orphans.
@@ -199,7 +227,15 @@ def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
         _log_stage(item_id, "stage_a_extract", chunks=len(chunks))
         for chunk in chunks:
             try:
-                _ingest_chunk_graph(db, item_id, chunk, user_id=user_id)
+                _ingest_chunk_graph(
+                    db, item_id, chunk,
+                    user_id=user_id,
+                    tenant_id=item.tenant_id,
+                    kb_uid=item.kb_uid,
+                    file_uid=file_uid,
+                    chunk_uid=chunk.chunk_uid,
+                    graph_generation=graph_generation,
+                )
             except Exception as exc:
                 logger.warning(
                     "[ingest.pipeline] chunk_graph_ingest_failed item_id=%s chunk_id=%s error=%s",
@@ -208,13 +244,21 @@ def _run_stage_a_for_item(db, item_id: str, user_id: str) -> None:
                     exc,
                 )
         db.commit()
-        _finalize_item_graph(chunks[-1], db, item_id, user_id)
+        _finalize_item_graph(
+            chunks[-1], db, item_id, user_id,
+            tenant_id=item.tenant_id, kb_uid=item.kb_uid,
+            file_uid=file_uid, chunk_uid=chunks[-1].chunk_uid,
+            graph_generation=graph_generation,
+        )
         _log_stage(item_id, "stage_a_settled")
     except Exception as exc:
         logger.warning("[ingest.pipeline] stage_a_failed item_id=%s error=%s", item_id, exc)
 
 
-def _ingest_chunk_graph(db, item_id: str, chunk, *, user_id: str) -> dict:
+def _ingest_chunk_graph(
+    db, item_id: str, chunk, *, user_id: str, tenant_id: str, kb_uid: str,
+    file_uid: str, chunk_uid: str, graph_generation: str,
+) -> dict:
     return run_graph_ingest_pipeline(
         {
             "source_kind": "document_chunk",
@@ -222,6 +266,11 @@ def _ingest_chunk_graph(db, item_id: str, chunk, *, user_id: str) -> dict:
             "item_id": item_id,
             "text": chunk.chunk_text or "",
             "user_id": user_id,
+            "tenant_id": tenant_id,
+            "kb_uid": kb_uid,
+            "file_uid": file_uid,
+            "chunk_uid": chunk_uid,
+            "graph_generation": graph_generation,
         },
         db=db,
         run_project=False,
@@ -229,7 +278,10 @@ def _ingest_chunk_graph(db, item_id: str, chunk, *, user_id: str) -> dict:
     )
 
 
-def _finalize_item_graph(chunk, db, item_id: str, user_id: str) -> None:
+def _finalize_item_graph(
+    chunk, db, item_id: str, user_id: str, *,
+    tenant_id: str, kb_uid: str, file_uid: str, chunk_uid: str, graph_generation: str,
+) -> None:
     try:
         run_graph_ingest_pipeline(
             {
@@ -237,6 +289,11 @@ def _finalize_item_graph(chunk, db, item_id: str, user_id: str) -> None:
                 "source_id": chunk.id,
                 "item_id": item_id,
                 "user_id": user_id,
+                "tenant_id": tenant_id,
+                "kb_uid": kb_uid,
+                "file_uid": file_uid,
+                "chunk_uid": chunk_uid,
+                "graph_generation": graph_generation,
                 "detected": "document_chunk",
             },
             db=db,

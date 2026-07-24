@@ -77,9 +77,13 @@ def test_document_ingestion_routes_chunk_to_shared_pipeline(monkeypatch):
         ),
     )
 
-    chunk = SimpleNamespace(id="chunk-1", chunk_text="hello graph")
+    chunk = SimpleNamespace(id="chunk-1", chunk_text="hello graph", chunk_uid="public-chunk-1")
 
-    mod._ingest_chunk_graph(SimpleNamespace(), "item-1", chunk, user_id="user-1")
+    mod._ingest_chunk_graph(
+        SimpleNamespace(), "item-1", chunk,
+        user_id="user-1", tenant_id="t1", kb_uid="k1",
+        file_uid="f1", chunk_uid="public-chunk-1", graph_generation="g1",
+    )
 
     assert len(captured) == 1
     env, db, run_project, run_analyze, run_persist = captured[0]
@@ -89,6 +93,11 @@ def test_document_ingestion_routes_chunk_to_shared_pipeline(monkeypatch):
     assert env["item_id"] == "item-1"
     assert env["text"] == "hello graph"
     assert env["user_id"] == "user-1"
+    assert env["tenant_id"] == "t1"
+    assert env["kb_uid"] == "k1"
+    assert env["file_uid"] == "f1"
+    assert env["chunk_uid"] == "public-chunk-1"
+    assert env["graph_generation"] == "g1"
     assert run_persist is True
     assert run_project is False
     assert run_analyze is False
@@ -101,16 +110,23 @@ class _FakeQuery:
     def filter(self, *args, **kwargs):
         return self
 
+    def filter_by(self, *args, **kwargs):
+        return self
+
     def all(self):
         return self._result
+
+    def first(self):
+        return self._result[0] if self._result else None
 
     def delete(self, synchronize_session=False):
         return 0
 
 
 class _FakeDB:
-    def __init__(self, chunks):
+    def __init__(self, chunks, item=None):
         self._chunks = chunks
+        self._item = item
         self.flush_calls = 0
         self.commit_calls = 0
 
@@ -118,6 +134,8 @@ class _FakeDB:
         model_name = getattr(model, "__name__", "")
         if model_name == "KnowledgeChunk":
             return _FakeQuery(self._chunks)
+        if model_name == "KnowledgeItem":
+            return _FakeQuery([self._item] if self._item else [])
         return _FakeQuery([])
 
     def flush(self):
@@ -132,18 +150,23 @@ def test_document_stage_a_processes_all_chunks_then_finalizes_graph_once(monkeyp
 
     processed: list[str] = []
     finalizations: list[dict] = []
+    item = SimpleNamespace(id="item-1", tenant_id="t1", kb_uid="k1")
     db = _FakeDB(
         [
-            SimpleNamespace(id="chunk-1", chunk_text="chunk 1"),
-            SimpleNamespace(id="chunk-2", chunk_text="chunk 2"),
-        ]
+            SimpleNamespace(id="chunk-1", chunk_text="chunk 1", chunk_uid="pub-1"),
+            SimpleNamespace(id="chunk-2", chunk_text="chunk 2", chunk_uid="pub-2"),
+        ],
+        item=item,
     )
 
     monkeypatch.setattr(mod.settings, "ENTITY_EXTRACT_ENABLED", True)
+    # _run_stage_a_for_item now resolves tenant/kb/generation from the item;
+    # stub the resolver so the fake db (no real KnowledgeItem) still works.
+    monkeypatch.setattr(mod, "_resolve_graph_generation", lambda db, item_id, tenant_id, kb_uid: "g1")
     monkeypatch.setattr(
         mod,
         "_ingest_chunk_graph",
-        lambda db, item_id, chunk, *, user_id: processed.append(chunk.id) or {},
+        lambda db, item_id, chunk, **kw: processed.append(chunk.id) or {},
     )
     monkeypatch.setattr(
         mod,
@@ -181,18 +204,21 @@ def test_document_stage_a_swallows_graph_finalize_errors_after_chunk_settle(monk
     from engine.app.ingestion import pipeline as mod
 
     processed: list[str] = []
+    item = SimpleNamespace(id="item-1", tenant_id="t1", kb_uid="k1")
     db = _FakeDB(
         [
-            SimpleNamespace(id="chunk-1", chunk_text="chunk 1"),
-            SimpleNamespace(id="chunk-2", chunk_text="chunk 2"),
-        ]
+            SimpleNamespace(id="chunk-1", chunk_text="chunk 1", chunk_uid="pub-1"),
+            SimpleNamespace(id="chunk-2", chunk_text="chunk 2", chunk_uid="pub-2"),
+        ],
+        item=item,
     )
 
     monkeypatch.setattr(mod.settings, "ENTITY_EXTRACT_ENABLED", True)
+    monkeypatch.setattr(mod, "_resolve_graph_generation", lambda db, item_id, tenant_id, kb_uid: "g1")
     monkeypatch.setattr(
         mod,
         "_ingest_chunk_graph",
-        lambda db, item_id, chunk, *, user_id: processed.append(chunk.id) or {},
+        lambda db, item_id, chunk, **kw: processed.append(chunk.id) or {},
     )
     monkeypatch.setattr(
         mod,
@@ -211,21 +237,24 @@ def test_document_stage_a_continues_after_single_chunk_graph_failure(monkeypatch
 
     processed: list[str] = []
     finalizations: list[str] = []
+    item = SimpleNamespace(id="item-1", tenant_id="t1", kb_uid="k1")
     db = _FakeDB(
         [
-            SimpleNamespace(id="chunk-1", chunk_text="chunk 1"),
-            SimpleNamespace(id="chunk-2", chunk_text="chunk 2"),
-            SimpleNamespace(id="chunk-3", chunk_text="chunk 3"),
-        ]
+            SimpleNamespace(id="chunk-1", chunk_text="chunk 1", chunk_uid="pub-1"),
+            SimpleNamespace(id="chunk-2", chunk_text="chunk 2", chunk_uid="pub-2"),
+            SimpleNamespace(id="chunk-3", chunk_text="chunk 3", chunk_uid="pub-3"),
+        ],
+        item=item,
     )
 
-    def fake_ingest_chunk_graph(db, item_id, chunk, *, user_id):
+    def fake_ingest_chunk_graph(db, item_id, chunk, **kw):
         processed.append(chunk.id)
         if chunk.id == "chunk-2":
             raise RuntimeError("graph boom")
         return {}
 
     monkeypatch.setattr(mod.settings, "ENTITY_EXTRACT_ENABLED", True)
+    monkeypatch.setattr(mod, "_resolve_graph_generation", lambda db, item_id, tenant_id, kb_uid: "g1")
     monkeypatch.setattr(mod, "_ingest_chunk_graph", fake_ingest_chunk_graph)
     monkeypatch.setattr(
         mod,

@@ -140,6 +140,40 @@ class GraphClient:
         """
         self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "graph_generation": graph_generation, "item_id": item_id})
 
+    def remove_scoped_mention(self, tenant_id: str, kb_uid: str, graph_generation: str, mention_id: str) -> None:
+        """Delete one scoped MENTIONED_IN edge by fact id; leaves endpoints intact."""
+        if not mention_id:
+            return
+        query = """
+        MATCH (:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+              -[r:MENTIONED_IN {mention_id: $mention_id}]->
+              (:ScopedSource {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+        DELETE r
+        """
+        self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "graph_generation": graph_generation, "mention_id": mention_id})
+
+    def remove_scoped_relation(self, tenant_id: str, kb_uid: str, graph_generation: str, relation_id: str) -> None:
+        """Delete one scoped RELATED_TO edge by fact id; shared triples survive."""
+        if not relation_id:
+            return
+        query = """
+        MATCH (:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+              -[r:RELATED_TO {relation_id: $relation_id}]->
+              (:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+        DELETE r
+        """
+        self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "graph_generation": graph_generation, "relation_id": relation_id})
+
+    def remove_scoped_entity(self, tenant_id: str, kb_uid: str, graph_generation: str, entity_id: str) -> None:
+        """Delete one scoped Entity node and its incident edges (entity.removed only)."""
+        if not entity_id:
+            return
+        query = """
+        MATCH (e:ScopedEntity {id: $entity_id, tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+        DETACH DELETE e
+        """
+        self._execute_write(query, {"tenant_id": tenant_id, "kb_uid": kb_uid, "graph_generation": graph_generation, "entity_id": entity_id})
+
     def delete_item_sources(self, tenant_id: str, kb_uid: str, item_id: str) -> None:
         self._execute_write(
             "MATCH (s:Source {tenant_id: $tenant_id, kb_uid: $kb_uid, item_id: $item_id}) DETACH DELETE s",
