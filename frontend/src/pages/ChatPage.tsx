@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { EvidenceDrawer } from '@/features/chat/EvidenceDrawer'
 import {
   AlertTriangle,
   ArrowRight,
@@ -1214,8 +1215,10 @@ function MessageBlock({
     onClarifySelect(option.label.trim() || option.value)
   }
   const isError = !isUser && msg.content.includes('请求失败：')
+  const [openEvidence, setOpenEvidence] = useState<Source | null>(null)
 
   return (
+    <>
     <div className={cn('flex min-w-0', isUser ? 'justify-end' : 'justify-start')}>
       <div className={cn('min-w-0 max-w-[92%] sm:max-w-[78%]', isUser ? 'text-right' : 'text-left')}>
         {!isUser && <ThinkingPanel msg={msg} />}
@@ -1259,9 +1262,11 @@ function MessageBlock({
             {sourcesOpen && (
               <div className="mt-2 grid gap-2">
                 {msg.sources.map((source, index) => (
-                  <div
+                  <button
+                    type="button"
                     key={`${source.display_type || source.source_kind || 'source'}-${source.display_id || source.source_id || source.chunk_id || source.item_id}-${index}`}
-                    className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-xs text-slate-600 shadow-sm"
+                    onClick={() => setOpenEvidence(source)}
+                    className="w-full rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-left text-xs text-slate-600 shadow-sm transition hover:border-blue-200 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
                   >
                     <div className="mb-1.5 flex items-center justify-between gap-2">
                       <div className="min-w-0">
@@ -1276,9 +1281,16 @@ function MessageBlock({
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
                           {sourceDisplayLabel(source)}
                         </span>
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
-                          {source.raw_score ? `匹配 ${(source.raw_score * 100).toFixed(0)}%` : `相关度 ${formatScore(source.score)}`}
-                        </span>
+                        {source.raw_score != null ? (
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
+                            原始分数 {formatScore(source.raw_score)}
+                          </span>
+                        ) : null}
+                        {source.score != null ? (
+                          <span className="rounded-full bg-violet-50 px-2 py-0.5 font-mono text-[10px] font-medium text-violet-600">
+                            相关度 {formatScore(source.score)}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                     {sourceSnippet(source) && (
@@ -1286,7 +1298,7 @@ function MessageBlock({
                         {sourceSnippet(source).slice(0, 300)}
                       </p>
                     )}
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -1294,6 +1306,8 @@ function MessageBlock({
         )}
       </div>
     </div>
+      <EvidenceDrawer source={openEvidence} onClose={() => setOpenEvidence(null)} />
+    </>
   )
 }
 
