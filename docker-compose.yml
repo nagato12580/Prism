@@ -44,7 +44,7 @@ services:
     volumes: ["milvus_data:/var/lib/milvus"]
 
   neo4j:
-    image: neo4j:5.28.1
+    image: neo4j:5.26.0
     environment:
       NEO4J_AUTH: neo4j/password
     ports:
