@@ -1,12 +1,39 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 function read(rel) {
   return readFileSync(resolve(root, rel), 'utf8')
+}
+
+async function loadPreviewContent() {
+  const outDir = mkdtempSync(join(tmpdir(), 'prism-preview-content-'))
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        resolve(root, 'node_modules/typescript/bin/tsc'),
+        'src/features/knowledge/components/previewContent.ts',
+        '--module',
+        'ESNext',
+        '--target',
+        'ES2020',
+        '--moduleResolution',
+        'bundler',
+        '--outDir',
+        outDir,
+      ],
+      { cwd: root, stdio: 'pipe' },
+    )
+    return await import(pathToFileURL(resolve(outDir, 'previewContent.js')).href)
+  } finally {
+    rmSync(outDir, { recursive: true, force: true })
+  }
 }
 
 test('FileUploadPanel bounds concurrent uploads and preserves relative paths', () => {
@@ -30,6 +57,22 @@ test('DocumentDrawer is read-only and uses the single preview content endpoint',
   // Must never render storage paths / uploads_data.
   assert.doesNotMatch(src, /uploads_data/)
   assert.doesNotMatch(src, /storage_uri/)
+})
+
+test('document preview bounds rendered text and reports truncation', async () => {
+  const { clampPreviewContent, MAX_PREVIEW_CHARACTERS } = await loadPreviewContent()
+  const oversized = 'x'.repeat(MAX_PREVIEW_CHARACTERS + 5)
+
+  assert.deepEqual(clampPreviewContent(oversized), {
+    content: 'x'.repeat(MAX_PREVIEW_CHARACTERS),
+    truncated: true,
+    totalCharacters: MAX_PREVIEW_CHARACTERS + 5,
+  })
+  assert.deepEqual(clampPreviewContent('short'), {
+    content: 'short',
+    truncated: false,
+    totalCharacters: 5,
+  })
 })
 
 test('KnowledgeFilesPage shows real stage status and avoids fabricated progress', () => {

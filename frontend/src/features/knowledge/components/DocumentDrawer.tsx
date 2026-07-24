@@ -7,6 +7,10 @@ import { Tabs } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingState, ErrorState } from '@/components/ui/StateView'
+import {
+  clampPreviewContent,
+  type PreviewContent,
+} from '@/features/knowledge/components/previewContent'
 
 export function DocumentDrawer({
   kbUid,
@@ -18,20 +22,20 @@ export function DocumentDrawer({
   onClose: () => void
 }) {
   const [view, setView] = useState<'original' | 'markdown' | 'chunks' | 'history'>('markdown')
-  const [content, setContent] = useState<string | null>(null)
+  const [preview, setPreview] = useState<PreviewContent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<unknown>(null)
 
   useEffect(() => {
     setLoading(true)
     setError(null)
-    setContent(null)
+    setPreview(null)
     // The backend exposes a single `preview` endpoint returning the stored text
     // content (parsed text). There is no separate markdown/original/chunks
     // variant in the current API; "original" triggers a binary download.
     filesApi
       .preview(kbUid, file.file_uid)
-      .then((res) => setContent(res.content))
+      .then((res) => setPreview(clampPreviewContent(res.content)))
       .catch((e) => setError(e))
       .finally(() => setLoading(false))
   }, [kbUid, file.file_uid])
@@ -98,7 +102,7 @@ export function DocumentDrawer({
         ) : view === 'chunks' ? (
           <div className="text-xs text-slate-500">
             当前后端预览接口返回完整正文，暂未提供独立分块视图。可在下方正文内容中查看。
-            {content ? <pre className="mt-2 whitespace-pre-wrap break-words text-slate-700">{content}</pre> : null}
+            {preview?.content ? <pre className="mt-2 whitespace-pre-wrap break-words text-slate-700">{preview.content}</pre> : null}
           </div>
         ) : view === 'history' ? (
           <div className="text-xs text-slate-500">
@@ -113,9 +117,17 @@ export function DocumentDrawer({
         ) : error ? (
           <ErrorState problem={error} />
         ) : (
-          <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-700">
-            {content || '（空内容）'}
-          </pre>
+          <div>
+            {preview?.truncated ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                正文共 {preview.totalCharacters.toLocaleString()} 个字符，为避免页面卡顿仅显示前{' '}
+                {preview.content.length.toLocaleString()} 个字符。完整内容请下载原文件查看。
+              </div>
+            ) : null}
+            <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-700">
+              {preview?.content || '（空内容）'}
+            </pre>
+          </div>
         )}
       </div>
     </Dialog>
