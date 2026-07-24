@@ -11,10 +11,18 @@ ToolBuilder = Callable[["ToolContext"], StructuredTool]
 
 @dataclass(slots=True)
 class ToolContext:
+    # Legacy fields (kept for compatibility with existing callers/tests).
     rag_runner: Any | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
     stats_holder: dict[str, Any] = field(default_factory=dict)
     clarify_holder: dict[str, Any] | None = None
+    # Authorized knowledge-run scope (Tasks 3-6). Production construction is
+    # authoritative in Tasks 4/6; until then tests/legacy callers may omit these.
+    db: Any | None = None
+    trace_id: str | None = None
+    run_id: str | None = None
+    knowledge_scope: Any | None = None
+    retrieval_service: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
