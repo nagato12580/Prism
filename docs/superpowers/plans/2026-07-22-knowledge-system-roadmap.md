@@ -178,12 +178,12 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| FT1: Alembic migration | `b66f913` | `alembic upgrade head` on fresh MySQL `prism_test` -> revision `20260722_01` applied; legacy FK conflict correctly detected |
-| FT2: Remove duplicate columns + fix user_id default | `299e474` | 22/22 `test_models.py` PASS |
-| FT3: ActorContext + KnowledgeAccessPolicy | `53c31fd` | 3/3 actor + 6/6 access PASS |
-| FT4: Local FileStorage with path safety | `bbf5d21` | 50/50 `test_file_storage.py` PASS |
-| FT5: Durable Job state with lease/retry | `49c386c` | 15/15 unit PASS; 9/9 real MySQL concurrency PASS (thread-barrier + `prism_test` DB-name gate) |
-| FT6: Authorized v1 CRUD with cursor/page | `028a59f` | 8/8 `test_knowledge_bases_v1_api.py` PASS (isolated SQLite per test) |
+| FT1: Alembic migration | `5760ea3` | `alembic upgrade head` on fresh MySQL `prism_test` -> revision `20260722_01` applied; legacy FK conflict correctly detected |
+| FT2: Remove duplicate columns + fix user_id default | `58e76ea` | 22/22 `test_models.py` PASS |
+| FT3: ActorContext + KnowledgeAccessPolicy | `0061eb6` | 3/3 actor + 6/6 access PASS |
+| FT4: Local FileStorage with path safety | `f020889` | 50/50 `test_file_storage.py` PASS |
+| FT5: Durable Job state with lease/retry | `b8d4e3c` | 15/15 unit PASS; 9/9 real MySQL concurrency PASS (thread-barrier + `prism_test` DB-name gate) |
+| FT6: Authorized v1 CRUD with cursor/page | `4de4205` | 8/8 `test_knowledge_bases_v1_api.py` PASS (isolated SQLite per test) |
 
 **Foundation Gate Record:**
 - `alembic upgrade head` on fresh `prism_test`: PASS
@@ -197,24 +197,24 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| IT1: Capability-driven Parser Registry | `9b73c26` | 10/10 registry PASS; 6/6 fixture PASS (real PDF/DOCX/XLSX/PPTX with embedded binary fixtures) |
-| IT2: Six Chunk Presets with separator | `20d7885` | 9/9 presets + 6/6 chunker PASS; semantic fake-splitter injection + unavailable error tested |
-| IT3: Upload Saga + File v1 API | `91ecbab` | 4/4 `test_knowledge_files_v1_api.py` PASS |
-| IT4: Parse/Chunk as Durable Engine Jobs | `76747ef` | 1/1 `test_knowledge_job_handlers.py` PASS |
-| IT5-6: Indexing (Milvus/ES) + Cleanup | `d607af5` | 4/4 `test_indexing.py` PASS |
+| IT1: Capability-driven Parser Registry | `2da2248` | 10/10 registry PASS; 6/6 fixture PASS (real PDF/DOCX/XLSX/PPTX with embedded binary fixtures) |
+| IT2: Six Chunk Presets with separator | `44582cd` | 9/9 presets + 6/6 chunker PASS; semantic fake-splitter injection + unavailable error tested |
+| IT3: Upload Saga + File v1 API | `b0e2877` | 4/4 `test_knowledge_files_v1_api.py` PASS |
+| IT4: Parse/Chunk as Durable Engine Jobs | `db6f232` | 1/1 `test_knowledge_job_handlers.py` PASS |
+| IT5-6: Indexing (Milvus/ES) + Cleanup | `e4a595c` | 4/4 `test_indexing.py` PASS |
 
 ### Plan 3: Retrieval (2026-07-22-knowledge-retrieval-evaluation.md)
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| RT1: Typed channel health and scope | `3550ab1` | Typed health distinguishes empty results from channel failure |
-| RT2: Native Dense/BM25/Graph scope | `884d905` | Real Milvus 2.4 + Elasticsearch + Neo4j cross-KB/file/source isolation gate PASS |
-| RT3: Single three-channel Weighted RRF | `421af4e` | Each channel and fusion execute exactly once |
-| RT4: Text rerank before parent expansion | `330ecb0` | Provider payload contains chunk text; fallback health is explicit |
-| RT5: Deep controls and cumulative Evidence | `7c49206` | Distinct rewrites, bounded controls, and cross-iteration Evidence PASS |
-| RT6: Evidence contract and retrieval APIs | `1071f95` | Public/private contracts distinguish no-hits, degraded, and unavailable |
-| RT7: Reproducible RAG evaluation | `13bc964` | Real MySQL migration gate and explicit Neo4j transaction timeout gate PASS |
-| RT8: Versioned mindmap/questions/export | `18b834f` | 79 focused PASS; 2 real-MySQL lock-order/race gates PASS; ZIP safety review APPROVED |
+| RT1: Typed channel health and scope | `bd2d589` | Typed health distinguishes empty results from channel failure |
+| RT2: Native Dense/BM25/Graph scope | `c0620c6` | Real Milvus 2.4 + Elasticsearch + Neo4j cross-KB/file/source isolation gate PASS |
+| RT3: Single three-channel Weighted RRF | `96b82c8` | Each channel and fusion execute exactly once |
+| RT4: Text rerank before parent expansion | `2343e94` | Provider payload contains chunk text; fallback health is explicit |
+| RT5: Deep controls and cumulative Evidence | `4179dea` | Distinct rewrites, bounded controls, and cross-iteration Evidence PASS |
+| RT6: Evidence contract and retrieval APIs | `3e14f49` | Public/private contracts distinguish no-hits, degraded, and unavailable |
+| RT7: Reproducible RAG evaluation | `e030ac4` | Real MySQL migration gate and explicit Neo4j transaction timeout gate PASS |
+| RT8: Versioned mindmap/questions/export | `996ed2b` | 79 focused PASS; 2 real-MySQL lock-order/race gates PASS; ZIP safety review APPROVED |
 
 **Retrieval Gate Record:**
 - focused retrieval/evaluation/enrichment suites: 190/190 PASS
@@ -227,24 +227,24 @@ Each stage verified with real infrastructure. Gates executed in worktree `knowle
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| AT1: Six typed authorized agent tools | `0ab5547` | 9/9 `test_agent_tools.py` PASS (knowledge_search, asset_search, memory_search, clarify, datetime, web_search) |
+| AT1: Six typed authorized agent tools | `ecc94d1` | 9/9 `test_agent_tools.py` PASS (knowledge_search, asset_search, memory_search, clarify, datetime, web_search) |
 | AT2-6: Citation recording, stats, prompt rules | (existing) | Agent prompt NER rule test PASS; citation recording in ToolContext verified |
 
 ### Plan 5: Graph (2026-07-22-knowledge-graph-outbox-governance.md)
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| GT1: Governance Outbox pattern | `3b3e5bc` | Original `knowledge_governance.py` (2220 lines) preserved; Neo4j available on port 7687 |
+| GT1: Governance Outbox pattern | `f99e226` | Original `knowledge_governance.py` (2220 lines) preserved; Neo4j available on port 7687 |
 | GT2-8: Entity extraction, PKU settlement, document governance | (existing) | Existing engine graph pipeline preserved |
 
 ### Plan 6: React/Cutover (2026-07-22-knowledge-react-product-cutover.md)
 
 | Task | Commit | Verification |
 |------|--------|-------------|
-| PC1: Frontend TypeScript + Vite build | `ad69215` | `tsc -b && vite build` PASS (exit code 0) |
+| PC1: Frontend TypeScript + Vite build | `5674031` | `tsc -b && vite build` PASS (exit code 0) |
 | PC2: System verification script | `886faa2` → `ddce424` | `scripts/verify_knowledge_system.py` 41/41 ALL PASS — 11-stage rigorous checks |
 | PC3: Playwright E2E tests | `b65417c` → `bc9c609` | `pnpm.cmd --dir frontend test:e2e` — 1 passed (Playwright Chromium installed, real browser smoke) |
-| PC4: Frontend Node tests | `ad69215` | 21/21 `node --test frontend/tests/*.test.mjs` PASS |
+| PC4: Frontend Node tests | `5674031` | 21/21 `node --test frontend/tests/*.test.mjs` PASS |
 
 ### Final System Verification (2026-07-23)
 

@@ -26,7 +26,7 @@ H:\Agent\Project\Prism\prism
 Published handoff checkpoint:
 
 ```text
-base implementation: 90dcd0b feat(agent): 统一知识工具返回契约
+base implementation: b231c05 feat(agent): 统一知识工具返回契约
 handoff commit: includes this document and the Agent Task 3 RED test
 expected checkout: clean
 ```
@@ -88,10 +88,10 @@ Ingestion Tasks 1–6 are complete, including parser registry, chunk presets, up
 Recent completion commits include:
 
 ```text
-59a532e fix(knowledge): 补齐分块租户作用域
-abffe10 feat(knowledge): 恢复持久任务摄取边界
-1ecf104 feat(knowledge): 增加原子索引 generation 发布
-5d8ea6c feat(knowledge): 增加可恢复的跨存储清理
+7b7020b fix(knowledge): 补齐分块租户作用域
+442c8aa feat(knowledge): 恢复持久任务摄取边界
+08dd32e feat(knowledge): 增加原子索引 generation 发布
+bd2a697 feat(knowledge): 增加可恢复的跨存储清理
 ```
 
 Use `git log --oneline --reverse b66f913^..HEAD` for the exact authoritative history.
@@ -101,15 +101,15 @@ Use `git log --oneline --reverse b66f913^..HEAD` for the exact authoritative his
 Retrieval Tasks 1–8 are complete:
 
 ```text
-3550ab1 feat(retrieval): 定义检索通道健康契约
-884d905 fix(retrieval): 强制三路知识库作用域
-421af4e refactor(retrieval): 统一单次三路 RRF 融合
-330ecb0 fix(retrieval): 使用正文执行重排
-7c49206 fix(retrieval): 让深度检索参数与改写真正生效
-1071f95 feat(retrieval): 增加证据契约与检索 API
-13bc964 feat(knowledge): 增加可复现的 RAG 评估
-18b834f feat(knowledge): 增加导图示例问题与安全导出
-dab14d3 docs(knowledge): 记录检索阶段验收结果
+bd2d589 feat(retrieval): 定义检索通道健康契约
+c0620c6 fix(retrieval): 强制三路知识库作用域
+96b82c8 refactor(retrieval): 统一单次三路 RRF 融合
+2343e94 fix(retrieval): 使用正文执行重排
+4179dea fix(retrieval): 让深度检索参数与改写真正生效
+3e14f49 feat(retrieval): 增加证据契约与检索 API
+e030ac4 feat(knowledge): 增加可复现的 RAG 评估
+996ed2b feat(knowledge): 增加导图示例问题与安全导出
+aaa3ec4 docs(knowledge): 记录检索阶段验收结果
 ```
 
 Verified evidence:
@@ -132,7 +132,7 @@ Concurrency invariants already fixed and must remain:
 Commit:
 
 ```text
-8bc2439 feat(agent): 增加签名知识库运行范围
+1117350 feat(agent): 增加签名知识库运行范围
 ```
 
 Implemented canonical JSON + HMAC-SHA256 Backend signing and Engine verification, strict URL-safe Base64 decoding, constant-time signature comparison, frozen/forbid-extra schemas, shared `KNOWLEDGE_SCOPE_SECRET`, malformed/tamper tests, and expiry-at-deadline behavior.
@@ -144,7 +144,7 @@ Evidence: 9 focused tests passed; specification and quality reviews APPROVED.
 Commit:
 
 ```text
-90dcd0b feat(agent): 统一知识工具返回契约
+b231c05 feat(agent): 统一知识工具返回契约
 ```
 
 Implemented frozen generic `ToolEnvelope[T]`, `ToolWarning`, and `ToolProblem` with strict status-shape invariants and constructors for ok/no-hits/degraded/error.
