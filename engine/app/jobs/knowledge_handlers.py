@@ -11,6 +11,8 @@ from backend.app.models.knowledge_types import StageStatus, uuid4_str
 from backend.app.config import settings
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.storage.files import LocalFileStorage
+from engine.app.indexing.publisher import GenerationPublisher, mark_index_complete
+from engine.app.indexing.profiles import DEFAULT_PROFILE
 from engine.app.ingestion.parsers import build_default_registry
 from engine.app.ingestion.presets import chunk_with_preset
 
@@ -223,6 +225,103 @@ def handle_parse(
             db_session.rollback()
         try:
             job_svc.fail(job_id, worker_id, "PARSE_ERROR", str(exc), True)
+        except Exception:
+            pass
+        return {"status": "failed", "error": str(exc)}
+
+
+def _build_generation_publisher(db_session):
+    from elasticsearch import Elasticsearch
+
+    from engine.app.indexing.es_index import V2_INDEX_NAME, ensure_v2_index
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex, _connect, ensure_collection
+
+    _connect(settings.MILVUS_HOST, settings.MILVUS_PORT)
+    collection = ensure_collection(
+        DEFAULT_PROFILE,
+        host=settings.MILVUS_HOST,
+        port=settings.MILVUS_PORT,
+    )
+    es_client = Elasticsearch([settings.ES_HOST], request_timeout=30)
+    es_index = ensure_v2_index(es_client, V2_INDEX_NAME)
+    return GenerationPublisher(
+        db_session,
+        MilvusGenerationIndex(collection),
+        es_index,
+        DEFAULT_PROFILE,
+    )
+
+
+def handle_index(
+    job_id: str,
+    worker_id: str,
+    db_session,
+    job_svc: KnowledgeJobService,
+    *,
+    publisher_factory=_build_generation_publisher,
+) -> dict:
+    lease = timedelta(seconds=300)
+    job = job_svc.claim(job_id, worker_id, lease)
+    if job is None:
+        return {"status": "skipped"}
+
+    try:
+        job_svc.start(job_id, worker_id)
+    except Exception:
+        return {"status": "skipped"}
+
+    try:
+        file_row = (
+            db_session.query(KnowledgeFile)
+            .filter_by(file_uid=job.file_uid, deleted_at=None)
+            .one_or_none()
+        )
+        if file_row is None:
+            job_svc.fail(job_id, worker_id, "FILE_NOT_FOUND", "File not found", False)
+            return {"status": "failed", "error": "FILE_NOT_FOUND"}
+        if file_row.parse_status != StageStatus.SUCCEEDED.value or not file_row.parsed_content_version:
+            raise RuntimeError("file has not been parsed successfully")
+
+        generation = str(file_row.parsed_content_version)
+        file_row.index_status = StageStatus.RUNNING.value
+        db_session.commit()
+
+        topic = file_row.topic
+        expected_old = topic.active_index_generation if topic is not None else None
+        result = publisher_factory(db_session).build(
+            file_row.kb_uid,
+            generation,
+            expected_old=expected_old,
+        )
+        if result.status != "succeeded":
+            raise RuntimeError(result.error or "index build failed")
+
+        mark_index_complete(db_session, file_row.file_uid, generation)
+        job_svc.succeed(
+            job_id,
+            worker_id,
+            {"generation": generation, "row_count": result.row_count},
+        )
+        return {
+            "status": "completed",
+            "generation": generation,
+            "row_count": result.row_count,
+        }
+    except Exception as exc:
+        try:
+            db_session.rollback()
+            file_row = (
+                db_session.query(KnowledgeFile)
+                .filter_by(file_uid=job.file_uid, deleted_at=None)
+                .one_or_none()
+            )
+            if file_row:
+                file_row.index_status = StageStatus.FAILED.value
+                db_session.commit()
+        except Exception:
+            db_session.rollback()
+        try:
+            job_svc.fail(job_id, worker_id, "INDEX_ERROR", str(exc), True)
         except Exception:
             pass
         return {"status": "failed", "error": str(exc)}

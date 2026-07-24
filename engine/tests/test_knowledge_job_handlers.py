@@ -122,6 +122,109 @@ def test_worker_dispatches_typed_parse_job_to_parse_handler(handler_db, monkeypa
     assert called == [(job.id, "worker-1", handler_db)]
 
 
+def test_worker_dispatches_typed_index_job_to_index_handler(handler_db, monkeypatch):
+    from engine.app.jobs import worker
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Index Dispatch KB")
+    handler_db.add(topic)
+    handler_db.commit()
+    job = KnowledgeJobService(handler_db).create(
+        JobCommand("index", "t1", topic.kb_uid, "file-1", {}),
+        "dispatch-index-1",
+    )
+    called = []
+
+    def fake_handle(job_id, worker_id, db_session, job_svc):
+        called.append((job_id, worker_id, db_session))
+        return {"status": "completed"}
+
+    monkeypatch.setattr(worker, "handle_index", fake_handle, raising=False)
+
+    result = worker.dispatch_typed_job(handler_db, job.id, "worker-1")
+
+    assert result == {"status": "completed"}
+    assert called == [(job.id, "worker-1", handler_db)]
+
+
+def test_handle_index_publishes_generation_and_marks_file(handler_db, monkeypatch):
+    from backend.app.models.knowledge_types import StageStatus
+    from engine.app.jobs.knowledge_handlers import handle_index
+
+    topic = KnowledgeTopic(
+        tenant_id="t1",
+        owner_user_id="u1",
+        name="Index KB",
+        active_index_generation=None,
+    )
+    handler_db.add(topic)
+    handler_db.flush()
+    item = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="Doc", content="body")
+    handler_db.add(item)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-index",
+        original_filename="doc.md",
+        item_id=item.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        parsed_content_version=3,
+    )
+    handler_db.add(file_row)
+    handler_db.add(
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_row.file_uid,
+            item_id=item.id,
+            generation="3",
+            chunk_uid="parent-index",
+            chunk_text="parent",
+            chunk_type="parent",
+        )
+    )
+    handler_db.add(
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_row.file_uid,
+            item_id=item.id,
+            generation="3",
+            chunk_uid="child-index",
+            chunk_text="child",
+            chunk_type="child",
+        )
+    )
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
+        "handle-index-1",
+    )
+
+    class FakePublisher:
+        calls = []
+
+        def build(self, kb_uid, generation, *, expected_old):
+            self.calls.append((kb_uid, generation, expected_old))
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 1, "error": None})()
+
+    fake = FakePublisher()
+    result = handle_index(job.id, "w1", handler_db, jobs, publisher_factory=lambda db: fake)
+
+    handler_db.refresh(file_row)
+    handler_db.refresh(topic)
+    assert result == {"status": "completed", "generation": "3", "row_count": 1}
+    assert fake.calls == [(topic.kb_uid, "3", None)]
+    assert file_row.index_status == StageStatus.SUCCEEDED.value
+    assert file_row.active_index_generation == "3"
+    assert topic.active_index_generation == "3"
+    assert handler_db.get(type(job), job.id).status == "succeeded"
+
+
 def test_parse_auto_index_creates_and_publishes_index_job(handler_db, tmp_path, monkeypatch):
     from engine.app.jobs import knowledge_handlers
     from engine.app.jobs.knowledge_handlers import handle_parse
