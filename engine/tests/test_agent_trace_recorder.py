@@ -299,3 +299,50 @@ def test_agent_trace_module_import_does_not_create_default_engine_when_database_
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_record_evidence_snapshot_persists_short_ids_and_invalid_citations(session_factory):
+    from engine.app.agent.citations import CitationRegistry
+
+    recorder = AgentTraceRecorder(
+        session_id="session-2",
+        user_message_id="message-2",
+        user_query="cite please",
+        model="test-model",
+        session_factory=session_factory,
+    )
+    trace_id = recorder.start()
+
+    registry = CitationRegistry()
+    registry.register(
+        {
+            "kb_uid": "kb-a",
+            "file_uid": "file-a",
+            "chunk_uid": "chunk-b",
+            "index_generation": "gen-1",
+            "source_kind": "document_chunk",
+            "excerpt": "grounded",
+        }
+    )
+    snapshot = registry.snapshot()
+
+    step_id = recorder.record_evidence_snapshot(
+        evidence_items=snapshot, invalid_citations=("K9",)
+    )
+    recorder.finish("success")
+
+    db = session_factory()
+    try:
+        step = db.query(AgentTraceStep).filter(AgentTraceStep.id == step_id).one()
+        assert step.step_type == "evidence_snapshot"
+        evidence = (
+            db.query(AgentTraceEvidence)
+            .filter(AgentTraceEvidence.trace_step_id == step_id)
+            .one()
+        )
+        # Short id assigned by the run-local registry is persisted verbatim.
+        assert evidence.evidence_id == "K1"
+        assert evidence.excerpt == "grounded"
+    finally:
+        db.close()
+

@@ -140,6 +140,31 @@ class AgentTraceRecorder:
             if db is not None:
                 self._close_safely("record_step", db)
 
+    def record_evidence_snapshot(
+        self,
+        *,
+        evidence_items: list[dict[str, Any]],
+        invalid_citations: tuple[str, ...] | list[str] | None = None,
+    ) -> str | None:
+        """Persist the run-local Evidence snapshot before answer completion.
+
+        Stores the canonical Evidence DTO together with its assigned short id
+        (``K1``, ...) as a dedicated ``evidence_snapshot`` step. The snapshot is
+        taken from the in-memory :class:`CitationRegistry` at answer time and is
+        never re-resolved against a later active generation. Unknown citations
+        are recorded as trace warnings, not as source cards.
+        """
+        if not self._enabled or not self._trace_id:
+            return None
+        return self.record_step(
+            step_type="evidence_snapshot",
+            output_json={
+                "evidence_count": len(evidence_items),
+                "invalid_citations": list(invalid_citations or []),
+            },
+            evidence_items=evidence_items,
+        )
+
     def finish(self, status: str) -> None:
         if not self._enabled or not self._trace_id:
             return
