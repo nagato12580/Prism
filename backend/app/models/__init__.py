@@ -27,6 +27,13 @@ from .knowledge_governance import (
 from .entity import KnowledgeEntity, EntityAlias, EntityMention, EntityRelation
 from .graph_community import GraphCommunity
 from .graph_insight_summary import GraphInsightSummary
+from .graph_outbox import (
+    GraphExtractionRevision,
+    GraphOutboxEvent,
+    GraphProjectionCursor,
+    GraphProjectionReceipt,
+    KnowledgeGraphGeneration,
+)
 from .knowledge_evaluation import EvaluationDataset, EvaluationDatasetItem, EvaluationRun, EvaluationRunItem
 
 __all__ = [
@@ -76,6 +83,11 @@ __all__ = [
     "EntityRelation",
     "GraphCommunity",
     "GraphInsightSummary",
+    "KnowledgeGraphGeneration",
+    "GraphExtractionRevision",
+    "GraphOutboxEvent",
+    "GraphProjectionReceipt",
+    "GraphProjectionCursor",
     "EvaluationDataset",
     "EvaluationDatasetItem",
     "EvaluationRun",

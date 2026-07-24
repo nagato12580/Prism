@@ -2,7 +2,7 @@
 import hashlib
 import uuid
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, event
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.dialects.mysql import CHAR, JSON
 from sqlalchemy.orm import relationship
 
@@ -17,12 +17,28 @@ def _uuid():
 class KnowledgeEntity(Base):
     __tablename__ = "knowledge_entity"
     __table_args__ = (
-        UniqueConstraint("user_id", "entity_type", "normalized_key", name="uq_entity_user_type_key"),
+        # Scoped identity replaces the legacy user-only unique key. Scope columns
+        # are NOT NULL with default "" so legacy rows (no scope set) still dedup
+        # on the empty-scope bucket instead of producing duplicates.
+        UniqueConstraint(
+            "tenant_id",
+            "kb_uid",
+            "graph_generation",
+            "entity_type",
+            "normalized_key",
+            name="uq_entity_scope_type_key",
+        ),
         Index("ix_entity_lookup", "user_id", "normalized_key"),
+        Index("ix_entity_scope", "tenant_id", "kb_uid", "graph_generation", "normalized_key"),
     )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     user_id = Column(CHAR(36), default="default-user", nullable=False, index=True)
+    # Scoped graph identity (Plans 1-4). Populated by the scoped graph fact
+    # writer; legacy extraction paths leave the empty-scope bucket until cutover.
+    tenant_id = Column(String(64), nullable=False, default="", index=True)
+    kb_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    graph_generation = Column(CHAR(36), nullable=False, default="", index=True)
     entity_type = Column(String(64), nullable=False, index=True)
     canonical_name = Column(String(512), nullable=False)
     normalized_key = Column(String(512), nullable=False, index=True)
@@ -57,10 +73,15 @@ class EntityAlias(Base):
     __table_args__ = (
         UniqueConstraint("entity_id", "normalized_key", name="uq_entity_alias_key"),
         Index("ix_entity_alias_lookup", "normalized_key"),
+        Index("ix_entity_alias_scope", "tenant_id", "kb_uid", "graph_generation", "normalized_key"),
     )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     entity_id = Column(CHAR(36), ForeignKey("knowledge_entity.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Scoped identity (empty-scope bucket for legacy rows).
+    tenant_id = Column(String(64), nullable=False, default="", index=True)
+    kb_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    graph_generation = Column(CHAR(36), nullable=False, default="", index=True)
     alias = Column(String(512), nullable=False)
     normalized_key = Column(String(512), nullable=False, index=True)
     confidence = Column(Float, default=0.5)
@@ -86,6 +107,16 @@ class EntityMention(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     entity_id = Column(CHAR(36), ForeignKey("knowledge_entity.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Scoped identity + per-file/per-chunk provenance + revision/active lifecycle.
+    tenant_id = Column(String(64), nullable=False, default="", index=True)
+    kb_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    graph_generation = Column(CHAR(36), nullable=False, default="", index=True)
+    file_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    chunk_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    revision_id = Column(CHAR(36), nullable=False, default="", index=True)
+    active = Column(String(8), nullable=False, default="true", index=True)
+    char_start = Column(Integer, nullable=True)
+    char_end = Column(Integer, nullable=True)
     source_kind = Column(String(64), nullable=False, index=True)
     source_id = Column(CHAR(36), nullable=False, index=True)
     item_id = Column(CHAR(36), default="", index=True)
@@ -114,6 +145,13 @@ class EntityRelation(Base):
         nullable=False,
         index=True,
     )
+    # Scoped identity + per-file provenance + revision/active lifecycle.
+    tenant_id = Column(String(64), nullable=False, default="", index=True)
+    kb_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    graph_generation = Column(CHAR(36), nullable=False, default="", index=True)
+    file_uid = Column(CHAR(36), nullable=False, default="", index=True)
+    revision_id = Column(CHAR(36), nullable=False, default="", index=True)
+    active = Column(String(8), nullable=False, default="true", index=True)
     predicate = Column(String(128), nullable=False, index=True)
     object_entity_id = Column(CHAR(36), ForeignKey("knowledge_entity.id", ondelete="CASCADE"), nullable=True, index=True)
     object_literal = Column(Text)

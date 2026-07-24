@@ -67,6 +67,15 @@ TABLE_NAMES = [
     "knowledge_file",
     "knowledge_item",
     "knowledge_topic",
+    "graph_projection_receipt",
+    "graph_projection_cursor",
+    "graph_outbox_event",
+    "graph_extraction_revision",
+    "knowledge_graph_generation",
+    "entity_relation",
+    "entity_mention",
+    "entity_alias",
+    "knowledge_entity",
 ]
 
 
