@@ -7,7 +7,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from pymilvus import Collection, connections, utility
 
+from engine.app.config import settings
 from engine.app.indexing.profiles import EmbeddingProfile, DEFAULT_PROFILE
+
+
+def _operation_timeout() -> float:
+    return float(getattr(settings, "MILVUS_OPERATION_TIMEOUT_SECONDS", 15) or 15)
+
+
+def _raise_readable_milvus_error(operation: str, exc: Exception) -> None:
+    text = str(exc)
+    if "DEADLINE_EXCEEDED" in text or "Deadline Exceeded" in text:
+        raise RuntimeError(
+            f"Milvus {operation} timed out after {_operation_timeout():g}s. "
+            "Milvus accepted the request but did not complete before the client deadline; "
+            "check Milvus service health/resources or increase MILVUS_OPERATION_TIMEOUT_SECONDS."
+        ) from exc
+    raise exc
 
 
 def _literal(value: str) -> str:
@@ -37,7 +53,7 @@ def _retrieval_scope_expr(scope) -> str:
     return " and ".join(parts)
 
 
-def search_index(*, query_embedding, scope, top_k, timeout=15):
+def search_index(*, query_embedding, scope, top_k, timeout=30):
     """Search the generation collection with server-side tenant/KB filters."""
     collection_name = os.getenv("PRISM_RETRIEVAL_MILVUS_COLLECTION")
     if collection_name:
@@ -78,6 +94,7 @@ class MilvusGenerationIndex:
     def write(self, rows):
         if not rows:
             return 0
+        timeout = _operation_timeout()
         fields = (
             "tenant_id", "kb_uid", "file_uid", "item_id", "chunk_uid",
             "source_type", "generation", "embedding_model_version", "content",
@@ -92,13 +109,19 @@ class MilvusGenerationIndex:
             }
             for row in rows
         ]
-        self.collection.insert(payload, timeout=15)
-        self.collection.flush(timeout=15)
+        try:
+            self.collection.insert(payload, timeout=timeout)
+        except Exception as exc:
+            _raise_readable_milvus_error("insert", exc)
+        try:
+            self.collection.flush(timeout=timeout)
+        except Exception as exc:
+            _raise_readable_milvus_error("flush", exc)
         return len(rows)
 
     def count(self, scope):
         result = self.collection.query(
-            expr=_scope_expr(scope), output_fields=["count(*)"], timeout=15
+            expr=_scope_expr(scope), output_fields=["count(*)"], timeout=_operation_timeout()
         )
         return int(result[0].get("count(*)", 0)) if result else 0
 
@@ -107,23 +130,31 @@ class MilvusGenerationIndex:
             expr=f'{_scope_expr(scope)} and chunk_uid == "{_literal(chunk_uid)}"',
             output_fields=["chunk_uid"],
             limit=1,
-            timeout=15,
+            timeout=_operation_timeout(),
         )
         return bool(result)
 
     def delete_generation(self, scope):
-        result = self.collection.delete(_scope_expr(scope), timeout=15)
-        self.collection.flush(timeout=15)
+        timeout = _operation_timeout()
+        result = self.collection.delete(_scope_expr(scope), timeout=timeout)
+        try:
+            self.collection.flush(timeout=timeout)
+        except Exception as exc:
+            _raise_readable_milvus_error("flush", exc)
         return result
 
     def delete_file(self, tenant_id, kb_uid, file_uid):
+        timeout = _operation_timeout()
         expr = (
             f'tenant_id == "{_literal(tenant_id)}" and '
             f'kb_uid == "{_literal(kb_uid)}" and '
             f'file_uid == "{_literal(file_uid)}"'
         )
-        result = self.collection.delete(expr, timeout=15)
-        self.collection.flush(timeout=15)
+        result = self.collection.delete(expr, timeout=timeout)
+        try:
+            self.collection.flush(timeout=timeout)
+        except Exception as exc:
+            _raise_readable_milvus_error("flush", exc)
         return result
 
 

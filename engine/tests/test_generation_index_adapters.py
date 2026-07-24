@@ -1,3 +1,5 @@
+import pytest
+
 from engine.app.indexing.publisher import GenerationScope
 
 
@@ -6,12 +8,13 @@ class FakeMilvusCollection:
         self.inserted = []
         self.queries = []
         self.deleted = []
+        self.flush_calls = []
 
     def insert(self, rows, **kwargs):
         self.inserted.extend(rows)
 
     def flush(self, **kwargs):
-        pass
+        self.flush_calls.append(kwargs)
 
     def query(self, **kwargs):
         self.queries.append(kwargs)
@@ -32,6 +35,48 @@ def test_milvus_write_omits_indexed_at_for_legacy_schema():
     row["embedding"] = [0.1]
     MilvusGenerationIndex(collection).write([row])
     assert "indexed_at" not in collection.inserted[0]
+
+
+def test_milvus_write_uses_configured_operation_timeout(monkeypatch):
+    from engine.app.indexing import milvus_index
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex
+
+    monkeypatch.setattr(milvus_index.settings, "MILVUS_OPERATION_TIMEOUT_SECONDS", 90)
+    collection = FakeMilvusCollection()
+    row = {
+        "tenant_id": "tenant-a", "kb_uid": "kb-a", "file_uid": "file-a",
+        "item_id": "item-a", "chunk_uid": "chunk-a", "source_type": "document",
+        "generation": "gen-a", "embedding_model_version": "profile-a",
+        "content": "text", "indexed_at": "2026-07-23T00:00:00",
+        "embedding": [0.1],
+    }
+
+    MilvusGenerationIndex(collection).write([row])
+
+    assert collection.flush_calls == [{"timeout": 90}]
+
+
+def test_milvus_write_reports_deadline_exceeded_as_readable_error():
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex
+
+    class DeadlineExceededCollection(FakeMilvusCollection):
+        def flush(self, **kwargs):
+            raise RuntimeError(
+                '<_MultiThreadedRendezvous of RPC that terminated with:\n'
+                '\tstatus = StatusCode.DEADLINE_EXCEEDED\n'
+                '\tdetails = "Deadline Exceeded"\n>'
+            )
+
+    row = {
+        "tenant_id": "tenant-a", "kb_uid": "kb-a", "file_uid": "file-a",
+        "item_id": "item-a", "chunk_uid": "chunk-a", "source_type": "document",
+        "generation": "gen-a", "embedding_model_version": "profile-a",
+        "content": "text", "indexed_at": "2026-07-23T00:00:00",
+        "embedding": [0.1],
+    }
+
+    with pytest.raises(RuntimeError, match="Milvus flush timed out"):
+        MilvusGenerationIndex(DeadlineExceededCollection()).write([row])
 
 
 def test_milvus_generation_index_uses_native_full_scope_expression():
