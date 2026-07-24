@@ -41,6 +41,11 @@ def register_tool(spec: ToolSpec) -> None:
     BUILTIN_REGISTRY[spec.key] = spec
 
 
+def registered_tool_names() -> list[str]:
+    """Names of all registered tools, in registration order."""
+    return [spec.name for spec in BUILTIN_REGISTRY.values()]
+
+
 def build_enabled_tools(
     ctx: ToolContext, overrides: dict[str, bool] | None = None
 ) -> list[StructuredTool]:

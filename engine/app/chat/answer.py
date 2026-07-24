@@ -5,11 +5,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from ..agent.events import error_event, trace_event
+from ..agent.knowledge_skill import compose_system_prompt_with_knowledge_skill
 from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult, RagRunConfig
 from ..agent.prompts import AGENT_SYSTEM_PROMPT
 from ..agent.runner import LangChainAgentRunner, create_chat_model
 from ..agent.trace import AgentTraceRecorder
-from ..agent.tools import ToolContext, build_enabled_tools
+from ..agent.tools import BUILTIN_REGISTRY, ToolContext, build_enabled_tools
+from ..agent.tools.knowledge_base import build_tools as build_knowledge_tools
 from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
@@ -267,14 +269,54 @@ def build_agent_runner(
     deep_search_top_k: int = 8,
     graph_hops: int = 1,
     rag_max_iterations: int = 3,
+    knowledge_scope: Any | None = None,
+    retrieval_service: Any | None = None,
+    db_session: Any | None = None,
+    trace_id: str | None = None,
 ) -> LangChainAgentRunner:
     """构造 Agent Runner，注入带过滤的搜索闭包。
 
     搜索闭包会捕获 topic_id / source_types / allowed_item_ids，
     RAG runner 调用 search(query, top_k) 时自动限定检索范围。
+
+    当传入已验证的 ``knowledge_scope``（非空 allowed_kb_uids）时，切换到授权
+    六工具路径：绑定 list_kbs/query_kb/.../get_mindmap + 通用 clarify/datetime，
+    并将 Knowledge Skill 追加到系统提示词。retrieval_service / db_session 由
+    Task 6 的代理在验签后注入；在此之前默认走旧链路，行为不变。
     """
     scope = _resolve_search_scope(topic_id, source_types)
     topic_ids = [topic_id] if topic_id else None
+
+    model = create_chat_model(settings)
+
+    allowed_kb_uids = getattr(knowledge_scope, "allowed_kb_uids", None)
+    if knowledge_scope is not None and allowed_kb_uids:
+        run_scope = scope  # SearchScope for the legacy rag_runner if ever needed
+        _ = run_scope
+        ctx = ToolContext(
+            db=db_session,
+            trace_id=trace_id or getattr(knowledge_scope, "run_id", None),
+            run_id=getattr(knowledge_scope, "run_id", None),
+            knowledge_scope=knowledge_scope,
+            retrieval_service=retrieval_service,
+            citations=[],
+            stats_holder={},
+            clarify_holder={},
+        )
+        knowledge_tools = list(build_knowledge_tools(ctx).values())
+        general_keys = ("clarify_user", "datetime")
+        general_tools = [
+            BUILTIN_REGISTRY[key].builder(ctx)
+            for key in general_keys
+            if key in BUILTIN_REGISTRY
+        ]
+        tools = knowledge_tools + general_tools
+        system_prompt = compose_system_prompt_with_knowledge_skill(
+            AGENT_SYSTEM_PROMPT, has_knowledge_scope=True
+        )
+        return LangChainAgentRunner(
+            model=model, tools=tools, system_prompt=system_prompt, clarify_depth=clarify_depth
+        )
 
     mode = "deep" if deep_search_enabled else "fast"
     _scoped_search = make_unified_search(
@@ -303,7 +345,6 @@ def build_agent_runner(
     )
     tool_overrides = {"deep_knowledge_search": True} if deep_search_enabled else None
     tools = build_enabled_tools(ctx, overrides=tool_overrides)
-    model = create_chat_model(settings)
     system_prompt = AGENT_SYSTEM_PROMPT
     if not deep_search_enabled:
         system_prompt = _strip_tool_guidance(system_prompt, {"deep_knowledge_search"})

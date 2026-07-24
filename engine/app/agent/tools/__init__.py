@@ -3,6 +3,7 @@ from engine.app.agent.tools.base import (
     ToolContext,
     ToolSpec,
     build_enabled_tools,
+    registered_tool_names,
     register_tool,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "ToolContext",
     "ToolSpec",
     "build_enabled_tools",
+    "registered_tool_names",
     "register_tool",
 ]

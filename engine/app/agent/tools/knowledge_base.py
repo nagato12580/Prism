@@ -711,17 +711,7 @@ def _build_get_mindmap(ctx: ToolContext) -> StructuredTool:
 
 def build_tools(ctx: ToolContext) -> dict[str, StructuredTool]:
     """Build the six authorized knowledge tools bound to ``ctx``."""
-    return {
-        spec.name: spec.builder(ctx)
-        for spec in (
-            LIST_KBS_SPEC,
-            QUERY_KB_SPEC,
-            SEARCH_FILE_SPEC,
-            FIND_KB_DOCUMENT_SPEC,
-            OPEN_KB_DOCUMENT_SPEC,
-            GET_MINDMAP_SPEC,
-        )
-    }
+    return {spec.name: spec.builder(ctx) for spec in KNOWLEDGE_TOOL_SPECS}
 
 
 # --------------------------------------------------------------------------- #
@@ -775,15 +765,22 @@ GET_MINDMAP_SPEC = ToolSpec(
 
 
 def _register_knowledge_tools() -> None:
-    for spec in (
-        LIST_KBS_SPEC,
-        QUERY_KB_SPEC,
-        SEARCH_FILE_SPEC,
-        FIND_KB_DOCUMENT_SPEC,
-        OPEN_KB_DOCUMENT_SPEC,
-        GET_MINDMAP_SPEC,
-    ):
+    for spec in KNOWLEDGE_TOOL_SPECS:
         register_tool(spec)
+
+
+KNOWLEDGE_TOOL_SPECS = (
+    LIST_KBS_SPEC,
+    QUERY_KB_SPEC,
+    SEARCH_FILE_SPEC,
+    FIND_KB_DOCUMENT_SPEC,
+    OPEN_KB_DOCUMENT_SPEC,
+    GET_MINDMAP_SPEC,
+)
+
+# Stable, ordered names of the six authorized knowledge tools. The Knowledge
+# Skill and ``registered_tool_names()`` stay in sync with this constant.
+KNOWLEDGE_TOOL_NAMES = tuple(spec.name for spec in KNOWLEDGE_TOOL_SPECS)
 
 
 _register_knowledge_tools()
