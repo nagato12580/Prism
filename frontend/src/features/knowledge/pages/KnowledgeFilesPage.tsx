@@ -337,6 +337,14 @@ function FileRow({
       <td className="px-3 py-2.5"><StageBadge status={file.parse_status} /></td>
       <td className="px-3 py-2.5">
         <StageBadge status={file.index_status} />
+        {file.index_error?.message ? (
+          <div
+            className="mt-1 max-w-[240px] truncate text-[11px] leading-4 text-red-600"
+            title={file.index_error.message}
+          >
+            {file.index_error.message}
+          </div>
+        ) : null}
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1">

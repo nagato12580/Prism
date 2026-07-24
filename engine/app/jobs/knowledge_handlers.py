@@ -1,5 +1,6 @@
 # engine/app/jobs/knowledge_handlers.py
 """Parse, chunk, and index handlers that execute as durable Engine jobs."""
+import logging
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -17,6 +18,8 @@ from engine.app.indexing.publisher import GenerationPublisher, mark_index_comple
 from engine.app.indexing.profiles import DEFAULT_PROFILE
 from engine.app.ingestion.parsers import build_default_registry
 from engine.app.ingestion.presets import chunk_with_preset
+
+logger = logging.getLogger(__name__)
 
 
 def handle_delete(job_id, worker_id, db_session, job_svc, cleanup):
@@ -83,6 +86,7 @@ def handle_parse(
             return {"status": "failed", "error": "FILE_NOT_FOUND"}
 
         file_row.parse_status = StageStatus.RUNNING.value
+        file_row.parse_error = None
         db_session.commit()
 
         db_session.refresh(job)
@@ -213,6 +217,13 @@ def handle_parse(
         return {"status": "completed", "item_id": str(item.id)}
 
     except Exception as exc:
+        logger.exception(
+            "knowledge parse job failed job_id=%s kb_uid=%s file_uid=%s error=%s",
+            job_id,
+            getattr(job, "kb_uid", None),
+            getattr(job, "file_uid", None),
+            exc,
+        )
         try:
             db_session.rollback()
             file_row = (
@@ -222,6 +233,10 @@ def handle_parse(
             )
             if file_row:
                 file_row.parse_status = StageStatus.FAILED.value
+                file_row.parse_error = {
+                    "code": "PARSE_ERROR",
+                    "message": str(exc),
+                }
                 db_session.commit()
         except Exception:
             db_session.rollback()
@@ -286,6 +301,7 @@ def handle_index(
 
         generation = str(file_row.parsed_content_version)
         file_row.index_status = StageStatus.RUNNING.value
+        file_row.index_error = None
         db_session.commit()
 
         topic = file_row.topic
@@ -310,6 +326,13 @@ def handle_index(
             "row_count": result.row_count,
         }
     except Exception as exc:
+        logger.exception(
+            "knowledge index job failed job_id=%s kb_uid=%s file_uid=%s error=%s",
+            job_id,
+            getattr(job, "kb_uid", None),
+            getattr(job, "file_uid", None),
+            exc,
+        )
         try:
             db_session.rollback()
             file_row = (
@@ -319,6 +342,10 @@ def handle_index(
             )
             if file_row:
                 file_row.index_status = StageStatus.FAILED.value
+                file_row.index_error = {
+                    "code": "INDEX_ERROR",
+                    "message": str(exc),
+                }
                 db_session.commit()
         except Exception:
             db_session.rollback()

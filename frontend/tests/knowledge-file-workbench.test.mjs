@@ -95,3 +95,14 @@ test('KnowledgeFilesPage surfaces terminal job failure reasons', () => {
   assert.match(page, /snap\.error_message/)
   assert.match(page, /setError\(new Error/)
 })
+
+test('KnowledgeFilesPage renders persisted file stage failure details', () => {
+  const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+  const api = read('src/features/knowledge/api/files.ts')
+
+  assert.match(api, /parse_error:\s*StageError\s*\|\s*null/)
+  assert.match(api, /index_error:\s*StageError\s*\|\s*null/)
+  assert.match(api, /last_job_id:\s*string\s*\|\s*null/)
+  assert.match(page, /file\.index_error\?\.message/)
+  assert.match(page, /title=\{file\.index_error\.message\}/)
+})

@@ -6,6 +6,11 @@
 import { requestJSON, requestUpload, requestBlob } from './client'
 import type { KnowledgeJobSnapshot } from './jobs'
 
+export interface StageError {
+  code?: string
+  message?: string
+}
+
 export interface KnowledgeFile {
   file_uid: string
   kb_uid: string
@@ -16,6 +21,9 @@ export interface KnowledgeFile {
   parse_status: string
   index_status: string
   graph_status: string
+  parse_error: StageError | null
+  index_error: StageError | null
+  last_job_id: string | null
   content_sha256: string
   size_bytes: number
   preview_url: string

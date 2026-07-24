@@ -98,6 +98,50 @@ def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch)
     assert handler_db.query(KnowledgeItem).count() == 1
 
 
+def test_handle_parse_records_file_error_when_parse_fails(handler_db, tmp_path, monkeypatch, caplog):
+    from backend.app.models.knowledge_types import StageStatus
+    from engine.app.jobs import knowledge_handlers
+    from engine.app.jobs.knowledge_handlers import handle_parse
+
+    root = tmp_path / "storage"
+    root.mkdir()
+    monkeypatch.setattr(knowledge_handlers.settings, "KNOWLEDGE_STORAGE_ROOT", str(root))
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Parse failure KB")
+    handler_db.add(topic)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-parse-fails",
+        original_filename="missing.md",
+        storage_uri="local://t1/kb-a/file-parse-fails/missing.md",
+        content_sha256="abc",
+        size_bytes=20,
+        parse_status=StageStatus.PENDING.value,
+    )
+    handler_db.add(file_row)
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("parse", "t1", topic.kb_uid, file_row.file_uid, {"auto_index": False}),
+        "handle-parse-fails",
+    )
+
+    result = handle_parse(job.id, "w1", handler_db, jobs)
+
+    handler_db.refresh(file_row)
+    assert result["status"] == "failed"
+    assert file_row.parse_status == StageStatus.FAILED.value
+    assert file_row.parse_error
+    assert file_row.parse_error["code"] == "PARSE_ERROR"
+    assert "missing.md" in file_row.parse_error["message"]
+    assert "knowledge parse job failed" in caplog.text
+    assert job.id in caplog.text
+    assert file_row.file_uid in caplog.text
+    assert topic.kb_uid in caplog.text
+
+
 def test_worker_dispatches_typed_parse_job_to_parse_handler(handler_db, monkeypatch):
     from engine.app.jobs import worker
 
@@ -223,6 +267,76 @@ def test_handle_index_publishes_generation_and_marks_file(handler_db, monkeypatc
     assert file_row.active_index_generation == "3"
     assert topic.active_index_generation == "3"
     assert handler_db.get(type(job), job.id).status == "succeeded"
+
+
+def test_handle_index_records_file_error_when_publish_fails(handler_db, caplog):
+    from backend.app.models.knowledge_types import StageStatus
+    from engine.app.jobs.knowledge_handlers import handle_index
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Index failure KB")
+    handler_db.add(topic)
+    handler_db.flush()
+    item = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="Doc", content="body")
+    handler_db.add(item)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-index-fails",
+        original_filename="doc.md",
+        item_id=item.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        parsed_content_version=3,
+    )
+    handler_db.add(file_row)
+    handler_db.add(
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_row.file_uid,
+            item_id=item.id,
+            generation="3",
+            chunk_uid="child-index-fails",
+            chunk_text="child",
+            chunk_type="child",
+        )
+    )
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
+        "handle-index-fails",
+    )
+
+    class FailingPublisher:
+        def build(self, kb_uid, generation, *, expected_old):
+            return type("Result", (), {
+                "status": "failed",
+                "row_count": 0,
+                "error": "Milvus flush deadline exceeded",
+            })()
+
+    result = handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: FailingPublisher(),
+    )
+
+    handler_db.refresh(file_row)
+    assert result["status"] == "failed"
+    assert file_row.index_status == StageStatus.FAILED.value
+    assert file_row.index_error == {
+        "code": "INDEX_ERROR",
+        "message": "Milvus flush deadline exceeded",
+    }
+    assert "knowledge index job failed" in caplog.text
+    assert job.id in caplog.text
+    assert file_row.file_uid in caplog.text
+    assert topic.kb_uid in caplog.text
+    assert "Milvus flush deadline exceeded" in caplog.text
 
 
 def test_parse_auto_index_creates_and_publishes_index_job(handler_db, tmp_path, monkeypatch):

@@ -159,6 +159,38 @@ def test_preview_prefers_parsed_text_for_binary_documents(client, db_session, fi
     assert "FlateDecode" not in preview.json()["content"]
 
 
+def test_file_projection_includes_stage_error_details(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Stage Error KB"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    upload = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("stage-error.md", b"# Error", "text/markdown")},
+    )
+    file_uid = upload.json()["file"]["file_uid"]
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
+    file_row.index_status = "failed"
+    file_row.index_error = {"code": "INDEX_ERROR", "message": "Milvus flush deadline exceeded"}
+    file_row.last_job_id = "job-failed"
+    db_session.commit()
+
+    response = client.get(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}",
+        headers=file_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["last_job_id"] == "job-failed"
+    assert response.json()["index_error"] == {
+        "code": "INDEX_ERROR",
+        "message": "Milvus flush deadline exceeded",
+    }
+
+
 @pytest.mark.parametrize("command,job_type", [("parse", "parse"), ("index", "index")])
 def test_file_command_returns_durable_job(client, file_headers, command, job_type):
     created = client.post(
