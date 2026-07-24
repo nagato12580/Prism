@@ -100,6 +100,9 @@ const watchJob = useCallback(
             if (isTerminalJobStatus(snap.status)) {
               clear()
               load()
+              if (snap.status === 'failed') {
+                setError(new Error(snap.error_message || snap.error_code || 'Knowledge job failed'))
+              }
               return
             }
             attempt += 1

@@ -90,7 +90,17 @@ def _require_file(db: Session, actor: ActorContext, kb_uid: str, file_uid: str, 
 
 
 def _job_snapshot(job) -> dict:
-    return {"id": job.id, "job_type": job.job_type, "status": job.status, "stage": job.stage}
+    error_message = job.error_message
+    if error_message and len(error_message) > 1000:
+        error_message = f"{error_message[:1000]}..."
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "stage": job.stage,
+        "error_code": job.error_code,
+        "error_message": error_message,
+    }
 
 
 def _publish_job(db: Session, job) -> None:
@@ -420,4 +430,5 @@ def get_job_status(
         "stage": job.stage,
         "attempt": job.attempt,
         "error_code": job.error_code,
+        "error_message": (job.error_message[:1000] + "...") if job.error_message and len(job.error_message) > 1000 else job.error_message,
     }

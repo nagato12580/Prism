@@ -85,3 +85,13 @@ test('KnowledgeFilesPage shows real stage status and avoids fabricated progress'
   assert.doesNotMatch(src, /job\.progress_current/)
   assert.doesNotMatch(src, /job\.progress_total/)
 })
+
+test('KnowledgeFilesPage surfaces terminal job failure reasons', () => {
+  const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+  const api = read('src/features/knowledge/api/jobs.ts')
+
+  assert.match(api, /error_message:\s*string\s*\|\s*null/)
+  assert.match(page, /snap\.status\s*===\s*'failed'/)
+  assert.match(page, /snap\.error_message/)
+  assert.match(page, /setError\(new Error/)
+})

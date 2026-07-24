@@ -4,7 +4,7 @@
 // KB-level job list or retry route. The only job access is a single pollable
 // snapshot:
 //   GET /knowledge-bases/{kb_uid}/files/jobs/{job_id}
-// returning { id, job_type, status, stage, attempt, error_code }.
+// returning { id, job_type, status, stage, attempt, error_code, error_message }.
 // (And the enrichment cancel route for mindmap/sample-question jobs only.)
 //
 // This module models exactly that real surface. No SSE, no retry endpoint.
@@ -18,6 +18,7 @@ export interface KnowledgeJobSnapshot {
   stage: string
   attempt: number
   error_code: string | null
+  error_message: string | null
 }
 
 export interface EnrichmentJobDto {

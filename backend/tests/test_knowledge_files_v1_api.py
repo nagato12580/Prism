@@ -409,6 +409,34 @@ def test_job_snapshot_is_scoped_to_requested_kb(client, file_headers):
     assert response.status_code == 404
 
 
+def test_job_snapshot_includes_failure_reason(client, db_session, file_headers):
+    from backend.app.models import KnowledgeJob
+
+    kb_uid = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Failure reason"}
+    ).json()["kb_uid"]
+    uploaded = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("failure.md", b"failure", "text/markdown")},
+    ).json()
+    job_id = uploaded["job"]["id"]
+    job = db_session.get(KnowledgeJob, job_id)
+    job.status = "failed"
+    job.error_code = "INDEX_ERROR"
+    job.error_message = "Milvus flush deadline exceeded"
+    db_session.commit()
+
+    response = client.get(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/jobs/{job_id}",
+        headers=file_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["error_code"] == "INDEX_ERROR"
+    assert response.json()["error_message"] == "Milvus flush deadline exceeded"
+
+
 def test_delete_tombstone_and_job_are_committed_atomically(client, db_session, monkeypatch):
     from backend.app.api import knowledge_files
     from backend.app.models import KnowledgeFile, KnowledgeJob
