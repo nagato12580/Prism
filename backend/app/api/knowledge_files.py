@@ -310,6 +310,15 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
         None,
     )
     if active is not None:
+        file_row.last_job_id = active.id
+        if job_type == "parse":
+            file_row.parse_status = "running"
+        elif job_type == "index":
+            file_row.index_status = "running"
+        db.commit()
+        if active.status == "queued":
+            _publish_job(db, active)
+            db.refresh(active)
         return _job_snapshot(active)
 
     idempotency_key = base_key

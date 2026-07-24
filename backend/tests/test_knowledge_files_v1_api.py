@@ -293,6 +293,49 @@ def test_index_command_records_new_job_on_file(client, db_session, file_headers)
     assert file_row.index_status == "running"
 
 
+def test_index_command_records_reused_active_job_on_file(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile, KnowledgeJob
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Active Last Job KB"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    upload = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("active-last-job.md", b"# Active", "text/markdown")},
+    )
+    file_uid = upload.json()["file"]["file_uid"]
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
+    file_row.parsed_content_version = 1
+    file_row.index_status = "failed"
+    active = KnowledgeJob(
+        job_type="index",
+        tenant_id=file_row.tenant_id,
+        kb_uid=kb_uid,
+        file_uid=file_uid,
+        idempotency_key=f"{kb_uid}:{file_uid}:index:v1:retry:2:old",
+        status="queued",
+        stage="enqueued",
+        error_code="INDEX_ERROR",
+        error_message="previous retry failed",
+    )
+    db_session.add(active)
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}/index",
+        headers=file_headers,
+    )
+
+    db_session.refresh(file_row)
+    assert response.status_code == 202
+    assert response.json()["id"] == active.id
+    assert response.json()["status"] == "queued"
+    assert file_row.last_job_id == active.id
+    assert file_row.index_status == "running"
+
+
 def test_list_files_supports_filters_and_limit(client, file_headers):
     created = client.post(
         "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Filter KB"}
