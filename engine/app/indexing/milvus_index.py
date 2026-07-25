@@ -16,14 +16,21 @@ def _operation_timeout() -> float:
 
 
 def _raise_readable_milvus_error(operation: str, exc: Exception) -> None:
+    message = _readable_milvus_error(operation, exc)
+    if message is not None:
+        raise RuntimeError(message) from exc
+    raise exc
+
+
+def _readable_milvus_error(operation: str, exc: Exception) -> str | None:
     text = str(exc)
     if "DEADLINE_EXCEEDED" in text or "Deadline Exceeded" in text:
-        raise RuntimeError(
+        return (
             f"Milvus {operation} timed out after {_operation_timeout():g}s. "
             "Milvus accepted the request but did not complete before the client deadline; "
             "check Milvus service health/resources or increase MILVUS_OPERATION_TIMEOUT_SECONDS."
-        ) from exc
-    raise exc
+        )
+    return None
 
 
 def _literal(value: str) -> str:
@@ -90,6 +97,7 @@ def search_index(*, query_embedding, scope, top_k, timeout=30):
 class MilvusGenerationIndex:
     def __init__(self, collection):
         self.collection = collection
+        self.last_flush_warning: str | None = None
 
     def write(self, rows):
         if not rows:
@@ -113,10 +121,14 @@ class MilvusGenerationIndex:
             self.collection.insert(payload, timeout=timeout)
         except Exception as exc:
             _raise_readable_milvus_error("insert", exc)
-        try:
-            self.collection.flush(timeout=timeout)
-        except Exception as exc:
-            _raise_readable_milvus_error("flush", exc)
+        if getattr(settings, "MILVUS_FLUSH_AFTER_WRITE", False):
+            try:
+                self.collection.flush(timeout=timeout)
+            except Exception as exc:
+                warning = _readable_milvus_error("flush", exc)
+                if warning is None:
+                    raise
+                self.last_flush_warning = warning
         return len(rows)
 
     def count(self, scope):

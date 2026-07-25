@@ -39,6 +39,7 @@ class Settings:
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
     MILVUS_OPERATION_TIMEOUT_SECONDS: float = float(os.getenv("MILVUS_OPERATION_TIMEOUT_SECONDS", "5"))
+    MILVUS_FLUSH_AFTER_WRITE: bool = os.getenv("MILVUS_FLUSH_AFTER_WRITE", "1") not in ("0", "false", "False")
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "password")

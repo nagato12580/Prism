@@ -105,9 +105,13 @@ class GenerationPublisher:
             self.es.write(rows)
             for index in (self.milvus, self.es):
                 if index.count(scope) != len(rows):
-                    raise RuntimeError("generation row count validation failed")
+                    warning = getattr(index, "last_flush_warning", None)
+                    suffix = f": {warning}" if warning else ""
+                    raise RuntimeError(f"generation row count validation failed{suffix}")
                 if not index.sample(scope, chunks[0].chunk_uid):
-                    raise RuntimeError("generation sample validation failed")
+                    warning = getattr(index, "last_flush_warning", None)
+                    suffix = f": {warning}" if warning else ""
+                    raise RuntimeError(f"generation sample validation failed{suffix}")
 
             updated = (
                 self.db.query(KnowledgeTopic)

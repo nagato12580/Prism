@@ -42,6 +42,7 @@ def test_milvus_write_uses_configured_operation_timeout(monkeypatch):
     from engine.app.indexing.milvus_index import MilvusGenerationIndex
 
     monkeypatch.setattr(milvus_index.settings, "MILVUS_OPERATION_TIMEOUT_SECONDS", 90)
+    monkeypatch.setattr(milvus_index.settings, "MILVUS_FLUSH_AFTER_WRITE", True, raising=False)
     collection = FakeMilvusCollection()
     row = {
         "tenant_id": "tenant-a", "kb_uid": "kb-a", "file_uid": "file-a",
@@ -56,7 +57,27 @@ def test_milvus_write_uses_configured_operation_timeout(monkeypatch):
     assert collection.flush_calls == [{"timeout": 90}]
 
 
-def test_milvus_write_reports_deadline_exceeded_as_readable_error():
+def test_milvus_write_can_skip_flush_when_explicitly_disabled(monkeypatch):
+    from engine.app.indexing import milvus_index
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex
+
+    monkeypatch.setattr(milvus_index.settings, "MILVUS_OPERATION_TIMEOUT_SECONDS", 90)
+    monkeypatch.setattr(milvus_index.settings, "MILVUS_FLUSH_AFTER_WRITE", False, raising=False)
+    collection = FakeMilvusCollection()
+    row = {
+        "tenant_id": "tenant-a", "kb_uid": "kb-a", "file_uid": "file-a",
+        "item_id": "item-a", "chunk_uid": "chunk-a", "source_type": "document",
+        "generation": "gen-a", "embedding_model_version": "profile-a",
+        "content": "text", "indexed_at": "2026-07-23T00:00:00",
+        "embedding": [0.1],
+    }
+
+    MilvusGenerationIndex(collection).write([row])
+
+    assert collection.flush_calls == []
+
+
+def test_milvus_write_records_deadline_exceeded_and_allows_validation(monkeypatch):
     from engine.app.indexing.milvus_index import MilvusGenerationIndex
 
     class DeadlineExceededCollection(FakeMilvusCollection):
@@ -75,8 +96,12 @@ def test_milvus_write_reports_deadline_exceeded_as_readable_error():
         "embedding": [0.1],
     }
 
-    with pytest.raises(RuntimeError, match="Milvus flush timed out"):
-        MilvusGenerationIndex(DeadlineExceededCollection()).write([row])
+    from engine.app.indexing import milvus_index
+
+    monkeypatch.setattr(milvus_index.settings, "MILVUS_FLUSH_AFTER_WRITE", True, raising=False)
+    index = MilvusGenerationIndex(DeadlineExceededCollection())
+    assert index.write([row]) == 1
+    assert "Milvus flush timed out" in index.last_flush_warning
 
 
 def test_milvus_generation_index_uses_native_full_scope_expression():
@@ -121,6 +146,74 @@ def test_env_selected_milvus_search_connects_and_loads_collection(monkeypatch):
     monkeypatch.setattr(milvus_index, "Collection", lambda name: Collection())
     milvus_index.search_index(query_embedding=[0.1], scope=SearchScope(tenant_id="t", kb_uid="k", index_generation="g"), top_k=1)
     assert calls == [("connect",), ("load", 30)]
+
+
+def test_real_milvus_generation_index_smoke(monkeypatch):
+    from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
+
+    try:
+        connections.connect("smoke", host="127.0.0.1", port="19530")
+        utility.list_collections(using="smoke", timeout=5)
+    except Exception as exc:
+        pytest.skip(f"Milvus is not available for smoke test: {exc}")
+
+    from engine.app.indexing import milvus_index
+    from engine.app.indexing.milvus_index import MilvusGenerationIndex
+
+    collection_name = "prism_milvus_generation_smoke"
+    if utility.has_collection(collection_name, using="smoke"):
+        utility.drop_collection(collection_name, using="smoke")
+    schema = CollectionSchema([
+        FieldSchema("id", DataType.VARCHAR, max_length=100, is_primary=True),
+        FieldSchema("tenant_id", DataType.VARCHAR, max_length=36),
+        FieldSchema("kb_uid", DataType.VARCHAR, max_length=36),
+        FieldSchema("file_uid", DataType.VARCHAR, max_length=36),
+        FieldSchema("item_id", DataType.VARCHAR, max_length=36),
+        FieldSchema("chunk_uid", DataType.VARCHAR, max_length=36),
+        FieldSchema("source_type", DataType.VARCHAR, max_length=32),
+        FieldSchema("generation", DataType.VARCHAR, max_length=36),
+        FieldSchema("embedding_model_version", DataType.VARCHAR, max_length=32),
+        FieldSchema("indexed_at", DataType.VARCHAR, max_length=40),
+        FieldSchema("content", DataType.VARCHAR, max_length=65535),
+        FieldSchema("embedding", DataType.FLOAT_VECTOR, dim=2),
+    ])
+    collection = Collection(collection_name, schema, using="smoke")
+    try:
+        collection.create_index(
+            "embedding",
+            {"metric_type": "COSINE", "index_type": "FLAT", "params": {}},
+            timeout=30,
+        )
+        collection.load(timeout=30)
+        monkeypatch.setattr(milvus_index.settings, "MILVUS_FLUSH_AFTER_WRITE", True, raising=False)
+        index = MilvusGenerationIndex(collection)
+        scope = GenerationScope("tenant-smoke", "kb-smoke", "gen-smoke")
+        row = {
+            "tenant_id": scope.tenant_id, "kb_uid": scope.kb_uid, "file_uid": "file-smoke",
+            "item_id": "item-smoke", "chunk_uid": "chunk-smoke", "source_type": "document",
+            "generation": scope.generation, "embedding_model_version": "smoke",
+            "content": "smoke text", "indexed_at": "2026-07-25T00:00:00",
+            "embedding": [1.0, 0.0],
+        }
+
+        assert index.write([row]) == 1
+        assert index.count(scope) == 1
+        assert index.sample(scope, "chunk-smoke") is True
+        hits = collection.search(
+            data=[[1.0, 0.0]],
+            anns_field="embedding",
+            param={"metric_type": "COSINE", "params": {}},
+            limit=1,
+            expr='tenant_id == "tenant-smoke" and kb_uid == "kb-smoke" and generation == "gen-smoke"',
+            output_fields=["chunk_uid"],
+            timeout=30,
+        )
+        assert hits and hits[0] and hits[0][0].entity.get("chunk_uid") == "chunk-smoke"
+        index.delete_generation(scope)
+    finally:
+        if utility.has_collection(collection_name, using="smoke"):
+            utility.drop_collection(collection_name, using="smoke")
+        connections.disconnect("smoke")
 
 
 class FakeES:
