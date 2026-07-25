@@ -490,6 +490,7 @@ class LangChainAgentRunner:
                             "stats": stats,
                             "trace_steps": trace_steps,
                             "evidence_items": evidence_items,
+                            "payload": payload,
                         },
                         status=status,
                         tool_name=name,
@@ -603,7 +604,12 @@ class LangChainAgentRunner:
             _record_trace_step(
                 trace_recorder,
                 step_type="error",
-                output_json={"message": "Agent reached the maximum tool iteration limit."},
+                output_json={
+                    "message": "Agent reached the maximum tool iteration limit.",
+                    "iteration_limit": self.max_iterations,
+                    "message_count": len(messages),
+                    "message_roles": _message_roles(messages),
+                },
                 status="error",
             )
             _finish_trace(trace_recorder, "error")

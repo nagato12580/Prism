@@ -177,6 +177,40 @@ def test_agent_trace_recorder_coerces_non_json_safe_values_and_invalid_score(ses
         db.close()
 
 
+def test_agent_trace_recorder_redacts_sensitive_json_keys(session_factory):
+    recorder = AgentTraceRecorder(
+        session_id="session-redact",
+        user_message_id="message-redact",
+        user_query="redact",
+        model="test-model",
+        session_factory=session_factory,
+    )
+
+    recorder.start()
+    step_id = recorder.record_step(
+        step_type="tool_result",
+        input_json={
+            "query": "safe",
+            "api_key": "sk-secret",
+            "nested": {"Authorization": "Bearer token", "password": "pw"},
+        },
+        output_json={"access_token": "token", "summary": "safe"},
+    )
+
+    db = session_factory()
+    try:
+        step = db.query(AgentTraceStep).filter(AgentTraceStep.id == step_id).one()
+
+        assert step.input_json["query"] == "safe"
+        assert step.input_json["api_key"] == "[REDACTED]"
+        assert step.input_json["nested"]["Authorization"] == "[REDACTED]"
+        assert step.input_json["nested"]["password"] == "[REDACTED]"
+        assert step.output_json["access_token"] == "[REDACTED]"
+        assert step.output_json["summary"] == "safe"
+    finally:
+        db.close()
+
+
 def test_agent_trace_recorder_close_failure_does_not_raise(session_factory):
     class CloseFailingSession:
         def __init__(self, session):

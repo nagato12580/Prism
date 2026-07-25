@@ -549,6 +549,9 @@ def test_runner_records_max_iterations_error_trace():
 
     assert recorder.steps[-1]["step_type"] == "error"
     assert recorder.steps[-1]["status"] == "error"
+    assert recorder.steps[-1]["output_json"]["message"] == "Agent reached the maximum tool iteration limit."
+    assert recorder.steps[-1]["output_json"]["iteration_limit"] == 1
+    assert recorder.steps[-1]["output_json"]["message_count"] > 0
     assert recorder.finished_status == "error"
 
 
@@ -749,6 +752,23 @@ def test_runner_includes_tool_trace_steps_in_tool_result_event():
             "detail": "overall=0.68 status=incomplete",
         },
     ]
+
+
+def test_runner_trace_tool_result_records_full_payload_for_bad_case_analysis():
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=FakeTraceModel(), tools=[FakeTraceTool()])
+
+    list(runner.stream("How?", [{"role": "user", "content": "previous"}], trace_recorder=recorder))
+
+    tool_result_step = next(step for step in recorder.steps if step["step_type"] == "tool_result")
+    assert tool_result_step["input_json"] == {
+        "tool": "deep_knowledge_search",
+        "call_id": "call_trace",
+        "args": {"query": "deep search"},
+        "query": "deep search",
+    }
+    assert tool_result_step["output_json"]["payload"]["status"] == "partial"
+    assert tool_result_step["output_json"]["payload"]["trace_steps"][0]["agent"] == "SearcherAgent"
 
 
 def test_runner_emits_title_on_first_exchange(monkeypatch):

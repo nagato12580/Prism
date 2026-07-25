@@ -26,11 +26,11 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def _seed_trace(db_session, *, status="success"):
+def _seed_trace(db_session, *, status="success", session_id="session-1", user_message_id="user-1", query="query"):
     trace = AgentTrace(
-        session_id="session-1",
-        user_message_id="user-1",
-        user_query="query",
+        session_id=session_id,
+        user_message_id=user_message_id,
+        user_query=query,
         status=status,
         model="test-model",
     )
@@ -266,3 +266,37 @@ def test_export_trace(client, db_session):
     assert payload["trace_id"] == trace_id
     assert payload["steps"][0]["tool_name"] == "raw_document_search"
     assert payload["steps"][0]["evidence_items"][0]["chunk_id"] == "chunk-1"
+
+
+def test_export_session_traces_orders_runs_and_includes_steps(client, db_session):
+    first_trace_id = _seed_trace(
+        db_session,
+        session_id="session-1",
+        user_message_id="user-1",
+        query="first question",
+    )
+    second_trace_id = _seed_trace(
+        db_session,
+        session_id="session-1",
+        user_message_id="user-2",
+        query="second question",
+        status="error",
+    )
+    _seed_trace(db_session, session_id="session-2", user_message_id="other-user", query="other")
+
+    resp = client.get("/api/v1/traces/sessions/session-1/export")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["session_id"] == "session-1"
+    assert [trace["trace_id"] for trace in payload["traces"]] == [first_trace_id, second_trace_id]
+    assert [trace["user_query"] for trace in payload["traces"]] == ["first question", "second question"]
+    assert payload["traces"][1]["status"] == "error"
+    assert payload["traces"][0]["steps"][0]["tool_call_id"] == "call_1"
+
+
+def test_export_session_traces_returns_empty_trace_list_for_unknown_session(client):
+    resp = client.get("/api/v1/traces/sessions/missing/export")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"session_id": "missing", "traces": []}

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..services.agent_trace import bind_trace_message, export_trace
+from ..services.agent_trace import bind_trace_message, export_session_traces, export_trace
 
 
 router = APIRouter(prefix="/traces", tags=["traces"])
@@ -33,6 +33,11 @@ def bind_message(trace_id: str, payload: TraceBindRequest, db: Session = Depends
         "assistant_message_id": trace.assistant_message_id,
         "status": trace.status,
     }
+
+
+@router.get("/sessions/{session_id}/export")
+def export_session(session_id: str, db: Session = Depends(get_db)):
+    return export_session_traces(db, session_id)
 
 
 @router.get("/{trace_id}/export")

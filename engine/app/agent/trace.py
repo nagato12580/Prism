@@ -16,6 +16,17 @@ from engine.app.observability import logger, quoted
 
 
 _Session: Callable[[], Any] | None = None
+_SENSITIVE_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+)
 
 
 def _default_session_factory() -> Any:
@@ -264,7 +275,11 @@ def _json_safe(value: Any) -> Any:
         except UnicodeDecodeError:
             return _safe_repr(value)
     if isinstance(value, Mapping):
-        return {str(_json_safe(key)): _json_safe(item) for key, item in value.items()}
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = str(_json_safe(key))
+            safe[safe_key] = "[REDACTED]" if _is_sensitive_key(safe_key) else _json_safe(item)
+        return safe
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_json_safe(item) for item in value]
     return _safe_repr(value)
@@ -275,3 +290,8 @@ def _safe_repr(value: Any) -> str:
         return repr(value)
     except Exception:
         return f"<{type(value).__name__}>"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return any(part in normalized for part in _SENSITIVE_KEY_PARTS)

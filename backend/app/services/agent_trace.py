@@ -44,6 +44,23 @@ def export_trace(db: Session, trace_id: str) -> dict[str, Any]:
     if trace is None:
         raise LookupError("trace not found")
 
+    return _serialize_trace(db, trace)
+
+
+def export_session_traces(db: Session, session_id: str) -> dict[str, Any]:
+    traces = (
+        db.query(AgentTrace)
+        .filter(AgentTrace.session_id == session_id)
+        .order_by(AgentTrace.started_at.asc(), AgentTrace.id.asc())
+        .all()
+    )
+    return {
+        "session_id": session_id,
+        "traces": [_serialize_trace(db, trace) for trace in traces],
+    }
+
+
+def _serialize_trace(db: Session, trace: AgentTrace) -> dict[str, Any]:
     steps = (
         db.query(AgentTraceStep)
         .filter(AgentTraceStep.trace_id == trace.id)
