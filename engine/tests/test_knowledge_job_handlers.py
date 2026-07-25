@@ -192,7 +192,7 @@ def test_worker_dispatches_typed_index_job_to_index_handler(handler_db, monkeypa
 
 def test_handle_index_publishes_generation_and_marks_file(handler_db, monkeypatch):
     from backend.app.models.knowledge_types import StageStatus
-    from engine.app.jobs.knowledge_handlers import handle_index
+    import engine.app.jobs.knowledge_handlers as handlers
 
     topic = KnowledgeTopic(
         tenant_id="t1",
@@ -246,6 +246,7 @@ def test_handle_index_publishes_generation_and_marks_file(handler_db, monkeypatc
         JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
         "handle-index-1",
     )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "index-generation")
 
     class FakePublisher:
         calls = []
@@ -257,16 +258,191 @@ def test_handle_index_publishes_generation_and_marks_file(handler_db, monkeypatc
             return type("Result", (), {"status": "succeeded", "row_count": 1, "error": None})()
 
     fake = FakePublisher()
-    result = handle_index(job.id, "w1", handler_db, jobs, publisher_factory=lambda db: fake)
+    result = handlers.handle_index(job.id, "w1", handler_db, jobs, publisher_factory=lambda db: fake)
 
     handler_db.refresh(file_row)
     handler_db.refresh(topic)
-    assert result == {"status": "completed", "generation": "3", "row_count": 1}
-    assert fake.calls == [(topic.kb_uid, "3", None)]
+    assert result == {"status": "completed", "generation": "index-generation", "row_count": 1}
+    assert fake.calls == [(topic.kb_uid, "index-generation", None)]
     assert file_row.index_status == StageStatus.SUCCEEDED.value
-    assert file_row.active_index_generation == "3"
-    assert topic.active_index_generation == "3"
+    assert file_row.active_index_generation == "index-generation"
+    assert topic.active_index_generation == "index-generation"
     assert handler_db.get(type(job), job.id).status == "succeeded"
+
+
+def test_handle_index_uses_kb_index_generation_not_file_content_version(handler_db, monkeypatch):
+    from backend.app.models.knowledge_types import StageStatus
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Index KB")
+    handler_db.add(topic)
+    handler_db.flush()
+    item = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="Doc", content="body")
+    handler_db.add(item)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-index-generation",
+        original_filename="doc.md",
+        item_id=item.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    handler_db.add(file_row)
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
+        "handle-index-generation",
+    )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "kb-index-generation")
+
+    class FakePublisher:
+        def __init__(self):
+            self.calls = []
+
+        def build(self, kb_uid, generation, *, expected_old):
+            self.calls.append((kb_uid, generation, expected_old))
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 1, "error": None})()
+
+    fake = FakePublisher()
+    result = handlers.handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: fake,
+    )
+
+    handler_db.refresh(file_row)
+    assert result["generation"] == "kb-index-generation"
+    assert fake.calls == [(topic.kb_uid, "kb-index-generation", None)]
+    assert file_row.active_index_generation == "kb-index-generation"
+
+
+def test_handle_index_marks_all_parsed_files_in_published_kb_snapshot(handler_db, monkeypatch):
+    from backend.app.models.knowledge_types import StageStatus
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(tenant_id="t1", owner_user_id="u1", name="Index KB")
+    handler_db.add(topic)
+    handler_db.flush()
+    item_a = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="A", content="a")
+    item_b = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="B", content="b")
+    handler_db.add_all([item_a, item_b])
+    handler_db.flush()
+    file_a = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-a",
+        original_filename="a.pdf",
+        item_id=item_a.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    file_b = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-b",
+        original_filename="b.pdf",
+        item_id=item_b.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.FAILED.value,
+        index_error={"code": "INDEX_ERROR", "message": "old failure"},
+        parsed_content_version=1,
+    )
+    handler_db.add_all([file_a, file_b])
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_a.file_uid, {}),
+        "handle-index-kb-snapshot",
+    )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "kb-index-generation")
+
+    class FakePublisher:
+        def build(self, kb_uid, generation, *, expected_old):
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 2, "error": None})()
+
+    handlers.handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: FakePublisher(),
+    )
+
+    handler_db.refresh(file_a)
+    handler_db.refresh(file_b)
+    assert file_a.index_status == StageStatus.SUCCEEDED.value
+    assert file_b.index_status == StageStatus.SUCCEEDED.value
+    assert file_a.active_index_generation == "kb-index-generation"
+    assert file_b.active_index_generation == "kb-index-generation"
+    assert file_b.index_error is None
+
+
+def test_handle_index_reads_expected_generation_by_kb_uid_when_file_topic_id_is_missing(handler_db, monkeypatch):
+    from backend.app.models.knowledge_types import StageStatus
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(
+        tenant_id="t1",
+        owner_user_id="u1",
+        name="Legacy File KB",
+        active_index_generation="already-active",
+    )
+    handler_db.add(topic)
+    handler_db.flush()
+    item = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="Doc", content="body")
+    handler_db.add(item)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-without-topic-id",
+        topic_id=None,
+        original_filename="doc.md",
+        item_id=item.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    handler_db.add(file_row)
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
+        "handle-index-missing-topic-id",
+    )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "next-generation")
+
+    class FakePublisher:
+        def __init__(self):
+            self.calls = []
+
+        def build(self, kb_uid, generation, *, expected_old):
+            self.calls.append((kb_uid, generation, expected_old))
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 1, "error": None})()
+
+    fake = FakePublisher()
+    handlers.handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: fake,
+    )
+
+    assert fake.calls == [(topic.kb_uid, "next-generation", "already-active")]
 
 
 def test_handle_index_records_file_error_when_publish_fails(handler_db, caplog):

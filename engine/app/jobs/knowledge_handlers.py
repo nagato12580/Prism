@@ -9,17 +9,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from engine.app.config import settings as _engine_settings
 
-from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeChunk
+from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeChunk, KnowledgeTopic
 from backend.app.models.knowledge_types import StageStatus, uuid4_str
 from backend.app.config import settings
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.storage.files import LocalFileStorage
-from engine.app.indexing.publisher import GenerationPublisher, mark_index_complete
+from engine.app.indexing.publisher import GenerationPublisher, mark_kb_index_complete
 from engine.app.indexing.profiles import DEFAULT_PROFILE
 from engine.app.ingestion.parsers import build_default_registry
 from engine.app.ingestion.presets import chunk_with_preset
 
 logger = logging.getLogger(__name__)
+
+
+def _new_index_generation() -> str:
+    return uuid4_str()
 
 
 def handle_delete(job_id, worker_id, db_session, job_svc, cleanup):
@@ -299,12 +303,21 @@ def handle_index(
         if file_row.parse_status != StageStatus.SUCCEEDED.value or not file_row.parsed_content_version:
             raise RuntimeError("file has not been parsed successfully")
 
-        generation = str(file_row.parsed_content_version)
+        generation = _new_index_generation()
         file_row.index_status = StageStatus.RUNNING.value
         file_row.index_error = None
         db_session.commit()
 
-        topic = file_row.topic
+        topic = (
+            db_session.query(KnowledgeTopic)
+            .populate_existing()
+            .filter_by(
+                tenant_id=file_row.tenant_id,
+                kb_uid=file_row.kb_uid,
+                deleted_at=None,
+            )
+            .one_or_none()
+        )
         expected_old = topic.active_index_generation if topic is not None else None
         result = publisher_factory(db_session).build(
             file_row.kb_uid,
@@ -314,7 +327,7 @@ def handle_index(
         if result.status != "succeeded":
             raise RuntimeError(result.error or "index build failed")
 
-        mark_index_complete(db_session, file_row.file_uid, generation)
+        mark_kb_index_complete(db_session, file_row.tenant_id, file_row.kb_uid, generation)
         job_svc.succeed(
             job_id,
             worker_id,

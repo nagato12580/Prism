@@ -328,6 +328,10 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
             file_row.parse_status = "running"
         elif job_type == "index":
             file_row.index_status = "running"
+        if active.status == "queued":
+            active.error_code = None
+            active.error_message = None
+            active.retryable = False
         db.commit()
         if active.status == "queued":
             _publish_job(db, active)

@@ -364,6 +364,8 @@ def test_index_command_records_reused_active_job_on_file(client, db_session, fil
     assert response.status_code == 202
     assert response.json()["id"] == active.id
     assert response.json()["status"] == "queued"
+    assert response.json()["error_code"] is None
+    assert response.json()["error_message"] is None
     assert file_row.last_job_id == active.id
     assert file_row.index_status == "running"
 

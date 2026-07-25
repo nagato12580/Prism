@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from backend.app.models import KnowledgeChunk, KnowledgeFile, KnowledgeTopic
+from backend.app.models.knowledge_types import StageStatus
 from backend.app.utils.time import local_now
 from engine.app.indexing.profiles import EmbeddingProfile
 from engine.app.ingestion.vectorizer import embed_texts
@@ -44,6 +45,7 @@ class GenerationPublisher:
     def build(self, kb_uid: str, generation: str, *, expected_old: str | None):
         topic = (
             self.db.query(KnowledgeTopic)
+            .populate_existing()
             .filter_by(kb_uid=kb_uid, deleted_at=None)
             .one_or_none()
         )
@@ -51,17 +53,38 @@ class GenerationPublisher:
             raise ValueError(f"Topic {kb_uid} not found")
         scope = GenerationScope(topic.tenant_id, topic.kb_uid, generation)
         try:
+            files = (
+                self.db.query(KnowledgeFile)
+                .filter(
+                    KnowledgeFile.tenant_id == topic.tenant_id,
+                    KnowledgeFile.kb_uid == topic.kb_uid,
+                    KnowledgeFile.deleted_at.is_(None),
+                    KnowledgeFile.parse_status == StageStatus.SUCCEEDED.value,
+                    KnowledgeFile.parsed_content_version.isnot(None),
+                )
+                .all()
+            )
+            file_generations = {
+                file.file_uid: str(file.parsed_content_version)
+                for file in files
+                if file.parsed_content_version
+            }
             chunks = (
                 self.db.query(KnowledgeChunk)
-                .filter_by(
-                    tenant_id=topic.tenant_id,
-                    kb_uid=topic.kb_uid,
-                    generation=generation,
-                    chunk_type="child",
+                .filter(
+                    KnowledgeChunk.tenant_id == topic.tenant_id,
+                    KnowledgeChunk.kb_uid == topic.kb_uid,
+                    KnowledgeChunk.file_uid.in_(list(file_generations)),
+                    KnowledgeChunk.chunk_type == "child",
                 )
                 .order_by(KnowledgeChunk.file_uid, KnowledgeChunk.chunk_uid)
                 .all()
             )
+            chunks = [
+                chunk
+                for chunk in chunks
+                if chunk.generation == file_generations.get(chunk.file_uid)
+            ]
             if not chunks:
                 raise RuntimeError("generation has no child chunks")
             vectors = self.embedder([chunk.chunk_text for chunk in chunks])
@@ -179,3 +202,25 @@ def mark_index_complete(db: Session, file_uid: str, generation: str):
     file_row.active_index_generation = generation
     db.commit()
     return file_row
+
+
+def mark_kb_index_complete(db: Session, tenant_id: str, kb_uid: str, generation: str):
+    from backend.app.models.knowledge_types import StageStatus
+
+    rows = (
+        db.query(KnowledgeFile)
+        .filter(
+            KnowledgeFile.tenant_id == tenant_id,
+            KnowledgeFile.kb_uid == kb_uid,
+            KnowledgeFile.deleted_at.is_(None),
+            KnowledgeFile.parse_status == StageStatus.SUCCEEDED.value,
+            KnowledgeFile.parsed_content_version.isnot(None),
+        )
+        .all()
+    )
+    for file_row in rows:
+        file_row.index_status = StageStatus.SUCCEEDED.value
+        file_row.index_error = None
+        file_row.active_index_generation = generation
+    db.commit()
+    return rows
