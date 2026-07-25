@@ -82,3 +82,13 @@ def test_compose_system_prompt_is_additive_only_when_scope_active():
     composed = compose_system_prompt_with_knowledge_skill(base, has_knowledge_scope=True)
     assert composed.startswith(base)
     assert render_knowledge_skill() in composed
+
+
+def test_render_knowledge_skill_prioritizes_kb_over_memory_for_document_questions():
+    from engine.app.agent.knowledge_skill import render_knowledge_skill
+
+    prompt = render_knowledge_skill()
+    assert "memory_search" in prompt
+    assert "query_kb" in prompt
+    assert "资料" in prompt or "文档" in prompt or "document" in prompt.lower()
+    assert "优先" in prompt or "first" in prompt.lower()

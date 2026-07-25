@@ -247,6 +247,57 @@ def test_build_agent_runner_places_chat_controls_on_rag_runner(monkeypatch):
     )
 
 
+def test_build_agent_runner_adds_memory_search_to_authorized_knowledge_scope(monkeypatch):
+    from engine.app.security.knowledge_scope import AuthorizedKnowledgeScope
+
+    class FakeModel:
+        pass
+
+    class FakeTool:
+        def __init__(self, name):
+            self.name = name
+
+    monkeypatch.setattr(answer, "_resolve_search_scope", lambda *args: None)
+    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+    monkeypatch.setattr(
+        answer,
+        "build_knowledge_tools",
+        lambda ctx: {"query_kb": FakeTool("query_kb")},
+    )
+    monkeypatch.setitem(
+        answer.BUILTIN_REGISTRY,
+        "clarify_user",
+        type("Spec", (), {"builder": staticmethod(lambda ctx: FakeTool("clarify_user"))})(),
+    )
+    monkeypatch.setitem(
+        answer.BUILTIN_REGISTRY,
+        "datetime",
+        type("Spec", (), {"builder": staticmethod(lambda ctx: FakeTool("datetime"))})(),
+    )
+    monkeypatch.setitem(
+        answer.BUILTIN_REGISTRY,
+        "memory_search",
+        type("Spec", (), {"builder": staticmethod(lambda ctx: FakeTool("memory_search"))})(),
+    )
+
+    runner = answer.build_agent_runner(
+        knowledge_scope=AuthorizedKnowledgeScope(
+            actor_id="alice",
+            tenant_id="tenant-a",
+            allowed_kb_uids=("kb-a",),
+            run_id="run-1",
+            expires_at=9999999999,
+        )
+    )
+
+    assert [tool.name for tool in runner.tools] == [
+        "query_kb",
+        "clarify_user",
+        "datetime",
+        "memory_search",
+    ]
+
+
 def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
 

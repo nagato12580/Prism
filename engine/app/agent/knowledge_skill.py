@@ -24,8 +24,11 @@ scope is verified server-side and cannot be overridden by arguments.
 - find_kb_document: exact keyword / regex matches inside a single document's text. Non-semantic and bounded; use it to confirm exact wording.
 - open_kb_document: open a bounded text window of a document by offset or line. Page forward with small windows instead of dumping whole files.
 - get_mindmap: get the mind-map structure of a knowledge base to understand its overall shape before querying.
+- memory_search: auxiliary long-term memory lookup for the user's preferences, goals, constraints, project background, and stable personal context. It is not a knowledge-base evidence source.
 
 Policy:
+- For uploaded资料, 文档, papers, files, or knowledge-base questions, use query_kb first. Use memory_search only when the user's remembered preferences, goals, constraints, project background, or prior personal context are needed to interpret the answer.
+- Separate evidence types in the final answer: knowledge-base facts must be grounded in query_kb/open_kb_document evidence; memory_search may provide user context but must not replace document evidence.
 - Prefer query_kb first. Use open_kb_document / find_kb_document only to read context the semantic evidence already pointed at.
 - Citation rule: every factual claim needs a citation to an evidence_id returned by these tools in this run. Reuse only the evidence_id values present in the current tool results; do not invent, back-fill, or carry over evidence ids from memory or earlier runs.
 - These tools are read-only: they never create, edit, or delete knowledge. Uploaded attachments are a separate channel and are not retrieved by these tools.
