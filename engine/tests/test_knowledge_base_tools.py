@@ -132,6 +132,33 @@ def test_query_kb_passes_only_verified_scope_and_strips_tenant(db_session):
     assert "tenant_id" not in str(result)
 
 
+def test_query_kb_maps_default_to_single_authorized_kb(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    ctx = _context(db_session, allowed=("kb-a",))
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "default",
+        "query_text": "architecture",
+    })
+
+    assert result["status"] == "ok"
+    assert ctx.retrieval_service.calls[0]["kb_uid"] == "kb-a"
+
+
+def test_query_kb_maps_missing_kb_uid_to_single_authorized_kb(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    ctx = _context(db_session, allowed=("kb-a",))
+    result = build_tools(ctx)["query_kb"].invoke({
+        "query_text": "architecture",
+    })
+
+    assert result["status"] == "ok"
+    assert ctx.retrieval_service.calls[0]["kb_uid"] == "kb-a"
+
+
 def test_query_kb_normalizes_empty_warning_messages(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 

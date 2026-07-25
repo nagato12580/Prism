@@ -531,6 +531,56 @@ class FakeLoopingToolModel:
         )
 
 
+class FakeOpenKbDocumentTool:
+    name = "open_kb_document"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "file_uid": args["file_uid"],
+                    "offset": args.get("offset", 0),
+                    "content": f"window {self.calls}",
+                    "has_more_after": True,
+                },
+            }
+        )
+
+
+class FakeLoopingOpenKbDocumentModel:
+    def __init__(self):
+        self.calls = 0
+        self.last_messages = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        self.last_messages = messages
+        if self.calls <= 99:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_open_{self.calls}",
+                        "name": "open_kb_document",
+                        "args": {
+                            "kb_uid": "kb-a",
+                            "file_uid": "file-a",
+                            "offset": (self.calls - 1) * 1000,
+                            "window_size": 1000,
+                        },
+                    }
+                ]
+            )
+        return FakeToolCall(content="should not reach here")
+
+
 def test_runner_records_max_iterations_error_trace():
     recorder = FakeTraceRecorder()
     runner = LangChainAgentRunner(
@@ -553,6 +603,30 @@ def test_runner_records_max_iterations_error_trace():
     assert recorder.steps[-1]["output_json"]["iteration_limit"] == 1
     assert recorder.steps[-1]["output_json"]["message_count"] > 0
     assert recorder.finished_status == "error"
+
+
+def test_runner_forces_answer_after_five_open_kb_document_calls_for_same_run():
+    model = FakeLoopingOpenKbDocumentModel()
+    tool = FakeOpenKbDocumentTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[tool],
+        max_iterations=10,
+    )
+
+    lines = list(
+        runner.stream(
+            "Summarize the full paper",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    assert tool.calls == 5
+    assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
+    assert event_types(lines)[-2:] == ["token", "done"]
+    token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    assert "还没读取完整篇文档" in token_text
+    assert "是否继续" in token_text
 
 
 class FakeEmptyEvidenceTool:

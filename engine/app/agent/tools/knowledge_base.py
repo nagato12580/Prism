@@ -167,7 +167,7 @@ class MindmapData(_StrictDTO):
 
 class QueryKbInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kb_uid: str = Field(min_length=1, max_length=128)
+    kb_uid: str | None = Field(default=None, min_length=1, max_length=128)
     query_text: str = Field(min_length=1, max_length=4000)
     mode: Literal["standard", "deep"] = "standard"
     file_filter: tuple[str, ...] = Field(default=(), max_length=100)
@@ -243,6 +243,20 @@ def _require_allowed_kb(ctx: ToolContext, kb_uid: str):
     if kb_uid not in scope.allowed_kb_uids:
         raise KnowledgeToolDenied(kb_uid)
     return scope
+
+
+def _resolve_allowed_kb(ctx: ToolContext, kb_uid: str | None) -> tuple[Any, str]:
+    scope = _require_scope(ctx)
+    normalized = (kb_uid or "").strip()
+    if normalized and normalized != "default":
+        if normalized not in scope.allowed_kb_uids:
+            raise KnowledgeToolDenied(normalized)
+        return scope, normalized
+    if len(scope.allowed_kb_uids) == 1:
+        return scope, scope.allowed_kb_uids[0]
+    raise KnowledgeToolInvalidRequest(
+        "kb_uid is required when more than one knowledge base is authorized"
+    )
 
 
 def _require_db(ctx: ToolContext) -> Session:
@@ -417,17 +431,17 @@ def _build_list_kbs(ctx: ToolContext) -> StructuredTool:
 
 def _build_query_kb(ctx: ToolContext) -> StructuredTool:
     def run(
-        kb_uid: str,
         query_text: str,
+        kb_uid: str | None = None,
         mode: Literal["standard", "deep"] = "standard",
         file_filter: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         try:
-            scope = _require_allowed_kb(ctx, kb_uid)
+            scope, resolved_kb_uid = _resolve_allowed_kb(ctx, kb_uid)
             retrieval = _require_retrieval(ctx)
             response = retrieval.query(
                 tenant_id=scope.tenant_id,
-                kb_uid=kb_uid,
+                kb_uid=resolved_kb_uid,
                 query=query_text,
                 mode="deep" if mode == "deep" else "fast",
                 file_uids=tuple(file_filter),

@@ -31,6 +31,11 @@ from ..observability import logger, quoted
 
 
 _TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="agent-tool")
+OPEN_KB_DOCUMENT_PER_FILE_LIMIT = 5
+FORCED_PARTIAL_DOCUMENT_ANSWER = (
+    "我已经连续读取了这篇文档的前 5 个窗口，但目前还没读取完整篇文档。"
+    "我会先基于已经读取到的内容回答；是否继续读取后续部分，请回复“继续”。"
+)
 FORCED_NO_EVIDENCE_ANSWER = "当前知识库没有可用的有效证据来回答这个问题。"
 
 
@@ -312,7 +317,9 @@ class LangChainAgentRunner:
         self.tool_map = {tool.name: tool for tool in tools}
         self._has_grounding_evidence = False
         self._force_answer_with_available_evidence = False
+        self._forced_answer_text: str | None = None
         self._ungrounded_insufficient_results = 0
+        self._open_kb_document_counts: dict[str, int] = {}
 
     def stream(
         self,
@@ -321,6 +328,11 @@ class LangChainAgentRunner:
         trace_recorder: Any | None = None,
     ):
         history = history or []
+        self._has_grounding_evidence = False
+        self._force_answer_with_available_evidence = False
+        self._forced_answer_text = None
+        self._ungrounded_insufficient_results = 0
+        self._open_kb_document_counts = {}
         is_casual_chat = _is_casual_chat_query(query)
         is_first_exchange = not history or not any(
             msg.get("role") == "user" for msg in history
@@ -385,7 +397,7 @@ class LangChainAgentRunner:
                     tool_calls = []
                 if not tool_calls:
                     if self._force_answer_with_available_evidence and not text:
-                        text = FORCED_NO_EVIDENCE_ANSWER
+                        text = self._forced_answer_text or FORCED_NO_EVIDENCE_ANSWER
                     if text:
                         logger.info("[agent] output preview=%s", quoted(text))
                         yield agent_status_event("generating answer")
@@ -567,6 +579,22 @@ class LangChainAgentRunner:
                                 )
                             )
                         )
+                    elif (
+                        name == "open_kb_document"
+                        and self._record_open_kb_document_call(args) >= OPEN_KB_DOCUMENT_PER_FILE_LIMIT
+                    ):
+                        self._force_answer_with_available_evidence = True
+                        self._forced_answer_text = FORCED_PARTIAL_DOCUMENT_ANSWER
+                        messages.append(
+                            SystemMessage(
+                                content=(
+                                    "You have already opened this knowledge-base document 5 times in this "
+                                    "answer. Do not call more tools. Answer now using the document content "
+                                    "already returned in tool messages. Clearly tell the user the full "
+                                    "document has not been completely read and ask whether to continue."
+                                )
+                            )
+                        )
                     elif self._ungrounded_insufficient_results >= 2:
                         self._force_answer_with_available_evidence = True
                         messages.append(
@@ -631,6 +659,13 @@ class LangChainAgentRunner:
             yield error_event(str(exc))
             logger.info("[agent] done")
             yield done_event()
+
+    def _record_open_kb_document_call(self, args: dict[str, Any]) -> int:
+        file_uid = str(args.get("file_uid") or "").strip()
+        key = file_uid or "__unknown__"
+        count = self._open_kb_document_counts.get(key, 0) + 1
+        self._open_kb_document_counts[key] = count
+        return count
 
     def _build_messages(self, query: str, history: list[dict[str, Any]]) -> list[Any]:
         messages: list[Any] = [SystemMessage(content=self.system_prompt)]
