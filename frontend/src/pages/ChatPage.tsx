@@ -39,7 +39,8 @@ import {
   type ThinkingStep,
 } from '@/app/chatStore'
 import type { GraphRagExplain, GraphRagPathEntry, ResourceMediaType } from '@/app/api'
-import { knowledgeApi, chatApi, traceApi, type KnowledgeTopic } from '@/app/api'
+import { chatApi, traceApi } from '@/app/api'
+import { knowledgeBasesApi, type KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { evidenceTypeLabel as formatEvidenceTypeLabel, graphPathLabels } from '@/app/graphrag'
 import { cn, genId } from '@/lib/utils'
 
@@ -244,7 +245,7 @@ export function ChatPage() {
   const restoreFromSession = useChatStore((s) => s.restoreFromSession)
   const [showTopicPicker, setShowTopicPicker] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
-  const [topics, setTopics] = useState<KnowledgeTopic[]>([])
+  const [topics, setTopics] = useState<KnowledgeBase[]>([])
   const [loadingTopics, setLoadingTopics] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const pendingClarifyRef = useRef<string | null>(null)
@@ -273,10 +274,10 @@ export function ChatPage() {
           restoreFromSession(latest)
           if (latest.topic_id) {
             try {
-              const topics = await knowledgeApi.listTopics()
+              const topics = (await knowledgeBasesApi.list({ limit: 100 })).items
               if (!cancelled) {
-                const matched = topics.find((t) => t.id === latest.topic_id)
-                if (matched) setSelectedTopic(matched.id, matched.name)
+                const matched = topics.find((t) => t.kb_uid === latest.topic_id)
+                if (matched) setSelectedTopic(matched.kb_uid, matched.name)
               }
             } catch { /* topic name restore best-effort */ }
           }
@@ -320,7 +321,7 @@ export function ChatPage() {
   const loadTopics = async () => {
     setLoadingTopics(true)
     try {
-      setTopics(await knowledgeApi.listTopics())
+      setTopics((await knowledgeBasesApi.list({ limit: 100 })).items)
     } catch {
       // 静默失败
     } finally {
@@ -337,8 +338,8 @@ export function ChatPage() {
     }
   }
 
-  const handleSelectTopic = (topic: KnowledgeTopic) => {
-    setSelectedTopic(topic.id, topic.name)
+  const handleSelectTopic = (topic: KnowledgeBase) => {
+    setSelectedTopic(topic.kb_uid, topic.name)
     setShowTopicPicker(false)
   }
 
@@ -534,13 +535,11 @@ export function ChatPage() {
         signal: streamAbortController.signal,
         body: JSON.stringify({
           query,
+          kb_uids: selectedTopicId ? [selectedTopicId] : [],
           history,
           session_id: sessionId,
           user_message_id: engineUserMessageId,
-          topic_id: selectedTopicId || undefined,
-          source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
-          deep_search_enabled: deepSearchEnabled,
-          deep_search_depth: deepSearchDepth,
+          mode: deepSearchEnabled || deepSearchDepth === 'deep' ? 'deep' : 'standard',
         }),
       })
 
@@ -731,9 +730,10 @@ export function ChatPage() {
       restoreFromSession(session)
       if (session.topic_id) {
         try {
-          const topics = await knowledgeApi.listTopics()
-          const matched = topics.find((t) => t.id === session.topic_id)
-          if (matched) setSelectedTopic(matched.id, matched.name)
+          const topics = (await knowledgeBasesApi.list({ limit: 100 })).items
+          setTopics(topics)
+          const matched = topics.find((t) => t.kb_uid === session.topic_id)
+          if (matched) setSelectedTopic(matched.kb_uid, matched.name)
         } catch { /* best effort */ }
       }
     }
@@ -989,19 +989,19 @@ export function ChatPage() {
                       <div className="max-h-44 overflow-y-auto">
                         {topics.map((topic) => (
                           <button
-                            key={topic.id}
+                            key={topic.kb_uid}
                             type="button"
                             onClick={() => handleSelectTopic(topic)}
                             className={cn(
                               'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition',
-                              selectedTopicId === topic.id
+                              selectedTopicId === topic.kb_uid
                                 ? 'bg-blue-50 text-[var(--prism-blue)]'
                                 : 'text-slate-600 hover:bg-slate-50',
                             )}
                           >
                             <BookOpen size={12} className="shrink-0 text-slate-400" />
                             <span className="min-w-0 flex-1 truncate">{topic.name}</span>
-                            <span className="shrink-0 text-[10px] text-slate-400">{topic.resource_count}</span>
+                            <span className="shrink-0 text-[10px] text-slate-400">{topic.status}</span>
                           </button>
                         ))}
                       </div>
