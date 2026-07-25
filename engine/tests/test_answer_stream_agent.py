@@ -298,6 +298,30 @@ def test_build_agent_runner_adds_memory_search_to_authorized_knowledge_scope(mon
     ]
 
 
+def test_build_agent_runner_applies_iteration_limit_to_authorized_knowledge_scope(monkeypatch):
+    from engine.app.security.knowledge_scope import AuthorizedKnowledgeScope
+
+    class FakeModel:
+        pass
+
+    monkeypatch.setattr(answer, "_resolve_search_scope", lambda *args: None)
+    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+    monkeypatch.setattr(answer, "build_knowledge_tools", lambda ctx: {})
+
+    runner = answer.build_agent_runner(
+        rag_max_iterations=9,
+        knowledge_scope=AuthorizedKnowledgeScope(
+            actor_id="alice",
+            tenant_id="tenant-a",
+            allowed_kb_uids=("kb-a",),
+            run_id="run-1",
+            expires_at=9999999999,
+        ),
+    )
+
+    assert runner.max_iterations == 9
+
+
 def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
 

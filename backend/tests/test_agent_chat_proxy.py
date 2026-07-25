@@ -40,6 +40,12 @@ def test_chat_answer_request_schema_has_no_secrets():
     assert "secret" not in fields
 
 
+def test_chat_answer_request_defaults_allow_multi_step_knowledge_synthesis():
+    req = ChatAnswerRequest(query="summarize", kb_uids=["kb-a"])
+
+    assert req.rag_max_iterations == 10
+
+
 def test_backend_proxy_signs_only_authorized_kbs(client, db_session, monkeypatch):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")

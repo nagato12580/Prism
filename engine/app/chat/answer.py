@@ -368,7 +368,11 @@ def build_agent_runner(
             AGENT_SYSTEM_PROMPT, has_knowledge_scope=True
         )
         return LangChainAgentRunner(
-            model=model, tools=tools, system_prompt=system_prompt, clarify_depth=clarify_depth
+            model=model,
+            tools=tools,
+            system_prompt=system_prompt,
+            max_iterations=rag_max_iterations,
+            clarify_depth=clarify_depth,
         )
 
     mode = "deep" if deep_search_enabled else "fast"

@@ -112,6 +112,9 @@ def test_deep_knowledge_search_handles_missing_runner():
 
 
 def test_chat_request_validates_deep_search_control_boundaries():
+    default_request = ChatRequest(query="q")
+    assert default_request.rag_max_iterations == 10
+
     request = ChatRequest(
         query="q",
         deep_search_depth="deep",

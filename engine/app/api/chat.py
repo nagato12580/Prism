@@ -24,7 +24,7 @@ class ChatRequest(BaseModel):
     deep_search_depth: Literal["quick", "standard", "deep"] = "standard"
     deep_search_top_k: int = Field(8, ge=1, le=30)
     graph_hops: int = Field(1, ge=1, le=3)
-    rag_max_iterations: int = Field(3, ge=1, le=10)
+    rag_max_iterations: int = Field(10, ge=1, le=10)
 
 
 @router.post("/answer")
