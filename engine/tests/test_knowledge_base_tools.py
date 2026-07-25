@@ -167,6 +167,24 @@ def test_search_file_is_scoped_and_cursor_paginated(db_session):
     assert "file_path" not in str(first)
 
 
+def test_search_file_matches_original_filename_when_title_is_missing(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid="file-a").one()
+    file_row.title = None
+    file_row.original_filename = "The_Name_of_the_Title_Is_Hope.pdf"
+    db_session.commit()
+
+    result = build_tools(_context(db_session))["search_file"].invoke({
+        "kb_uid": "kb-a",
+        "query": "The_Name_of_the_Title_Is_Hope",
+    })
+
+    assert result["status"] == "ok"
+    assert [item["file_uid"] for item in result["data"]["items"]] == ["file-a"]
+
+
 def test_find_and_open_document_are_bounded_and_path_safe(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 

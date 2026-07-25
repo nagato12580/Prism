@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import asc
+from sqlalchemy import asc, or_
 from sqlalchemy.orm import Session
 
 from backend.app.models import KnowledgeFile, KnowledgeTopic
@@ -504,7 +504,13 @@ def _build_search_file(ctx: ToolContext) -> StructuredTool:
             if media_types:
                 q = q.filter(KnowledgeFile.media_type.in_(list(media_types)))
             if query:
-                q = q.filter(KnowledgeFile.title.ilike(f"%{query}%"))
+                pattern = f"%{query}%"
+                q = q.filter(
+                    or_(
+                        KnowledgeFile.title.ilike(pattern),
+                        KnowledgeFile.original_filename.ilike(pattern),
+                    )
+                )
             if after:
                 q = q.filter(KnowledgeFile.file_uid > after)
             q = q.order_by(asc(KnowledgeFile.file_uid)).limit(limit + 1)
