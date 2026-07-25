@@ -102,6 +102,21 @@ def _content_preview(content: str, limit: int = 500) -> str:
     return content[:limit]
 
 
+def _looks_like_textual_tool_call(content: str) -> bool:
+    normalized = content.strip()
+    if not normalized:
+        return False
+    return (
+        "tool_calls" in normalized
+        and "invoke name=" in normalized
+        and (
+            "DSML" in normalized
+            or normalized.startswith("<tool_calls")
+            or normalized.startswith("<｜｜")
+        )
+    )
+
+
 def _tool_call_summaries(tool_calls: list[Any]) -> list[dict[str, Any]]:
     return [
         {
@@ -396,6 +411,15 @@ class LangChainAgentRunner:
                 if self._force_answer_with_available_evidence:
                     tool_calls = []
                 if not tool_calls:
+                    if (
+                        self._force_answer_with_available_evidence
+                        and _looks_like_textual_tool_call(text)
+                    ):
+                        logger.warning(
+                            "[agent] suppressed_textual_tool_call_after_force_answer preview=%s",
+                            quoted(text, limit=300),
+                        )
+                        text = ""
                     if self._force_answer_with_available_evidence and not text:
                         text = self._forced_answer_text or FORCED_NO_EVIDENCE_ANSWER
                     if text:

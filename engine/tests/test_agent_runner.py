@@ -581,6 +581,36 @@ class FakeLoopingOpenKbDocumentModel:
         return FakeToolCall(content="should not reach here")
 
 
+class FakeDsmlAfterOpenLimitModel(FakeLoopingOpenKbDocumentModel):
+    def invoke(self, messages):
+        self.calls += 1
+        self.last_messages = messages
+        if self.calls <= 5:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_open_{self.calls}",
+                        "name": "open_kb_document",
+                        "args": {
+                            "kb_uid": "kb-a",
+                            "file_uid": "file-a",
+                            "offset": (self.calls - 1) * 1000,
+                            "window_size": 1000,
+                        },
+                    }
+                ]
+            )
+        return FakeToolCall(
+            content=(
+                "<｜｜DSML｜｜tool_calls>\n"
+                "<｜｜DSML｜｜invoke name=\"open_kb_document\">\n"
+                "<｜｜DSML｜｜parameter name=\"file_uid\" string=\"true\">file-a</｜｜DSML｜｜parameter>\n"
+                "</｜｜DSML｜｜invoke>\n"
+                "</｜｜DSML｜｜tool_calls>"
+            )
+        )
+
+
 def test_runner_records_max_iterations_error_trace():
     recorder = FakeTraceRecorder()
     runner = LangChainAgentRunner(
@@ -625,6 +655,30 @@ def test_runner_forces_answer_after_five_open_kb_document_calls_for_same_run():
     assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
     assert event_types(lines)[-2:] == ["token", "done"]
     token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    assert "还没读取完整篇文档" in token_text
+    assert "是否继续" in token_text
+
+
+def test_runner_suppresses_textual_dsml_tool_call_after_open_limit():
+    model = FakeDsmlAfterOpenLimitModel()
+    tool = FakeOpenKbDocumentTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[tool],
+        max_iterations=10,
+    )
+
+    lines = list(
+        runner.stream(
+            "Explain hierarchical anchoring",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    assert tool.calls == 5
+    assert "DSML" not in token_text
+    assert "open_kb_document" not in token_text
     assert "还没读取完整篇文档" in token_text
     assert "是否继续" in token_text
 
