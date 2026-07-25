@@ -659,6 +659,30 @@ def test_runner_forces_answer_after_five_open_kb_document_calls_for_same_run():
     assert "是否继续" in token_text
 
 
+def test_runner_immediately_answers_when_open_limit_reached_on_final_iteration():
+    model = FakeLoopingOpenKbDocumentModel()
+    tool = FakeOpenKbDocumentTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[tool],
+        max_iterations=5,
+    )
+
+    lines = list(
+        runner.stream(
+            "Explain the paper in detail",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    assert tool.calls == 5
+    assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
+    assert event_types(lines)[-2:] == ["token", "done"]
+    token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    assert "还没读取完整篇文档" in token_text
+    assert "是否继续" in token_text
+
+
 def test_runner_suppresses_textual_dsml_tool_call_after_open_limit():
     model = FakeDsmlAfterOpenLimitModel()
     tool = FakeOpenKbDocumentTool()

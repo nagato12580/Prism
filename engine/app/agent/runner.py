@@ -619,6 +619,20 @@ class LangChainAgentRunner:
                                 )
                             )
                         )
+                        _record_trace_step(
+                            trace_recorder,
+                            step_type="final_answer",
+                            output_json={"content": FORCED_PARTIAL_DOCUMENT_ANSWER},
+                        )
+                        _finish_trace(trace_recorder, "success")
+                        logger.info(
+                            "[agent] open_kb_document_limit_reached; returning forced partial answer"
+                        )
+                        yield agent_status_event("generating answer")
+                        yield token_event(FORCED_PARTIAL_DOCUMENT_ANSWER)
+                        logger.info("[agent] done")
+                        yield done_event()
+                        return
                     elif self._ungrounded_insufficient_results >= 2:
                         self._force_answer_with_available_evidence = True
                         messages.append(
