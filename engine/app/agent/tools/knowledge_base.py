@@ -435,7 +435,10 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
             status = str(response.get("status") or "ok")
             raw_evidence = list(response.get("evidence") or [])
             warnings = [
-                ToolWarning(code=str(w.get("code", "WARNING")), message=str(w.get("message", "")))
+                ToolWarning(
+                    code=str(w.get("code") or "WARNING"),
+                    message=str(w.get("message") or w.get("code") or "WARNING"),
+                )
                 for w in (response.get("warnings") or [])
                 if isinstance(w, dict)
             ]

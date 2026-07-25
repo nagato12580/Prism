@@ -132,6 +132,26 @@ def test_query_kb_passes_only_verified_scope_and_strips_tenant(db_session):
     assert "tenant_id" not in str(result)
 
 
+def test_query_kb_normalizes_empty_warning_messages(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    ctx = _context(db_session)
+    ctx.retrieval_service.query = lambda **_kwargs: {
+        "status": "degraded",
+        "evidence": [],
+        "warnings": [{"code": "RERANK_UNAVAILABLE", "message": ""}],
+    }
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "architecture",
+    })
+
+    assert result["status"] == "degraded"
+    assert result["warnings"][0]["message"] == "RERANK_UNAVAILABLE"
+
+
 def test_search_file_is_scoped_and_cursor_paginated(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 

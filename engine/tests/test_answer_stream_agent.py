@@ -97,6 +97,34 @@ def test_answer_stream_forwards_deep_search_options(monkeypatch):
     assert captured["deep_search_depth"] == "deep"
 
 
+def test_answer_stream_injects_resources_for_authorized_knowledge_scope(monkeypatch):
+    class Scope:
+        allowed_kb_uids = ("kb-a",)
+
+    class DB:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    db = DB()
+    captured = {}
+
+    monkeypatch.setattr(answer, "_Session", lambda: db)
+    monkeypatch.setattr(
+        answer,
+        "build_agent_runner",
+        lambda **kwargs: captured.update(kwargs) or FakeRunner(),
+    )
+
+    list(answer.answer_stream("hello", [], knowledge_scope=Scope()))
+
+    assert captured["knowledge_scope"].allowed_kb_uids == ("kb-a",)
+    assert captured["db_session"] is db
+    assert captured["retrieval_service"] is not None
+    assert db.closed is True
+
+
 def test_answer_stream_forwards_explicit_rag_controls(monkeypatch):
     captured = {}
 

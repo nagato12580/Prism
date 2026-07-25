@@ -15,11 +15,64 @@ from ..agent.tools.knowledge_base import build_tools as build_knowledge_tools
 from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
+from ..api.retrieval import AuthorizedKnowledgeScope as RetrievalScope
+from ..api.retrieval import RetrievalRequest, execute_retrieval
 from ..retrieval.unified import make_unified_search
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 _Session = sessionmaker(bind=_engine)
+
+
+class _KnowledgeRetrievalService:
+    def __init__(self, db):
+        self.db = db
+
+    def query(
+        self,
+        *,
+        tenant_id: str,
+        kb_uid: str,
+        query: str,
+        mode: str = "fast",
+        file_uids: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        from backend.app.models import KnowledgeTopic
+
+        topic = (
+            self.db.query(KnowledgeTopic)
+            .filter(
+                KnowledgeTopic.tenant_id == tenant_id,
+                KnowledgeTopic.kb_uid == kb_uid,
+                KnowledgeTopic.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if topic is None or not topic.active_index_generation:
+            return {
+                "status": "unavailable",
+                "evidence": [],
+                "warnings": [
+                    {
+                        "code": "RETRIEVAL_UNAVAILABLE",
+                        "message": "Knowledge base has no active index",
+                        "retryable": True,
+                    }
+                ],
+            }
+        request = RetrievalRequest(
+            query=query,
+            mode="deep" if mode == "deep" else "fast",
+            filters={"file_uids": tuple(file_uids), "source_types": ()},
+        )
+        scope = RetrievalScope(
+            tenant_id=tenant_id,
+            kb_uid=kb_uid,
+            index_generation=topic.active_index_generation,
+            graph_generation=topic.active_graph_generation,
+        )
+        response = execute_retrieval(request, scope)
+        return response.model_dump()
 
 
 def _strip_tool_guidance(prompt: str, disabled_tools: set[str]) -> str:
@@ -370,8 +423,11 @@ def answer_stream(
     rag_max_iterations: int = 3,
     session_id: str | None = None,
     user_message_id: str | None = None,
+    knowledge_scope: Any | None = None,
 ):
     history = history or []
+    db_session = _Session() if knowledge_scope is not None else None
+    retrieval_service = _KnowledgeRetrievalService(db_session) if db_session is not None else None
     # P0-3: Count previous clarify rounds from history to limit depth.
     # Each assistant message with a non-empty clarify JSON counts as one round.
     clarify_depth = sum(
@@ -398,6 +454,9 @@ def answer_stream(
             deep_search_top_k=deep_search_top_k,
             graph_hops=graph_hops,
             rag_max_iterations=rag_max_iterations,
+            knowledge_scope=knowledge_scope,
+            db_session=db_session,
+            retrieval_service=retrieval_service,
         )
         logger.info("[chat] runner_ready")
         trace_recorder = None
@@ -425,3 +484,6 @@ def answer_stream(
             quoted(str(exc), limit=300),
         )
         yield error_event(str(exc))
+    finally:
+        if db_session is not None:
+            db_session.close()
