@@ -178,24 +178,47 @@ def _load_child_texts(db, hits: list[dict], scope: SearchScope) -> list[dict]:
         return hits
     try:
         rows = (
-            db.query(KnowledgeChunk.chunk_uid, KnowledgeChunk.chunk_text)
+            db.query(
+                KnowledgeChunk.chunk_uid,
+                KnowledgeChunk.file_uid,
+                KnowledgeChunk.item_id,
+                KnowledgeChunk.chunk_text,
+            )
             .filter(
                 KnowledgeChunk.chunk_uid.in_(chunk_uids),
                 KnowledgeChunk.tenant_id == scope.tenant_id,
                 KnowledgeChunk.kb_uid == scope.kb_uid,
-                KnowledgeChunk.generation == scope.index_generation,
+                KnowledgeChunk.chunk_type == "child",
             )
             .all()
         )
     except Exception as exc:
         logger.warning("[unified] child_text_load_failed err=%s", exc)
         return hits
-    texts = {str(chunk_uid): text for chunk_uid, text in rows}
-    return [
-        {**hit, "text": texts[str(hit["chunk_id"])]}
-        if hit.get("chunk_id") and str(hit["chunk_id"]) in texts else hit
-        for hit in hits
-    ]
+    texts = {
+        (str(chunk_uid), str(file_uid or ""), str(item_id or "")): text
+        for chunk_uid, file_uid, item_id, text in rows
+    }
+    fallback_texts = {
+        str(chunk_uid): text
+        for chunk_uid, _file_uid, _item_id, text in rows
+    }
+    loaded: list[dict] = []
+    for hit in hits:
+        chunk_id = hit.get("chunk_id")
+        if not chunk_id:
+            loaded.append(hit)
+            continue
+        key = (
+            str(chunk_id),
+            str(hit.get("file_uid") or ""),
+            str(hit.get("item_id") or ""),
+        )
+        text = texts.get(key)
+        if text is None:
+            text = fallback_texts.get(str(chunk_id))
+        loaded.append({**hit, "text": text} if text is not None else hit)
+    return loaded
 
 
 def _merge_source_marker(existing: dict, incoming: dict) -> None:

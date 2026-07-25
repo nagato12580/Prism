@@ -394,3 +394,46 @@ def test_unified_search_filters_stale_document_chunks_from_retrieval():
         db.close()
 
     assert [row["chunk_id"] for row in out] == ["chunk-live"]
+
+
+@patch("engine.app.retrieval.unified.expand_candidates", lambda *args, **kwargs: [])
+@patch("engine.app.retrieval.unified.rerank", lambda q, c, **kw: c)
+@patch("engine.app.retrieval.unified.recall", lambda *a, **kw: _recalled({
+    "chunk_id": "chunk-side-index",
+    "item_id": "item-side-index",
+    "file_uid": "file-side-index",
+    "score": 0.8,
+}))
+def test_unified_search_loads_chunk_text_when_index_generation_differs_from_parse_generation():
+    db = _test_session()
+    try:
+        db.add(
+            KnowledgeItem(
+                id="item-side-index",
+                tenant_id="tenant-test",
+                kb_uid="kb-test",
+                title="Side indexed item",
+                user_id="default-user",
+            )
+        )
+        db.add(
+            KnowledgeChunk(
+                id="internal-side-index-row",
+                chunk_uid="chunk-side-index",
+                tenant_id="tenant-test",
+                kb_uid="kb-test",
+                file_uid="file-side-index",
+                generation="parse-version-1",
+                item_id="item-side-index",
+                chunk_text="Text must be loaded even though active index generation is different.",
+                chunk_type="child",
+            )
+        )
+        db.commit()
+
+        out = unified_search("side index?", top_k=5, mode="fast", db=db, graph_client=None, scope=SCOPE)
+    finally:
+        db.close()
+
+    assert out[0]["chunk_id"] == "chunk-side-index"
+    assert out[0]["text"] == "Text must be loaded even though active index generation is different."
