@@ -328,6 +328,69 @@ def _file_summary(file: KnowledgeFile) -> FileSummary:
     )
 
 
+def _resolve_file_reference(
+    db: Session,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+    file_ref: str,
+) -> KnowledgeFile:
+    normalized = file_ref.strip()
+    file = (
+        db.query(KnowledgeFile)
+        .filter(
+            KnowledgeFile.file_uid == normalized,
+            KnowledgeFile.kb_uid == kb_uid,
+            KnowledgeFile.tenant_id == tenant_id,
+            KnowledgeFile.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if file is not None:
+        return file
+
+    matches = (
+        db.query(KnowledgeFile)
+        .filter(
+            KnowledgeFile.kb_uid == kb_uid,
+            KnowledgeFile.tenant_id == tenant_id,
+            KnowledgeFile.deleted_at.is_(None),
+            or_(
+                KnowledgeFile.title == normalized,
+                KnowledgeFile.original_filename == normalized,
+            ),
+        )
+        .order_by(asc(KnowledgeFile.file_uid))
+        .limit(2)
+        .all()
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise KnowledgeToolInvalidRequest(
+            f"file reference '{file_ref}' matches multiple documents; use file_uid"
+        )
+    raise KnowledgeToolNotFound("document not found in the authorized scope")
+
+
+def _resolve_file_references(
+    db: Session,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+    file_refs: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        _resolve_file_reference(
+            db,
+            tenant_id=tenant_id,
+            kb_uid=kb_uid,
+            file_ref=file_ref,
+        ).file_uid
+        for file_ref in file_refs
+    )
+
+
 def _evidence_item_from_raw(raw: dict[str, Any]) -> EvidenceItem:
     """Project a canonical Evidence dict into the public, de-tenantized DTO."""
     excerpt = str(
@@ -438,13 +501,20 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
     ) -> dict[str, Any]:
         try:
             scope, resolved_kb_uid = _resolve_allowed_kb(ctx, kb_uid)
+            db = _require_db(ctx)
             retrieval = _require_retrieval(ctx)
+            resolved_file_uids = _resolve_file_references(
+                db,
+                tenant_id=scope.tenant_id,
+                kb_uid=resolved_kb_uid,
+                file_refs=tuple(file_filter),
+            )
             response = retrieval.query(
                 tenant_id=scope.tenant_id,
                 kb_uid=resolved_kb_uid,
                 query=query_text,
                 mode="deep" if mode == "deep" else "fast",
-                file_uids=tuple(file_filter),
+                file_uids=resolved_file_uids,
             )
             status = str(response.get("status") or "ok")
             raw_evidence = list(response.get("evidence") or [])
@@ -565,18 +635,12 @@ def _build_find_kb_document(ctx: ToolContext) -> StructuredTool:
         try:
             scope = _require_allowed_kb(ctx, kb_uid)
             db = _require_db(ctx)
-            file = (
-                db.query(KnowledgeFile)
-                .filter(
-                    KnowledgeFile.file_uid == file_uid,
-                    KnowledgeFile.kb_uid == kb_uid,
-                    KnowledgeFile.tenant_id == scope.tenant_id,
-                    KnowledgeFile.deleted_at.is_(None),
-                )
-                .first()
+            file = _resolve_file_reference(
+                db,
+                tenant_id=scope.tenant_id,
+                kb_uid=kb_uid,
+                file_ref=file_uid,
             )
-            if file is None:
-                raise KnowledgeToolNotFound("document not found in the authorized scope")
             content = file.content_text or ""
             regex = _compile_patterns(patterns, use_regex, case_sensitive)
             matches: list[FindMatch] = []
@@ -634,18 +698,12 @@ def _build_open_kb_document(ctx: ToolContext) -> StructuredTool:
         try:
             scope = _require_allowed_kb(ctx, kb_uid)
             db = _require_db(ctx)
-            file = (
-                db.query(KnowledgeFile)
-                .filter(
-                    KnowledgeFile.file_uid == file_uid,
-                    KnowledgeFile.kb_uid == kb_uid,
-                    KnowledgeFile.tenant_id == scope.tenant_id,
-                    KnowledgeFile.deleted_at.is_(None),
-                )
-                .first()
+            file = _resolve_file_reference(
+                db,
+                tenant_id=scope.tenant_id,
+                kb_uid=kb_uid,
+                file_ref=file_uid,
             )
-            if file is None:
-                raise KnowledgeToolNotFound("document not found in the authorized scope")
             content = file.content_text or ""
             length = len(content)
             if line is not None:

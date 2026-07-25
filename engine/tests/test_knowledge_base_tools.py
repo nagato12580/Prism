@@ -132,6 +132,21 @@ def test_query_kb_passes_only_verified_scope_and_strips_tenant(db_session):
     assert "tenant_id" not in str(result)
 
 
+def test_query_kb_resolves_file_filter_filenames_to_file_uids(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    ctx = _context(db_session)
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "architecture",
+        "file_filter": ["architecture.md"],
+    })
+
+    assert result["status"] == "ok"
+    assert ctx.retrieval_service.calls[0]["file_uids"] == ("file-a",)
+
+
 def test_query_kb_maps_default_to_single_authorized_kb(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 
@@ -229,6 +244,37 @@ def test_find_and_open_document_are_bounded_and_path_safe(db_session):
     assert opened["data"]["content"] == "alpha line\nn"
     assert "secret" not in str(found).lower()
     assert "storage_uri" not in str(opened)
+
+
+def test_find_document_resolves_original_filename_to_file_uid(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    result = build_tools(_context(db_session))["find_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "architecture.md",
+        "patterns": ["needle"],
+    })
+
+    assert result["status"] == "ok"
+    assert result["data"]["file_uid"] == "file-a"
+    assert result["data"]["matches"]
+
+
+def test_open_document_resolves_title_to_file_uid(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    result = build_tools(_context(db_session))["open_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "Architecture Guide",
+        "offset": 0,
+        "window_size": 5,
+    })
+
+    assert result["status"] == "ok"
+    assert result["data"]["file_uid"] == "file-a"
+    assert result["data"]["content"] == "alpha"
 
 
 def test_get_mindmap_and_registered_names_are_exact(db_session):
