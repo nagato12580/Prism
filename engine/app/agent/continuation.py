@@ -45,6 +45,8 @@ def _parse_state(value: Any) -> AgentContinuation | None:
         isinstance(item, str) and item.strip() for item in (objective, kb_uid, file_uid)
     ):
         return None
+    if len(kb_uid.strip()) > 128 or len(file_uid.strip()) > 128:
+        return None
     if not isinstance(next_offset, int) or isinstance(next_offset, bool) or next_offset < 0:
         return None
     if not isinstance(has_more_after, bool) or not has_more_after:
@@ -53,8 +55,8 @@ def _parse_state(value: Any) -> AgentContinuation | None:
     return AgentContinuation(
         version=1,
         objective=objective.strip()[:8000],
-        kb_uid=kb_uid.strip()[:128],
-        file_uid=file_uid.strip()[:128],
+        kb_uid=kb_uid.strip(),
+        file_uid=file_uid.strip(),
         next_offset=next_offset,
         has_more_after=True,
     )
@@ -83,7 +85,10 @@ def resolve_effective_objective(
     for item in reversed(history):
         if not isinstance(item, dict) or item.get("role") != "user":
             continue
-        content = str(item.get("content") or "").strip()
+        content = item.get("content")
+        if not isinstance(content, str):
+            continue
+        content = content.strip()
         if content and not is_bare_continuation(content):
-            return content
+            return content[:8000]
     return query

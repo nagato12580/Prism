@@ -58,6 +58,22 @@ def test_malformed_version_99_state_falls_back_to_last_substantive_user_question
     assert resolve_effective_objective("继续", history, state) == "层次锚定的超参数怎么设置？"
 
 
+def test_history_fallback_skips_non_string_content():
+    history = [
+        {"role": "user", "content": "有效问题"},
+        {"role": "user", "content": ["不是问题"]},
+        {"role": "user", "content": {"query": "也不是问题"}},
+    ]
+
+    assert resolve_effective_objective("继续", history, None) == "有效问题"
+
+
+def test_history_fallback_objective_is_bounded():
+    history = [{"role": "user", "content": "o" * 8001}]
+
+    assert resolve_effective_objective("继续", history, None) == "o" * 8000
+
+
 def test_substantive_current_query_supersedes_state():
     state = AgentContinuation(**STATE)
 
@@ -80,17 +96,16 @@ def test_invalid_cursor_completion_and_empty_strings_are_not_resumable():
         assert continuation_from_history([{"role": "assistant", "continuation": malformed}]) is None
 
 
-def test_state_text_is_truncated_to_public_contract_bounds():
+def test_state_objective_is_truncated_but_oversized_identifiers_are_rejected():
     oversized = {
         **STATE,
         "objective": "o" * 8001,
-        "kb_uid": "k" * 129,
-        "file_uid": "f" * 129,
     }
 
     state = continuation_from_history([{"role": "assistant", "continuation": oversized}])
 
     assert state is not None
     assert len(state.objective) == 8000
-    assert len(state.kb_uid) == 128
-    assert len(state.file_uid) == 128
+    for field in ("kb_uid", "file_uid"):
+        malformed = {**STATE, field: "x" * 129}
+        assert continuation_from_history([{"role": "assistant", "continuation": malformed}]) is None
