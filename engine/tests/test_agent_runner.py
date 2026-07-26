@@ -4,6 +4,7 @@ import os
 import re
 import time
 
+import pytest
 from langchain_core.messages import ToolMessage
 
 if not os.environ.get("DATABASE_URL"):
@@ -585,13 +586,17 @@ class FakeOpenKbDocumentTool:
 
     def invoke(self, args):
         self.calls += 1
+        content = f"window {self.calls}"
+        offset = args.get("offset", 0)
         return json.dumps(
             {
                 "status": "ok",
                 "data": {
+                    "kb_uid": args["kb_uid"],
                     "file_uid": args["file_uid"],
-                    "offset": args.get("offset", 0),
-                    "content": f"window {self.calls}",
+                    "offset": offset,
+                    "next_offset": offset + len(content),
+                    "content": content,
                     "has_more_after": True,
                 },
             }
@@ -601,6 +606,8 @@ class FakeOpenKbDocumentTool:
 class FakeNestedOpenKbDocumentTool(FakeOpenKbDocumentTool):
     def invoke(self, args):
         self.calls += 1
+        content = f"nested window {self.calls}"
+        offset = args.get("offset", 0)
         return json.dumps(
             {
                 "status": "success",
@@ -608,9 +615,11 @@ class FakeNestedOpenKbDocumentTool(FakeOpenKbDocumentTool):
                     "summary": {
                         "status": "ok",
                         "data": {
+                            "kb_uid": args["kb_uid"],
                             "file_uid": args["file_uid"],
-                            "offset": args.get("offset", 0),
-                            "content": f"nested window {self.calls}",
+                            "offset": offset,
+                            "next_offset": offset + len(content),
+                            "content": content,
                             "has_more_after": True,
                         },
                     }
@@ -1197,7 +1206,7 @@ def test_runner_forces_answer_after_five_open_kb_document_calls_for_same_run():
 
     assert tool.calls == 5
     assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
-    assert event_types(lines)[-2:] == ["token", "done"]
+    assert event_types(lines)[-3:] == ["token", "continuation", "done"]
     token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
     assert "还没读取完整篇文档" in token_text
     assert "是否继续" in token_text
@@ -1221,7 +1230,7 @@ def test_runner_immediately_answers_when_open_limit_reached_on_final_iteration()
 
     assert tool.calls == 5
     assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
-    assert event_types(lines)[-2:] == ["token", "done"]
+    assert event_types(lines)[-3:] == ["token", "continuation", "done"]
     token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
     assert "还没读取完整篇文档" in token_text
     assert "是否继续" in token_text
@@ -1978,15 +1987,23 @@ class FakeRecordingDocumentTool:
         index = len(self.args) - 1
         window = self.windows[index] if index < len(self.windows) else {}
         offset = window.get("offset", args.get("offset", 0))
+        content = window.get("content")
+        if content is None:
+            requested_next_offset = window.get("next_offset")
+            if isinstance(requested_next_offset, int) and not isinstance(requested_next_offset, bool):
+                content = "x" * max(0, requested_next_offset - offset)
+            else:
+                content = f"window {index + 1}"
+        next_offset = window.get("next_offset", offset + len(content))
         return json.dumps(
             {
-                "status": "ok",
+                "status": window.get("status", "ok"),
                 "data": {
                     "kb_uid": window.get("kb_uid", args.get("kb_uid", "kb-hyper")),
                     "file_uid": window.get("file_uid", args.get("file_uid", "file-hyper")),
                     "offset": offset,
-                    "next_offset": window.get("next_offset", offset + 100),
-                    "content": window.get("content", f"window {index + 1}"),
+                    "next_offset": next_offset,
+                    "content": content,
                     "has_more_after": window.get("has_more_after", True),
                 },
             },
@@ -2137,7 +2154,11 @@ def test_fifth_open_emits_safe_continuation_from_furthest_window():
         {"offset": 100, "next_offset": 200},
         {"offset": 500, "next_offset": 600},
         {"offset": 200, "next_offset": 300},
-        {"offset": 900, "next_offset": 1000, "content": "furthest secret excerpt"},
+        {
+            "offset": 900,
+            "next_offset": 1000,
+            "content": "furthest secret excerpt".ljust(100, "x"),
+        },
         {"offset": 400, "next_offset": 500},
     ]
     model = FakeScriptedOpenModel(_five_open_calls(requested_offsets), final_text="")
@@ -2257,3 +2278,151 @@ def test_forced_document_cap_answer_uses_window_wording_not_page_number():
 
     assert "5 个窗口" in token_text
     assert "第5页" not in token_text
+
+
+def _document_window_messages(status="ok", **overrides):
+    data = {
+        "kb_uid": "kb-valid",
+        "file_uid": "file-valid",
+        "offset": 10,
+        "next_offset": 14,
+        "content": "abcd",
+        "has_more_after": True,
+    }
+    data.update(overrides)
+    return [
+        ToolMessage(
+            content=json.dumps({"status": status, "data": data}),
+            tool_call_id="call_window",
+        )
+    ]
+
+
+@pytest.mark.parametrize("status", ["error", "no_hits", "failed", None, ""])
+def test_document_window_extraction_rejects_non_success_status(status):
+    assert runner_mod._document_windows_from_messages(
+        _document_window_messages(status=status)
+    ) == []
+
+
+@pytest.mark.parametrize("status", ["ok", "success", "degraded"])
+def test_document_window_extraction_accepts_explicit_success_statuses(status):
+    windows = runner_mod._document_windows_from_messages(
+        _document_window_messages(status=status)
+    )
+
+    assert windows == [
+        {
+            "kb_uid": "kb-valid",
+            "file_uid": "file-valid",
+            "offset": 10,
+            "next_offset": 14,
+            "content": "abcd",
+            "has_more_after": True,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"content": ""},
+        {"content": "   ", "next_offset": 13},
+        {"offset": "10"},
+        {"offset": True},
+        {"offset": -1},
+        {"next_offset": "14"},
+        {"next_offset": False},
+        {"next_offset": -1},
+        {"offset": 10, "next_offset": 9},
+        {"offset": 10, "next_offset": 13},
+        {"has_more_after": "false"},
+        {"kb_uid": None},
+        {"kb_uid": ""},
+        {"file_uid": None},
+        {"file_uid": ""},
+    ],
+)
+def test_document_window_extraction_rejects_malformed_progress(overrides):
+    assert runner_mod._document_windows_from_messages(
+        _document_window_messages(**overrides)
+    ) == []
+
+
+def test_malformed_document_windows_do_not_emit_continuation():
+    windows = [
+        {"status": "error", "offset": 0, "next_offset": 4, "content": "data"},
+        {"offset": 4, "next_offset": 4, "content": ""},
+        {"offset": True, "next_offset": 5, "content": "data"},
+        {"offset": 8, "next_offset": 20, "content": "short"},
+        {
+            "offset": 20,
+            "next_offset": 24,
+            "content": "data",
+            "has_more_after": "false",
+        },
+    ]
+    model = FakeScriptedOpenModel(_five_open_calls(), final_text="")
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeRecordingDocumentTool(windows)],
+        max_iterations=10,
+    )
+
+    lines = list(runner.stream("总结全文", [{"role": "user", "content": "previous"}]))
+
+    assert "continuation" not in event_types(lines)
+
+
+def test_document_cap_normalization_preserves_generic_five_page_reference():
+    original = "实验要求参与者读取了5页材料"
+
+    assert runner_mod._normalize_document_cap_progress(original) == original
+
+
+@pytest.mark.parametrize("prefix", ["已", "已经"])
+def test_document_cap_normalization_rewrites_only_trace_style_progress(prefix):
+    assert runner_mod._normalize_document_cap_progress(
+        f"我{prefix}读取到第 5 页，继续分析"
+    ) == "我已读取了 5 个窗口，继续分析"
+
+
+def test_runner_reuse_resets_resume_state_before_substantive_request():
+    model = FakeScriptedOpenModel(
+        [("open_kb_document", {"file_uid": "file-hyper", "offset": 0})]
+    )
+    tool = FakeRecordingDocumentTool()
+    runner = LangChainAgentRunner(model=model, tools=[tool])
+
+    list(runner.stream("继续", _continuation_history()))
+    model.calls = [("open_kb_document", {"file_uid": "file-hyper", "offset": 0})]
+    model.invocations = []
+    list(
+        runner.stream(
+            "改为检查文档开头",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    assert tool.args == [
+        {"kb_uid": "kb-hyper", "file_uid": "file-hyper", "offset": 1651},
+        {"file_uid": "file-hyper", "offset": 0},
+    ]
+
+
+def test_global_iteration_limit_uses_continuation_objective_for_synthesis():
+    model = FakeScriptedOpenModel(
+        [("open_kb_document", {"file_uid": "file-hyper", "offset": 0})],
+        final_text="阶段性答案",
+    )
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeRecordingDocumentTool()],
+        max_iterations=1,
+    )
+
+    list(runner.stream("继续", _continuation_history()))
+
+    synthesis_prompt = model.invocations[-1][1].content
+    assert CONTINUATION_STATE["objective"] in synthesis_prompt
+    assert "用户问题：继续\n" not in synthesis_prompt

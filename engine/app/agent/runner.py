@@ -49,6 +49,7 @@ class SynthesisEvidence:
 
 _TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="agent-tool")
 OPEN_KB_DOCUMENT_PER_FILE_LIMIT = 5
+DOCUMENT_WINDOW_SUCCESS_STATUSES = frozenset({"ok", "success", "degraded"})
 FORCED_PARTIAL_DOCUMENT_ANSWER = (
     "我已经连续读取了这篇文档的 5 个窗口，但目前还没读取完整篇文档。"
     "我会先基于已经读取到的内容回答；是否继续读取后续部分，请回复“继续”。"
@@ -174,25 +175,53 @@ def _decoded_tool_results(messages: list[Any]) -> list[dict[str, Any]]:
 def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     for result in _decoded_tool_results(messages):
-        data = result.get("data")
-        if not isinstance(data, dict):
-            continue
-        content = data.get("content")
-        kb_uid = data.get("kb_uid")
-        file_uid = data.get("file_uid")
-        if not isinstance(content, str) or not content.strip() or not file_uid:
-            continue
-        windows.append(
-            {
-                "kb_uid": str(kb_uid) if kb_uid else "",
-                "file_uid": str(file_uid),
-                "offset": data.get("offset"),
-                "next_offset": data.get("next_offset"),
-                "content": content.strip(),
-                "has_more_after": bool(data.get("has_more_after")),
-            }
-        )
+        window = _validated_document_window(result)
+        if window is not None:
+            windows.append(window)
     return windows
+
+
+def _validated_document_window(result: dict[str, Any]) -> dict[str, Any] | None:
+    result_status = result.get("status")
+    if (
+        not isinstance(result_status, str)
+        or result_status.strip().lower() not in DOCUMENT_WINDOW_SUCCESS_STATUSES
+    ):
+        return None
+    data = result.get("data")
+    if not isinstance(data, dict):
+        return None
+    content = data.get("content")
+    kb_uid = data.get("kb_uid")
+    file_uid = data.get("file_uid")
+    offset = data.get("offset")
+    next_offset = data.get("next_offset")
+    has_more_after = data.get("has_more_after")
+    if (
+        not isinstance(content, str)
+        or not content.strip()
+        or not isinstance(kb_uid, str)
+        or not kb_uid.strip()
+        or not isinstance(file_uid, str)
+        or not file_uid.strip()
+        or not isinstance(offset, int)
+        or isinstance(offset, bool)
+        or offset < 0
+        or not isinstance(next_offset, int)
+        or isinstance(next_offset, bool)
+        or next_offset < 0
+        or next_offset != offset + len(content)
+        or not isinstance(has_more_after, bool)
+    ):
+        return None
+    return {
+        "kb_uid": kb_uid.strip(),
+        "file_uid": file_uid.strip(),
+        "offset": offset,
+        "next_offset": next_offset,
+        "content": content,
+        "has_more_after": has_more_after,
+    }
 
 
 def _document_window_from_payload(
@@ -202,33 +231,7 @@ def _document_window_from_payload(
     if status != "success":
         return None
     result = _normalized_tool_result(payload)
-    data = result.get("data")
-    if not isinstance(data, dict):
-        return None
-    content = data.get("content")
-    kb_uid = data.get("kb_uid")
-    file_uid = data.get("file_uid")
-    next_offset = data.get("next_offset")
-    if (
-        not isinstance(content, str)
-        or not content.strip()
-        or not isinstance(kb_uid, str)
-        or not kb_uid.strip()
-        or not isinstance(file_uid, str)
-        or not file_uid.strip()
-        or not isinstance(next_offset, int)
-        or isinstance(next_offset, bool)
-        or next_offset < 0
-    ):
-        return None
-    return {
-        "kb_uid": kb_uid.strip(),
-        "file_uid": file_uid.strip(),
-        "offset": data.get("offset"),
-        "next_offset": next_offset,
-        "content": content.strip(),
-        "has_more_after": bool(data.get("has_more_after")),
-    }
+    return _validated_document_window(result)
 
 
 def _bounded_evidence_text(candidate: Any) -> str:
@@ -519,7 +522,7 @@ def _partial_document_answer_from_messages(messages: list[Any]) -> str:
 
 def _normalize_document_cap_progress(text: str) -> str:
     return re.sub(
-        r"(?:已经|已)读取到\s*第\s*5\s*页|读取了\s*5\s*页",
+        r"(?:已经|已)读取到\s*第\s*5\s*页",
         "已读取了 5 个窗口",
         text,
     )
