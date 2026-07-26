@@ -26,6 +26,7 @@ from backend.app.models import KnowledgeFile, KnowledgeTopic
 
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 from engine.app.agent.tools.contracts import ToolEnvelope, ToolProblem, ToolWarning
+from engine.app.observability import logger
 
 
 # --------------------------------------------------------------------------- #
@@ -598,13 +599,18 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
                     cursor=coverage_cursor,
                 )
                 warnings: list[ToolWarning] = []
+                warning_keys: set[tuple[str, str]] = set()
                 retrieval_health: dict[str, Any] = {}
                 selected_by_file: dict[str, EvidenceItem] = {}
                 degraded = False
 
                 def merge_response(response: dict[str, Any]) -> None:
                     nonlocal degraded
-                    warnings.extend(_warnings_from_response(response))
+                    for warning in _warnings_from_response(response):
+                        key = (warning.code, warning.message)
+                        if key not in warning_keys:
+                            warning_keys.add(key)
+                            warnings.append(warning)
                     health = response.get("retrieval_health")
                     if isinstance(health, dict):
                         _merge_retrieval_health(retrieval_health, health)
@@ -624,12 +630,18 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
                             file_uids=requested_file_uids,
                             top_k=global_top_k,
                         )
-                    except Exception as exc:  # isolate retrieval provider failures
+                    except Exception:  # isolate retrieval provider failures per page
+                        logger.exception(
+                            "[knowledge.query_kb] retrieval failed "
+                            "phase=global trace_id=%s kb_uid=%s",
+                            _trace(ctx),
+                            resolved_kb_uid,
+                        )
                         global_response = {
                             "status": "unavailable",
                             "warnings": [{
                                 "code": "RETRIEVAL_UNAVAILABLE",
-                                "message": str(exc) or "retrieval is unavailable",
+                                "message": "retrieval is unavailable",
                             }],
                         }
                     merge_response(global_response)
@@ -657,12 +669,19 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
                                 file_uids=(file_uid,),
                                 top_k=1,
                             )
-                        except Exception as exc:  # keep successful files usable
+                        except Exception:  # keep successful files usable
+                            logger.exception(
+                                "[knowledge.query_kb] retrieval failed "
+                                "phase=directed trace_id=%s kb_uid=%s file_uid=%s",
+                                _trace(ctx),
+                                resolved_kb_uid,
+                                file_uid,
+                            )
                             directed_response = {
                                 "status": "unavailable",
                                 "warnings": [{
                                     "code": "RETRIEVAL_UNAVAILABLE",
-                                    "message": str(exc) or "retrieval is unavailable",
+                                    "message": "retrieval is unavailable",
                                 }],
                                 "retrieval_health": {file_uid: "unavailable"},
                             }

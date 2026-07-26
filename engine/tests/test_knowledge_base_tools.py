@@ -1,4 +1,5 @@
 import base64
+import json
 
 from types import SimpleNamespace
 
@@ -367,6 +368,85 @@ def test_query_kb_per_file_coverage_reports_unavailable_file_as_missing(db_sessi
         "global": "ok", "file-000": "unavailable",
     }
     assert result["warnings"][0]["code"] == "FILE_UNAVAILABLE"
+
+
+def test_query_kb_per_file_coverage_redacts_retrieval_exception_details(
+    db_session, caplog
+):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    sensitive_parts = (
+        "secret-token-123",
+        "https://provider.invalid/query?token=secret-token-123",
+        "C:\\private\\provider\\request.json",
+    )
+
+    class RaisingRetrievalService:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, **kwargs):
+            self.calls.append(kwargs)
+            raise RuntimeError(" | ".join(sensitive_parts))
+
+    _seed_numbered_files(db_session, 2)
+    service = RaisingRetrievalService()
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+
+    with caplog.at_level("ERROR", logger="uvicorn.error"):
+        result = build_tools(ctx)["query_kb"].invoke({
+            "kb_uid": "kb-a",
+            "query_text": "all files",
+            "coverage": "per_file",
+        })
+
+    public_json = json.dumps(result)
+    assert all(part not in public_json for part in sensitive_parts)
+    assert result["warnings"] == [{
+        "code": "RETRIEVAL_UNAVAILABLE",
+        "message": "retrieval is unavailable",
+    }]
+    assert len(service.calls) == 3
+    error_records = [
+        record
+        for record in caplog.records
+        if "[knowledge.query_kb] retrieval failed" in record.getMessage()
+    ]
+    assert len(error_records) == 3
+    assert all(record.exc_info is not None for record in error_records)
+
+
+def test_query_kb_per_file_coverage_deduplicates_provider_warnings_stably(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    first_warning = {"code": "DENSE_UNAVAILABLE", "message": "dense unavailable"}
+    second_warning = {"code": "RERANK_UNAVAILABLE", "message": "rerank unavailable"}
+
+    class RepeatingWarningService(CoverageRetrievalService):
+        def query(self, **kwargs):
+            response = super().query(**kwargs)
+            response["status"] = "degraded"
+            response["warnings"] = (
+                [first_warning]
+                if len(self.calls) == 1
+                else [second_warning, first_warning]
+            )
+            return response
+
+    _seed_numbered_files(db_session, 30)
+    service = RepeatingWarningService(global_file_uids=())
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all files",
+        "coverage": "per_file",
+    })
+
+    assert len(service.calls) == 31
+    assert result["warnings"] == [first_warning, second_warning]
 
 
 def test_query_kb_per_file_coverage_pages_thirty_files_by_file_uid_cursor(db_session):
