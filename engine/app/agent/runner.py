@@ -158,8 +158,8 @@ def _normalized_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _decoded_tool_results(messages: list[Any]) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
+def _decoded_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, ToolMessage):
             continue
@@ -168,25 +168,35 @@ def _decoded_tool_results(messages: list[Any]) -> list[dict[str, Any]]:
         except Exception:
             continue
         if isinstance(payload, dict):
-            results.append(_normalized_tool_result(payload))
-    return results
+            payloads.append(payload)
+    return payloads
+
+
+def _decoded_tool_results(messages: list[Any]) -> list[dict[str, Any]]:
+    return [
+        _normalized_tool_result(payload)
+        for payload in _decoded_tool_payloads(messages)
+    ]
 
 
 def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
-    for result in _decoded_tool_results(messages):
-        window = _validated_document_window(result)
+    for payload in _decoded_tool_payloads(messages):
+        window = _document_window_from_envelope(payload)
         if window is not None:
             windows.append(window)
     return windows
 
 
+def _is_successful_document_status(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and value.strip().lower() in DOCUMENT_WINDOW_SUCCESS_STATUSES
+    )
+
+
 def _validated_document_window(result: dict[str, Any]) -> dict[str, Any] | None:
-    result_status = result.get("status")
-    if (
-        not isinstance(result_status, str)
-        or result_status.strip().lower() not in DOCUMENT_WINDOW_SUCCESS_STATUSES
-    ):
+    if not _is_successful_document_status(result.get("status")):
         return None
     data = result.get("data")
     if not isinstance(data, dict):
@@ -224,14 +234,20 @@ def _validated_document_window(result: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _document_window_from_envelope(payload: dict[str, Any]) -> dict[str, Any] | None:
+    result = _normalized_tool_result(payload)
+    if result is not payload and not _is_successful_document_status(payload.get("status")):
+        return None
+    return _validated_document_window(result)
+
+
 def _document_window_from_payload(
     payload: dict[str, Any],
     status: str,
 ) -> dict[str, Any] | None:
     if status != "success":
         return None
-    result = _normalized_tool_result(payload)
-    return _validated_document_window(result)
+    return _document_window_from_envelope(payload)
 
 
 def _bounded_evidence_text(candidate: Any) -> str:
@@ -827,6 +843,8 @@ class LangChainAgentRunner:
         trace_recorder: Any | None = None,
     ):
         history = history or []
+        self._timed_out_tools = set()
+        self._pending_clarify = None
         self._has_grounding_evidence = False
         self._force_answer_with_available_evidence = False
         self._forced_answer_text = None

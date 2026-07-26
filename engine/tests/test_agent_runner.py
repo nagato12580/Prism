@@ -2426,3 +2426,140 @@ def test_global_iteration_limit_uses_continuation_objective_for_synthesis():
     synthesis_prompt = model.invocations[-1][1].content
     assert CONTINUATION_STATE["objective"] in synthesis_prompt
     assert "用户问题：继续\n" not in synthesis_prompt
+
+
+def _nested_document_window_messages(outer_status, inner_status):
+    inner = json.loads(_document_window_messages(status=inner_status)[0].content)
+    envelope = {"payload": {"summary": inner}}
+    if outer_status is not None:
+        envelope["status"] = outer_status
+    return [
+        ToolMessage(
+            content=json.dumps(envelope),
+            tool_call_id="call_nested_window",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("outer_status", "inner_status"),
+    [
+        ("error", "ok"),
+        (None, "ok"),
+        ("success", "failed"),
+    ],
+)
+def test_document_window_extraction_rejects_failed_nested_status_chain(
+    outer_status,
+    inner_status,
+):
+    assert runner_mod._document_windows_from_messages(
+        _nested_document_window_messages(outer_status, inner_status)
+    ) == []
+
+
+class FakeNestedStatusDocumentTool:
+    name = "open_kb_document"
+
+    def __init__(self, outer_status, inner_status):
+        self.outer_status = outer_status
+        self.inner_status = inner_status
+
+    def invoke(self, args):
+        content = "data"
+        offset = args.get("offset", 0)
+        inner = {
+            "status": self.inner_status,
+            "data": {
+                "kb_uid": args["kb_uid"],
+                "file_uid": args["file_uid"],
+                "offset": offset,
+                "next_offset": offset + len(content),
+                "content": content,
+                "has_more_after": True,
+            },
+        }
+        envelope = {"payload": {"summary": inner}}
+        if self.outer_status is not None:
+            envelope["status"] = self.outer_status
+        return json.dumps(envelope)
+
+
+@pytest.mark.parametrize(
+    ("outer_status", "inner_status"),
+    [
+        ("error", "ok"),
+        (None, "ok"),
+        ("success", "failed"),
+    ],
+)
+def test_failed_nested_status_chain_never_emits_continuation(
+    outer_status,
+    inner_status,
+):
+    runner = LangChainAgentRunner(
+        model=FakeScriptedOpenModel(_five_open_calls(), final_text=""),
+        tools=[FakeNestedStatusDocumentTool(outer_status, inner_status)],
+        max_iterations=10,
+    )
+
+    lines = list(runner.stream("总结全文", [{"role": "user", "content": "previous"}]))
+
+    assert "continuation" not in event_types(lines)
+
+
+class FakeTimeoutThenSuccessTool:
+    name = "raw_document_search"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        if self.calls == 1:
+            time.sleep(0.1)
+        return json.dumps({"status": "success", "summary": "fresh invocation"})
+
+
+def test_runner_reuse_clears_timed_out_tool_disablement():
+    model = FakeSlowToolModel()
+    tool = FakeTimeoutThenSuccessTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[tool],
+        tool_timeout_seconds=0.01,
+    )
+
+    list(runner.stream("first request", [{"role": "user", "content": "previous"}]))
+    model.calls = 0
+    second_lines = list(
+        runner.stream("second request", [{"role": "user", "content": "previous"}])
+    )
+
+    second_result = next(
+        json.loads(line)["data"]
+        for line in second_lines
+        if json.loads(line)["type"] == "tool_result"
+    )
+    assert tool.calls == 2
+    assert second_result["status"] == "success"
+    assert second_result["summary"] == "fresh invocation"
+
+
+def test_runner_reuse_drops_unemitted_pending_clarify():
+    model = FakeClarifyModel()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeClarifyTool()],
+        max_iterations=1,
+    )
+
+    first_lines = list(
+        runner.stream("first request", [{"role": "user", "content": "previous"}])
+    )
+    second_lines = list(
+        runner.stream("second request", [{"role": "user", "content": "previous"}])
+    )
+
+    assert "clarify" not in event_types(first_lines)
+    assert "clarify" not in event_types(second_lines)
