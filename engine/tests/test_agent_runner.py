@@ -824,14 +824,13 @@ def test_synthesis_selection_orders_distinct_file_coverage_before_duplicate_file
             content=json.dumps(
                 {
                     "data": {
-                        "coverage": {
-                            "evidence": [
-                                {"text": "file-a coverage one", "file_uid": "file-a"},
-                                {"text": "file-a coverage two", "file_uid": "file-a"},
-                                {"text": "file-b coverage", "file_uid": "file-b"},
-                                {"text": "file-c coverage", "file_uid": "file-c"},
-                            ]
-                        }
+                        "coverage": {"files_considered": 3},
+                        "evidence": [
+                            {"text": "file-a coverage one", "file_uid": "file-a"},
+                            {"text": "file-a coverage two", "file_uid": "file-a"},
+                            {"text": "file-b coverage", "file_uid": "file-b"},
+                            {"text": "file-c coverage", "file_uid": "file-c"},
+                        ],
                     }
                 }
             ),
@@ -883,6 +882,33 @@ def test_synthesis_selection_preserves_each_required_tool_result_within_budget()
 
     assert [item.tool_call_id for item in selected[:2]] == ["call_first", "call_second"]
     assert [item.text for item in selected[:2]] == ["first exact fact", "second document fact"]
+
+
+def test_synthesis_selection_uses_unique_candidate_after_required_duplicate():
+    shared = "shared fact " * 20
+    messages = [
+        ToolMessage(
+            content=json.dumps(
+                {"data": {"evidence": [{"text": shared}, {"text": "call-a detail " * 20}]}}
+            ),
+            tool_call_id="call_a",
+        ),
+        ToolMessage(
+            content=json.dumps(
+                {"data": {"evidence": [{"text": shared}, {"text": "call-b detail " * 20}]}}
+            ),
+            tool_call_id="call_b",
+        ),
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_a", "call_b"],
+        char_budget=500,
+    )
+
+    assert {item.tool_call_id for item in selected} >= {"call_a", "call_b"}
+    assert any(item.tool_call_id == "call_b" and "call-b detail" in item.text for item in selected)
 
 
 def test_synthesis_selection_reserves_budget_for_last_required_tool_result():

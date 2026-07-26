@@ -231,6 +231,11 @@ def _synthesis_evidence_candidates(messages: list[Any]) -> list[SynthesisEvidenc
                 values = container.get(key)
                 if not isinstance(values, list):
                     continue
+                candidate_kind = (
+                    "coverage"
+                    if container is data and key == "evidence" and isinstance(data.get("coverage"), dict)
+                    else kind
+                )
                 for value in values:
                     text = _bounded_evidence_text(value)
                     if not text:
@@ -241,30 +246,7 @@ def _synthesis_evidence_candidates(messages: list[Any]) -> list[SynthesisEvidenc
                     candidates.append(
                         SynthesisEvidence(
                             text=text,
-                            kind=kind,
-                            tool_call_id=tool_call_id,
-                            file_uid=str(file_uid) if file_uid else None,
-                            result_index=result_index,
-                        )
-                    )
-
-        coverage = data.get("coverage")
-        if isinstance(coverage, dict):
-            for key in list_kinds:
-                values = coverage.get(key)
-                if not isinstance(values, list):
-                    continue
-                for value in values:
-                    text = _bounded_evidence_text(value)
-                    if not text:
-                        continue
-                    file_uid = (
-                        value.get("file_uid") if isinstance(value, dict) else None
-                    ) or coverage.get("file_uid") or data.get("file_uid") or result.get("file_uid")
-                    candidates.append(
-                        SynthesisEvidence(
-                            text=text,
-                            kind="coverage",
+                            kind=candidate_kind,
                             tool_call_id=tool_call_id,
                             file_uid=str(file_uid) if file_uid else None,
                             result_index=result_index,
@@ -284,13 +266,13 @@ def _select_synthesis_evidence(
     selected_ids: set[int] = set()
     used_chars = 0
 
-    def add(candidate: SynthesisEvidence) -> bool:
+    def add(candidate: SynthesisEvidence, *, force: bool = False) -> bool:
         nonlocal used_chars
         candidate_id = id(candidate)
         normalized = re.sub(r"\s+", " ", candidate.text).strip()
         if candidate_id in selected_ids or not normalized or normalized in seen_texts:
             return False
-        if selected and used_chars + len(normalized) > char_budget:
+        if not force and selected and used_chars + len(normalized) > char_budget:
             return False
         selected.append(candidate)
         selected_ids.add(candidate_id)
@@ -298,17 +280,25 @@ def _select_synthesis_evidence(
         used_chars += len(normalized)
         return True
 
-    required_ids = [str(call_id) for call_id in (required_tool_call_ids or [])]
-    required_groups = [
-        [candidate for candidate in candidates if candidate.tool_call_id == call_id]
-        for call_id in required_ids
-    ]
-    representatives = [group[0] for group in required_groups if group]
-    for index, candidate in enumerate(representatives):
-        remaining_required_chars = sum(len(item.text) for item in representatives[index + 1 :])
-        if remaining_required_chars and used_chars + len(candidate.text) + remaining_required_chars > char_budget:
+    required_ids = {str(call_id) for call_id in (required_tool_call_ids or [])}
+    required_groups: list[list[SynthesisEvidence]] = []
+    required_group_by_id: dict[str, list[SynthesisEvidence]] = {}
+    for candidate in candidates:
+        if candidate.tool_call_id not in required_ids:
             continue
-        add(candidate)
+        group = required_group_by_id.get(candidate.tool_call_id)
+        if group is None:
+            group = []
+            required_group_by_id[candidate.tool_call_id] = group
+            required_groups.append(group)
+        group.append(candidate)
+
+    for group in required_groups:
+        for candidate in group:
+            normalized = re.sub(r"\s+", " ", candidate.text).strip()
+            if normalized and normalized not in seen_texts:
+                add(candidate, force=True)
+                break
     for group in required_groups:
         for candidate in group:
             add(candidate)
