@@ -277,6 +277,69 @@ def test_open_document_resolves_title_to_file_uid(db_session):
     assert result["data"]["content"] == "alpha"
 
 
+def test_open_document_returns_next_offset_for_initial_window(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    result = build_tools(_context(db_session))["open_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "offset": 0,
+        "window_size": 12,
+    })
+
+    assert result["data"]["next_offset"] == 12
+
+
+def test_open_document_returns_document_end_for_tail_request(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    result = build_tools(_context(db_session))["open_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "offset": 35,
+        "window_size": 100,
+    })
+
+    assert result["data"]["next_offset"] == len("alpha line\nneedle appears here\nomega line")
+    assert result["data"]["has_more_after"] is False
+
+
+def test_open_document_returns_next_offset_for_line_window(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    result = build_tools(_context(db_session))["open_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "line": 2,
+        "window_size": 7,
+    })
+
+    line_start = len("alpha line\n")
+    assert result["data"]["next_offset"] == line_start + len(result["data"]["content"])
+
+
+def test_open_document_returns_document_end_for_empty_content(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    file_row = db_session.query(KnowledgeFile).filter_by(file_uid="file-a").one()
+    file_row.content_text = ""
+    db_session.commit()
+
+    result = build_tools(_context(db_session))["open_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "offset": 0,
+        "window_size": 12,
+    })
+
+    assert result["data"]["next_offset"] == 0
+    assert result["data"]["has_more_after"] is False
+
+
 def test_get_mindmap_and_registered_names_are_exact(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 

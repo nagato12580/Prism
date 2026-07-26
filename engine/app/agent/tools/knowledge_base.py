@@ -148,6 +148,7 @@ class OpenDocumentData(_StrictDTO):
     kb_uid: str
     offset: int
     window_size: int
+    next_offset: int
     content: str
     has_more_before: bool
     has_more_after: bool
@@ -726,6 +727,7 @@ def _build_open_kb_document(ctx: ToolContext) -> StructuredTool:
                 kb_uid=file.kb_uid,
                 offset=start,
                 window_size=window_size,
+                next_offset=end,
                 content=window,
                 has_more_before=start > 0,
                 has_more_after=end < length,
