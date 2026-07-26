@@ -11,6 +11,7 @@ const chatPageSource = readFileSync(resolve(root, 'src/pages/ChatPage.tsx'), 'ut
 
 let server
 let chatStoreModule
+let chatContinuationModule
 
 before(async () => {
   server = await createServer({
@@ -20,6 +21,7 @@ before(async () => {
     server: { middlewareMode: true, hmr: false },
     appType: 'custom',
   })
+  chatContinuationModule = await server.ssrLoadModule('/src/app/chatContinuation.ts')
   chatStoreModule = await server.ssrLoadModule('/src/app/chatStore.ts')
 })
 
@@ -58,20 +60,51 @@ test('declares the exact version 1 continuation shape on messages', () => {
 })
 
 test('normalizes persisted continuation state and rejects malformed state', () => {
-  const { normalizeAgentContinuation } = chatStoreModule
+  const { normalizeAgentContinuation } = chatContinuationModule
   assert.equal(typeof normalizeAgentContinuation, 'function')
-  assert.deepEqual(normalizeAgentContinuation(continuation), continuation)
-  assert.equal(
-    normalizeAgentContinuation({ ...continuation, next_offset: '24' }),
-    undefined,
+  assert.deepEqual(
+    normalizeAgentContinuation({
+      ...continuation,
+      objective: `  ${'x'.repeat(8_010)}  `,
+      kb_uid: '  kb-public  ',
+      file_uid: '  file-public  ',
+    }),
+    {
+      ...continuation,
+      objective: 'x'.repeat(8_000),
+    },
   )
+
+  for (const invalid of [
+    null,
+    [],
+    { ...continuation, version: 2 },
+    { ...continuation, objective: '   ' },
+    { ...continuation, kb_uid: '' },
+    { ...continuation, file_uid: '   ' },
+    { ...continuation, kb_uid: 'k'.repeat(129) },
+    { ...continuation, file_uid: 'f'.repeat(129) },
+    { ...continuation, next_offset: '24' },
+    { ...continuation, next_offset: -1 },
+    { ...continuation, next_offset: 1.5 },
+    { ...continuation, has_more_after: false },
+  ]) {
+    assert.equal(normalizeAgentContinuation(invalid), undefined)
+  }
 
   const { useChatStore } = chatStoreModule
   useChatStore.setState({ currentSessionId: 'session-a', messages: [], sessionMessages: {} })
   useChatStore.getState().loadMessages('session-a', [
-    persistedMessage('valid', 'assistant', '', { agent_continuation: continuation }),
+    persistedMessage('valid', 'assistant', '', {
+      agent_continuation: {
+        ...continuation,
+        objective: '  Continue synthesizing the document  ',
+        kb_uid: '  kb-public  ',
+        file_uid: '  file-public  ',
+      },
+    }),
     persistedMessage('invalid', 'assistant', 'answer 2', {
-      agent_continuation: { ...continuation, has_more_after: 'yes' },
+      agent_continuation: { ...continuation, has_more_after: false },
     }),
   ])
 
@@ -113,27 +146,92 @@ test('setLastContinuation updates only the named assistant in the named session'
   assert.equal(state.sessionMessages['session-b'][0].agentContinuation, undefined)
 })
 
-test('history indexes the filtered messages before attaching continuation to the latest assistant', () => {
-  assert.match(
-    chatPageSource,
-    /export function buildChatHistory\(messages: Message\[]\)\s*{[\s\S]*const historyMessages = messages\.filter\(\(message\) => !message\.streaming\)[\s\S]*let latestAssistantIndex = -1[\s\S]*for \(let index = historyMessages\.length - 1; index >= 0; index -= 1\)[\s\S]*historyMessages\[index\]\.role === 'assistant'[\s\S]*return historyMessages\.map\(\(message, index\) => \([\s\S]*content: historyContent\(message\)[\s\S]*index === latestAssistantIndex && message\.agentContinuation[\s\S]*agent_continuation: message\.agentContinuation/,
-    'History must find and map the assistant index on the same post-filter array.',
-  )
-  assert.doesNotMatch(chatPageSource, /findLastIndex/, 'ES2020 does not provide findLastIndex.')
+test('buildAgentHistory filters before indexing and adds continuation only to the latest assistant', () => {
+  const { buildAgentHistory } = chatContinuationModule
+  assert.equal(typeof buildAgentHistory, 'function')
+
+  const history = buildAgentHistory([
+    { id: 'old', role: 'assistant', content: 'old', agentContinuation: { ...continuation, next_offset: 8 } },
+    { id: 'user', role: 'user', content: 'follow up' },
+    {
+      id: 'latest',
+      role: 'assistant',
+      content: 'partial answer',
+      clarify: { question: 'Choose one', options: [{ label: 'A', value: 'a' }] },
+      agentContinuation: continuation,
+    },
+    { id: 'streaming', role: 'assistant', content: '', streaming: true, agentContinuation: { ...continuation, next_offset: 40 } },
+  ])
+
+  assert.deepEqual(history, [
+    { role: 'assistant', content: 'old' },
+    { role: 'user', content: 'follow up' },
+    {
+      role: 'assistant',
+      content: 'partial answer\nChoose one\nA',
+      continuation,
+    },
+  ])
+
+  assert.deepEqual(buildAgentHistory([
+    { id: 'old', role: 'assistant', content: 'old', agentContinuation: continuation },
+    { id: 'latest', role: 'assistant', content: 'latest' },
+  ]), [
+    { role: 'assistant', content: 'old' },
+    { role: 'assistant', content: 'latest' },
+  ])
 })
 
-test('stream continuation events are validated, stored before done, and queued for persistence', () => {
-  const continuationBranch = /else if \(msg\.type === 'continuation'\)\s*{([\s\S]*?)}\s*else if \(msg\.type === 'done'\)/.exec(chatPageSource)
-  assert.ok(continuationBranch, 'continuation handling must occur before done')
-  assert.match(continuationBranch[1], /normalizeAgentContinuation\(msg\.data\)/)
-  assert.match(continuationBranch[1], /if \(continuation\)/)
-  assert.match(continuationBranch[1], /setLastContinuation\(continuation,\s*sessionId,\s*assistantMessageId\)/)
-  assert.match(continuationBranch[1], /if \(assistantPersistedId\) queueAssistantProcessSnapshot\(sessionId,\s*assistantPersistedId\)/)
-})
+test('continuation event helper validates data and persists only after updating state', () => {
+  const { applyAgentContinuationEvent } = chatContinuationModule
+  assert.equal(typeof applyAgentContinuationEvent, 'function')
 
-test('assistant process snapshots persist continuation state or null', () => {
+  const calls = []
+  let state
+  const accepted = applyAgentContinuationEvent(
+    { ...continuation, objective: '  normalized objective  ' },
+    (value) => {
+      state = value
+      calls.push('set')
+    },
+    () => {
+      assert.equal(state.objective, 'normalized objective')
+      calls.push('persist')
+    },
+  )
+  assert.equal(accepted, true)
+  assert.deepEqual(calls, ['set', 'persist'])
+
+  const rejectedCalls = []
+  assert.equal(applyAgentContinuationEvent(
+    { ...continuation, next_offset: -1 },
+    () => rejectedCalls.push('set'),
+    () => rejectedCalls.push('persist'),
+  ), false)
+  assert.deepEqual(rejectedCalls, [])
+
   assert.match(
     chatPageSource,
-    /function buildAssistantProcess\(message: Message\)\s*{[\s\S]*agent_continuation:\s*message\.agentContinuation \|\| null/,
+    /msg\.type === 'continuation'[\s\S]*applyAgentContinuationEvent\([\s\S]*setLastContinuation[\s\S]*queueAssistantProcessSnapshot/,
+    'The stream branch must use the tested event helper for state and snapshot ordering.',
   )
+})
+
+test('buildAssistantProcess keeps continuation under the persistence-only key', () => {
+  const { buildAssistantProcess } = chatContinuationModule
+  assert.equal(typeof buildAssistantProcess, 'function')
+  assert.deepEqual(buildAssistantProcess({
+    id: 'assistant',
+    role: 'assistant',
+    content: 'answer',
+    traceId: 'trace-1',
+    agentStatus: 'done',
+    agentContinuation: continuation,
+  }), {
+    trace_id: 'trace-1',
+    agent_status: 'done',
+    tool_runs: [],
+    thinking_steps: [],
+    agent_continuation: continuation,
+  })
 })

@@ -28,7 +28,9 @@ import {
 import {
   useChatStore,
   SOURCE_TYPE_OPTIONS,
-  normalizeAgentContinuation,
+  applyAgentContinuationEvent,
+  buildAgentHistory,
+  buildAssistantProcess as buildAssistantProcessSnapshot,
   normalizeEvidenceItems,
   type ClarifyOption,
   type ClarifyRequest,
@@ -190,25 +192,6 @@ function historyContent(message: Message) {
   return message.content
 }
 
-export function buildChatHistory(messages: Message[]) {
-  const historyMessages = messages.filter((message) => !message.streaming)
-  let latestAssistantIndex = -1
-  for (let index = historyMessages.length - 1; index >= 0; index -= 1) {
-    if (historyMessages[index].role === 'assistant') {
-      latestAssistantIndex = index
-      break
-    }
-  }
-
-  return historyMessages.map((message, index) => ({
-    role: message.role,
-    content: historyContent(message),
-    ...(index === latestAssistantIndex && message.agentContinuation
-      ? { agent_continuation: message.agentContinuation }
-      : {}),
-  }))
-}
-
 function shouldAutoGenerateTitle(title?: string | null) {
   const normalized = (title || '').trim()
   return !normalized || normalized === '新对话' || normalized === 'New conversation' || normalized === 'Untitled session'
@@ -216,11 +199,8 @@ function shouldAutoGenerateTitle(title?: string | null) {
 
 function buildAssistantProcess(message: Message) {
   return {
+    ...buildAssistantProcessSnapshot(message),
     trace_id: message.traceId || null,
-    agent_status: message.agentStatus || null,
-    tool_runs: message.toolRuns || [],
-    thinking_steps: message.thinkingSteps || [],
-    agent_continuation: message.agentContinuation || null,
   }
 }
 
@@ -389,7 +369,7 @@ export function ChatPage() {
       }
     }
 
-    const history = buildChatHistory(messages)
+    const history = buildAgentHistory(messages, historyContent)
 
     const userMessageId = genId()
     const temporaryAssistantMessageId = genId()
@@ -524,11 +504,12 @@ export function ChatPage() {
         } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data), sessionId, assistantMessageId)
         else if (msg.type === 'token') enqueueTypewriterText(safeString(msg.data))
         else if (msg.type === 'continuation') {
-          const continuation = normalizeAgentContinuation(msg.data)
-          if (continuation) {
-            setLastContinuation(continuation, sessionId, assistantMessageId)
-            if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
-          }
+          const persistedId = assistantPersistedId
+          applyAgentContinuationEvent(
+            msg.data,
+            (continuation) => setLastContinuation(continuation, sessionId, assistantMessageId),
+            persistedId ? () => queueAssistantProcessSnapshot(sessionId, persistedId) : undefined,
+          )
         }
         else if (msg.type === 'done') {
           clearStreamTimeout()

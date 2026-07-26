@@ -1,5 +1,13 @@
 import { create } from 'zustand'
 import type { ChatSessionOut, ChatMessageOut, ResourceMediaType } from './api'
+import { normalizeAgentContinuation } from './chatContinuation'
+
+export {
+  applyAgentContinuationEvent,
+  buildAgentHistory,
+  buildAssistantProcess,
+  normalizeAgentContinuation,
+} from './chatContinuation'
 
 export interface Source {
   chunk_id: string
@@ -166,28 +174,6 @@ function normalizeToolRunStatus(value: unknown): ToolRunStatus {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-export function normalizeAgentContinuation(value: unknown): AgentContinuation | undefined {
-  if (
-    !isPlainRecord(value) ||
-    value.version !== 1 ||
-    typeof value.objective !== 'string' ||
-    typeof value.kb_uid !== 'string' ||
-    typeof value.file_uid !== 'string' ||
-    typeof value.next_offset !== 'number' ||
-    !Number.isFinite(value.next_offset) ||
-    typeof value.has_more_after !== 'boolean'
-  ) return undefined
-
-  return {
-    version: 1,
-    objective: value.objective,
-    kb_uid: value.kb_uid,
-    file_uid: value.file_uid,
-    next_offset: value.next_offset,
-    has_more_after: value.has_more_after,
-  }
 }
 
 export function normalizeEvidenceItems(value: unknown): EvidenceItem[] | undefined {

@@ -102,7 +102,7 @@ def test_backend_proxy_forwards_public_continuation_history_without_scope_leaks(
         {
             "role": "assistant",
             "content": "partial answer",
-            "agent_continuation": {
+            "continuation": {
                 "version": 1,
                 "objective": "finish the synthesis",
                 "kb_uid": "kb-a",
