@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 
 from langchain_core.messages import ToolMessage
@@ -838,7 +839,10 @@ def test_synthesis_selection_orders_distinct_file_coverage_before_duplicate_file
         )
     ]
 
-    selected = runner_mod._select_synthesis_evidence(messages)
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_coverage"],
+    )
 
     assert [item.kind for item in selected] == ["coverage"] * 4
     assert [item.file_uid for item in selected] == ["file-a", "file-b", "file-c", "file-a"]
@@ -904,14 +908,14 @@ def test_synthesis_selection_uses_unique_candidate_after_required_duplicate():
     selected = runner_mod._select_synthesis_evidence(
         messages,
         required_tool_call_ids=["call_a", "call_b"],
-        char_budget=500,
+        char_budget=550,
     )
 
     assert {item.tool_call_id for item in selected} >= {"call_a", "call_b"}
     assert any(item.tool_call_id == "call_b" and "call-b detail" in item.text for item in selected)
 
 
-def test_synthesis_selection_reserves_budget_for_last_required_tool_result():
+def test_synthesis_selection_keeps_required_results_within_total_budget():
     messages = [
         ToolMessage(
             content=json.dumps({"data": {"content": "a" * 700}}),
@@ -929,7 +933,7 @@ def test_synthesis_selection_reserves_budget_for_last_required_tool_result():
         char_budget=800,
     )
 
-    assert "call_last" in [item.tool_call_id for item in selected]
+    assert sum(len(re.sub(r"\s+", " ", item.text).strip()) for item in selected) <= 800
 
 
 class FakeFinalOpenEvidenceModel:

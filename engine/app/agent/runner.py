@@ -266,13 +266,13 @@ def _select_synthesis_evidence(
     selected_ids: set[int] = set()
     used_chars = 0
 
-    def add(candidate: SynthesisEvidence, *, force: bool = False) -> bool:
+    def add(candidate: SynthesisEvidence) -> bool:
         nonlocal used_chars
         candidate_id = id(candidate)
         normalized = re.sub(r"\s+", " ", candidate.text).strip()
         if candidate_id in selected_ids or not normalized or normalized in seen_texts:
             return False
-        if not force and selected and used_chars + len(normalized) > char_budget:
+        if selected and used_chars + len(normalized) > char_budget:
             return False
         selected.append(candidate)
         selected_ids.add(candidate_id)
@@ -297,11 +297,8 @@ def _select_synthesis_evidence(
         for candidate in group:
             normalized = re.sub(r"\s+", " ", candidate.text).strip()
             if normalized and normalized not in seen_texts:
-                add(candidate, force=True)
+                add(candidate)
                 break
-    for group in required_groups:
-        for candidate in group:
-            add(candidate)
 
     def newest_first(kind: str) -> list[SynthesisEvidence]:
         return sorted(
