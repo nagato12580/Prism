@@ -2828,3 +2828,87 @@ def test_runner_reuse_drops_unemitted_pending_clarify():
 
     assert "clarify" not in event_types(first_lines)
     assert "clarify" not in event_types(second_lines)
+
+
+class FakeIterationLimitSemanticTool:
+    name = "query_kb"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        return json.dumps(
+            {
+                "status": "success",
+                "data": {
+                    "evidence": [
+                        {
+                            "text": "最终语义证据：实验要求参与者读取了5页材料",
+                            "file_uid": "semantic-file",
+                        }
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        )
+
+
+class FakeIterationLimitSemanticModel:
+    def __init__(self):
+        self.calls = 0
+        self.synthesis_messages = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_final_semantic",
+                        "name": "query_kb",
+                        "args": {"query": "比较实验阅读要求"},
+                    }
+                ]
+            )
+        self.synthesis_messages = messages
+        return FakeToolCall(content="证据原文：我已读取到第5页。")
+
+
+def test_iteration_limit_semantic_synthesis_uses_generic_prompt_after_final_tool():
+    model = FakeIterationLimitSemanticModel()
+    tool = FakeIterationLimitSemanticTool()
+    runner = LangChainAgentRunner(model=model, tools=[tool], max_iterations=1)
+
+    lines = list(
+        runner.stream(
+            "比较实验阅读要求",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    prompt = "\n".join(message.content for message in model.synthesis_messages)
+    token_text = "".join(
+        json.loads(line)["data"]
+        for line in lines
+        if json.loads(line)["type"] == "token"
+    )
+    types = event_types(lines)
+    assert tool.calls == 1
+    assert model.calls == 2
+    assert types.index("tool_result") < types.index("token")
+    assert "比较实验阅读要求" in prompt
+    assert "最终语义证据：实验要求参与者读取了5页材料" in prompt
+    assert "工具迭代预算" in prompt
+    for unsupported in (
+        "文档尚未完整读取",
+        "五次读取",
+        "5 个窗口",
+        "5个窗口",
+        "是否继续读取",
+    ):
+        assert unsupported not in prompt
+    assert token_text == "证据原文：我已读取到第5页。"

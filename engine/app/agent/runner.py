@@ -579,6 +579,39 @@ def _document_cap_synthesis_messages(
     ]
 
 
+def _iteration_limit_synthesis_messages(
+    query: str,
+    messages: list[Any],
+    required_tool_call_ids: list[str] | None = None,
+) -> list[Any]:
+    evidence_texts = [
+        item.text
+        for item in _select_synthesis_evidence(
+            messages,
+            required_tool_call_ids=required_tool_call_ids,
+        )
+    ]
+    evidence = "\n\n".join(
+        f"{index}. {text}" for index, text in enumerate(evidence_texts, start=1)
+    ) or "没有可用的工具证据。"
+    return [
+        SystemMessage(
+            content=(
+                "工具迭代预算已经耗尽。请基于所有已执行工具返回的证据直接回答用户问题。"
+                "只输出自然语言答案，不得再调用工具，不得输出 XML、DSML 或任何工具调用协议。"
+                "仅报告证据实际支持的内容与限制，不得臆测未执行的操作或没有证据支持的结论。"
+            )
+        ),
+        HumanMessage(
+            content=(
+                f"用户问题：{query}\n\n"
+                "以下是本轮工具已经返回的证据：\n\n"
+                f"{evidence}"
+            )
+        ),
+    ]
+
+
 def _grounded_fallback_answer_from_messages(
     messages: list[Any],
     required_tool_call_ids: list[str] | None = None,
@@ -1242,7 +1275,7 @@ class LangChainAgentRunner:
                     required_tool_call_ids = [
                         _resolved_tool_call_id(call) for call in tool_calls
                     ]
-                    synthesis_messages = _document_cap_synthesis_messages(
+                    synthesis_messages = _iteration_limit_synthesis_messages(
                         self._effective_query,
                         messages,
                         required_tool_call_ids=required_tool_call_ids,
