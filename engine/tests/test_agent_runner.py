@@ -2280,6 +2280,271 @@ def test_forced_document_cap_answer_uses_window_wording_not_page_number():
     assert "第5页" not in token_text
 
 
+class FakeTraceContinuationModel:
+    def __init__(self):
+        self.first_complete = False
+        self.request = 1
+        self.request_calls = {1: 0, 2: 0}
+        self.invocations = []
+        self.second_forced_messages = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        if self.first_complete and any(
+            getattr(message, "type", "") == "human" and message.content == "继续"
+            for message in messages
+        ):
+            self.request = 2
+        self.request_calls[self.request] += 1
+        call = self.request_calls[self.request]
+        self.invocations.append((self.request, messages))
+
+        if self.request == 1:
+            if call <= 5:
+                return FakeToolCall(
+                    tool_calls=[
+                        {
+                            "id": f"trace_first_open_{call}",
+                            "name": "open_kb_document",
+                            "args": {
+                                "kb_uid": "kb-hyper",
+                                "file_uid": "file-hyper",
+                                "offset": (call - 1) * 100,
+                            },
+                        }
+                    ]
+                )
+            self.first_complete = True
+            return FakeToolCall(content="我已读取到第5页，先给出阶段性结论。是否继续？")
+
+        if call == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "trace_stale_restart",
+                        "name": "open_kb_document",
+                        "args": {
+                            "kb_uid": "kb-hyper",
+                            "file_uid": "file-hyper",
+                            "offset": 0,
+                        },
+                    }
+                ]
+            )
+        if call == 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "trace_semantic_query",
+                        "name": "query_kb",
+                        "args": {
+                            "kb_uid": "kb-hyper",
+                            "query_text": "层次锚定 超参数",
+                        },
+                    }
+                ]
+            )
+        if call in {3, 4}:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"trace_resumed_open_{call}",
+                        "name": "open_kb_document",
+                        "args": {
+                            "kb_uid": "kb-hyper",
+                            "file_uid": "file-hyper",
+                            "offset": 600 + (call - 3) * 100,
+                        },
+                    }
+                ]
+            )
+        if call in {5, 6}:
+            suffix = "jump" if call == 5 else "final"
+            line = 42 if call == 5 else 84
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"trace_{suffix}_find",
+                        "name": "find_kb_document",
+                        "args": {
+                            "file_uid": "file-hyper",
+                            "query": "Adam learning rate layers",
+                        },
+                    },
+                    {
+                        "id": f"trace_{suffix}_open",
+                        "name": "open_kb_document",
+                        "args": {"file_uid": "file-hyper", "line": line},
+                    },
+                ]
+            )
+
+        self.second_forced_messages = messages
+        return FakeToolCall(
+            content=(
+                "我已读取到第5页：使用 Adam，初始学习率为 0.01，"
+                "层数取 {3, 4, 5}。是否继续？"
+            )
+        )
+
+
+class FakeTraceSemanticTool:
+    name = "query_kb"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "kb_uid": args["kb_uid"],
+                    "evidence": [
+                        {
+                            "file_uid": "file-hyper",
+                            "text": f"semantic evidence {index}: hierarchical anchoring context",
+                        }
+                        for index in range(10)
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        )
+
+
+class FakeTraceFindTool:
+    name = "find_kb_document"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "file_uid": args["file_uid"],
+                    "matches": [
+                        {
+                            "line": 84,
+                            "text": "decisive find: Adam optimizer with layer counts {3, 4, 5}",
+                        }
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        )
+
+
+class FakeTraceWindowTool:
+    name = "open_kb_document"
+
+    def __init__(self):
+        self.args = []
+
+    def invoke(self, args):
+        self.args.append(dict(args))
+        call = len(self.args)
+        if call == 10:
+            content = "decisive open: initial learning rate 0.01."
+        else:
+            content = f"trace document window {call}"
+        if "line" in args:
+            offset = 800 if call == 9 else 900
+        else:
+            offset = args.get("offset", 0)
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "kb_uid": args.get("kb_uid", "kb-hyper"),
+                    "file_uid": args["file_uid"],
+                    "offset": offset,
+                    "next_offset": offset + len(content),
+                    "content": content,
+                    "has_more_after": True,
+                },
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_trace_shaped_continuation_preserves_final_evidence_and_resume_cursor():
+    objective = "层次锚定的超参数怎么设置？"
+    model = FakeTraceContinuationModel()
+    window_tool = FakeTraceWindowTool()
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeTraceSemanticTool(), FakeTraceFindTool(), window_tool],
+        max_iterations=10,
+    )
+
+    first_lines = list(
+        runner.stream(objective, [{"role": "user", "content": "previous"}])
+    )
+    first_events = [json.loads(line) for line in first_lines]
+    first_continuation = next(
+        event["data"] for event in first_events if event["type"] == "continuation"
+    )
+    first_answer = "".join(
+        event["data"] for event in first_events if event["type"] == "token"
+    )
+
+    assert first_continuation["file_uid"] == "file-hyper"
+    assert first_continuation["next_offset"] > 0
+    assert first_continuation["has_more_after"] is True
+    assert len(window_tool.args) == 5
+
+    history = [
+        {"role": "user", "content": objective},
+        {
+            "role": "assistant",
+            "content": first_answer,
+            "continuation": first_continuation,
+        },
+    ]
+    second_lines = list(runner.stream("继续", history, trace_recorder=recorder))
+    second_events = [json.loads(line) for line in second_lines]
+    second_answer = "".join(
+        event["data"] for event in second_events if event["type"] == "token"
+    )
+    second_continuation = next(
+        event["data"] for event in second_events if event["type"] == "continuation"
+    )
+
+    assert window_tool.args[5] == {
+        "kb_uid": "kb-hyper",
+        "file_uid": "file-hyper",
+        "offset": first_continuation["next_offset"],
+    }
+    assert window_tool.args[8] == {"file_uid": "file-hyper", "line": 42}
+    assert window_tool.args[9] == {"file_uid": "file-hyper", "line": 84}
+    assert len(window_tool.args[5:]) == 5
+    assert second_continuation["objective"] == objective
+    assert second_continuation["file_uid"] == "file-hyper"
+    assert second_continuation["next_offset"] > first_continuation["next_offset"]
+    assert second_continuation["has_more_after"] is True
+
+    semantic_tool_messages = [
+        message
+        for request, messages in model.invocations
+        if request == 2
+        for message in messages
+        if isinstance(message, ToolMessage)
+        and message.tool_call_id == "trace_semantic_query"
+    ]
+    semantic_payload = json.loads(semantic_tool_messages[-1].content)
+    assert len(semantic_payload["data"]["evidence"]) == 10
+
+    synthesis_prompt = model.second_forced_messages[1].content
+    assert f"用户问题：{objective}" in synthesis_prompt
+    assert "用户问题：继续\n" not in synthesis_prompt
+    assert "decisive find: Adam optimizer with layer counts {3, 4, 5}" in synthesis_prompt
+    assert "decisive open: initial learning rate 0.01" in synthesis_prompt
+    assert "Adam" in second_answer
+    assert "0.01" in second_answer
+    assert "第5页" not in second_answer
+    assert event_types(second_lines)[-3:] == ["token", "continuation", "done"]
+
+
 def _document_window_messages(status="ok", **overrides):
     data = {
         "kb_uid": "kb-valid",
