@@ -89,3 +89,46 @@ def test_backend_proxy_forwards_authorized_kbs_with_signed_scope(client, db_sess
     forwarded = str(captured["payload"]).lower()
     assert "tenant_id" not in forwarded
     assert "actor_id" not in forwarded
+
+
+def test_backend_proxy_forwards_public_continuation_history_without_scope_leaks(
+    client, db_session, monkeypatch
+):
+    _enable_scope_secret(monkeypatch)
+    _seed_owned_kb(db_session, "kb-a")
+    captured = {}
+    history = [
+        {"role": "user", "content": "continue"},
+        {
+            "role": "assistant",
+            "content": "partial answer",
+            "agent_continuation": {
+                "version": 1,
+                "objective": "finish the synthesis",
+                "kb_uid": "kb-a",
+                "file_uid": "file-a",
+                "next_offset": 24,
+                "has_more_after": True,
+            },
+        },
+    ]
+
+    async def fake_stream(signed_token, payload):
+        captured["token"] = signed_token
+        captured["payload"] = payload
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={"query": "next", "kb_uids": ["kb-a"], "history": history},
+    )
+
+    assert response.status_code == 200
+    assert captured["payload"]["history"] == history
+    forwarded = str(captured["payload"]).lower()
+    assert "tenant_id" not in forwarded
+    assert "actor_id" not in forwarded
+    assert "scope" not in forwarded
+    assert captured["token"]

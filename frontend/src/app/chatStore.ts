@@ -76,6 +76,15 @@ export interface ThinkingStep {
   tool?: string
 }
 
+export interface AgentContinuation {
+  version: 1
+  objective: string
+  kb_uid: string
+  file_uid: string
+  next_offset: number
+  has_more_after: boolean
+}
+
 type ToolRunPatch = Partial<ToolRun> & {
   traceSteps?: ThinkingStep[]
   evidenceItems?: EvidenceItem[]
@@ -92,6 +101,7 @@ export interface Message {
   clarify?: ClarifyRequest
   agentStatus?: string
   traceId?: string
+  agentContinuation?: AgentContinuation
 }
 
 interface ChatState {
@@ -115,6 +125,7 @@ interface ChatState {
   finishLastToolRun: (tool: string, data: ToolRunPatch, sessionId?: string, messageId?: string) => void
   setLastClarify: (clarify: ClarifyRequest, sessionId?: string, messageId?: string) => void
   setLastTraceId: (traceId: string, sessionId?: string, messageId?: string) => void
+  setLastContinuation: (continuation: AgentContinuation, sessionId: string, messageId: string) => void
   finishLast: (sessionId?: string, messageId?: string, remainingToolStatus?: ToolRunStatus) => void
   replaceMessageId: (sessionId: string, fromId: string, toId: string) => void
   clear: () => void
@@ -155,6 +166,28 @@ function normalizeToolRunStatus(value: unknown): ToolRunStatus {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function normalizeAgentContinuation(value: unknown): AgentContinuation | undefined {
+  if (
+    !isPlainRecord(value) ||
+    value.version !== 1 ||
+    typeof value.objective !== 'string' ||
+    typeof value.kb_uid !== 'string' ||
+    typeof value.file_uid !== 'string' ||
+    typeof value.next_offset !== 'number' ||
+    !Number.isFinite(value.next_offset) ||
+    typeof value.has_more_after !== 'boolean'
+  ) return undefined
+
+  return {
+    version: 1,
+    objective: value.objective,
+    kb_uid: value.kb_uid,
+    file_uid: value.file_uid,
+    next_offset: value.next_offset,
+    has_more_after: value.has_more_after,
+  }
 }
 
 export function normalizeEvidenceItems(value: unknown): EvidenceItem[] | undefined {
@@ -236,11 +269,15 @@ function toMessages(msgs: ChatMessageOut[]): Message[] {
     const thinkingSteps = normalizeThinkingSteps(process?.thinking_steps)
     const agentStatus = typeof process?.agent_status === 'string' ? process.agent_status : undefined
     const traceId = typeof process?.trace_id === 'string' ? process.trace_id : undefined
+    const agentContinuation = m.role === 'assistant'
+      ? normalizeAgentContinuation(process?.agent_continuation)
+      : undefined
     const isPendingAssistantMessage =
       m.role === 'assistant' &&
       !(m.content || '').trim() &&
       !m.sources?.length &&
-      !m.clarify
+      !m.clarify &&
+      !agentContinuation
 
     return {
       id: m.id,
@@ -253,6 +290,7 @@ function toMessages(msgs: ChatMessageOut[]): Message[] {
       thinkingSteps,
       agentStatus,
       traceId,
+      agentContinuation,
     }
   })
 }
@@ -468,6 +506,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) =>
       updateMessagesForSession(s, sessionId, (messages) =>
         replaceMessage(messages, messageId, (last) => ({ ...last, traceId })),
+      ),
+    ),
+  setLastContinuation: (continuation, sessionId, messageId) =>
+    set((s) =>
+      updateMessagesForSession(s, sessionId, (messages) =>
+        replaceMessage(messages, messageId, (message) =>
+          message.role === 'assistant' ? { ...message, agentContinuation: continuation } : message,
+        ),
       ),
     ),
   finishLast: (sessionId, messageId, remainingToolStatus = 'success') =>

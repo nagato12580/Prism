@@ -28,6 +28,7 @@ import {
 import {
   useChatStore,
   SOURCE_TYPE_OPTIONS,
+  normalizeAgentContinuation,
   normalizeEvidenceItems,
   type ClarifyOption,
   type ClarifyRequest,
@@ -189,6 +190,25 @@ function historyContent(message: Message) {
   return message.content
 }
 
+export function buildChatHistory(messages: Message[]) {
+  const historyMessages = messages.filter((message) => !message.streaming)
+  let latestAssistantIndex = -1
+  for (let index = historyMessages.length - 1; index >= 0; index -= 1) {
+    if (historyMessages[index].role === 'assistant') {
+      latestAssistantIndex = index
+      break
+    }
+  }
+
+  return historyMessages.map((message, index) => ({
+    role: message.role,
+    content: historyContent(message),
+    ...(index === latestAssistantIndex && message.agentContinuation
+      ? { agent_continuation: message.agentContinuation }
+      : {}),
+  }))
+}
+
 function shouldAutoGenerateTitle(title?: string | null) {
   const normalized = (title || '').trim()
   return !normalized || normalized === '新对话' || normalized === 'New conversation' || normalized === 'Untitled session'
@@ -200,6 +220,7 @@ function buildAssistantProcess(message: Message) {
     agent_status: message.agentStatus || null,
     tool_runs: message.toolRuns || [],
     thinking_steps: message.thinkingSteps || [],
+    agent_continuation: message.agentContinuation || null,
   }
 }
 
@@ -226,6 +247,7 @@ export function ChatPage() {
   const finishLastToolRun = useChatStore((s) => s.finishLastToolRun)
   const setLastClarify = useChatStore((s) => s.setLastClarify)
   const setLastTraceId = useChatStore((s) => s.setLastTraceId)
+  const setLastContinuation = useChatStore((s) => s.setLastContinuation)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
   const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
@@ -367,9 +389,7 @@ export function ChatPage() {
       }
     }
 
-    const history = messages
-      .filter((m) => !m.streaming)
-      .map((m) => ({ role: m.role, content: historyContent(m) }))
+    const history = buildChatHistory(messages)
 
     const userMessageId = genId()
     const temporaryAssistantMessageId = genId()
@@ -503,6 +523,13 @@ export function ChatPage() {
           }, sessionId, assistantMessageId)
         } else if (msg.type === 'sources') setLastSources(normalizeSources(msg.data), sessionId, assistantMessageId)
         else if (msg.type === 'token') enqueueTypewriterText(safeString(msg.data))
+        else if (msg.type === 'continuation') {
+          const continuation = normalizeAgentContinuation(msg.data)
+          if (continuation) {
+            setLastContinuation(continuation, sessionId, assistantMessageId)
+            if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
+          }
+        }
         else if (msg.type === 'done') {
           clearStreamTimeout()
           await flushTypewriterText()
