@@ -13,12 +13,12 @@ export function normalizeAgentContinuation(value: unknown): AgentContinuation | 
   if (!objective || !kbUid || !fileUid || kbUid.length > 128 || fileUid.length > 128) {
     return undefined
   }
-  if (!Number.isInteger(value.next_offset) || (value.next_offset as number) < 0) return undefined
+  if (!Number.isSafeInteger(value.next_offset) || (value.next_offset as number) < 0) return undefined
   if (value.has_more_after !== true) return undefined
 
   return {
     version: 1,
-    objective: objective.slice(0, 8_000),
+    objective: Array.from(objective).slice(0, 8_000).join(''),
     kb_uid: kbUid,
     file_uid: fileUid,
     next_offset: value.next_offset as number,

@@ -87,6 +87,7 @@ test('normalizes persisted continuation state and rejects malformed state', () =
     { ...continuation, next_offset: '24' },
     { ...continuation, next_offset: -1 },
     { ...continuation, next_offset: 1.5 },
+    { ...continuation, next_offset: Number.MAX_SAFE_INTEGER + 1 },
     { ...continuation, has_more_after: false },
   ]) {
     assert.equal(normalizeAgentContinuation(invalid), undefined)
@@ -112,6 +113,20 @@ test('normalizes persisted continuation state and rejects malformed state', () =
   assert.deepEqual(restored[0].agentContinuation, continuation)
   assert.equal(restored[0].streaming, false, 'A persisted continuation must survive history streaming filters.')
   assert.equal(restored[1].agentContinuation, undefined)
+})
+
+test('normalizes objective length by Unicode code points without splitting emoji', () => {
+  const { normalizeAgentContinuation } = chatContinuationModule
+  const exactBoundary = `${'x'.repeat(7_999)}😀`
+
+  assert.equal(
+    normalizeAgentContinuation({ ...continuation, objective: exactBoundary })?.objective,
+    exactBoundary,
+  )
+  assert.equal(
+    normalizeAgentContinuation({ ...continuation, objective: `${exactBoundary}z` })?.objective,
+    exactBoundary,
+  )
 })
 
 test('setLastContinuation updates only the named assistant in the named session', () => {
