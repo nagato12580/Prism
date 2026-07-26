@@ -945,6 +945,30 @@ def test_synthesis_selection_keeps_required_results_within_total_budget():
     assert impossible == []
 
 
+def test_synthesis_selection_keeps_required_truncated_excerpts_distinct():
+    messages = [
+        ToolMessage(
+            content=json.dumps({"data": {"content": "a" * 700}}),
+            tool_call_id="call_first",
+        ),
+        ToolMessage(
+            content=json.dumps({"data": {"content": ("a" * 500) + ("b" * 200)}}),
+            tool_call_id="call_last",
+        ),
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_first", "call_last"],
+        char_budget=800,
+    )
+    normalized = [re.sub(r"\s+", " ", item.text).strip() for item in selected]
+
+    assert [item.tool_call_id for item in selected] == ["call_first", "call_last"]
+    assert sum(len(text) for text in normalized) <= 800
+    assert len(set(normalized)) == 2
+
+
 class FakeFinalOpenEvidenceModel:
     def __init__(self):
         self.calls = 0

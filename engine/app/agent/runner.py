@@ -184,6 +184,42 @@ def _bounded_evidence_text(candidate: Any) -> str:
     return text
 
 
+def _unique_bounded_excerpt(
+    text: str,
+    quota: int,
+    selected_texts: set[str],
+) -> str | None:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized or quota <= 0:
+        return None
+
+    excerpts = [normalized[:quota], normalized[-quota:]]
+    if quota >= 3 and len(normalized) > quota:
+        content_quota = quota - 1
+        head_length = (content_quota + 1) // 2
+        tail_length = content_quota - head_length
+        excerpts.append(
+            normalized[:head_length]
+            + "…"
+            + (normalized[-tail_length:] if tail_length else "")
+        )
+    if len(normalized) > quota:
+        excerpts.extend(
+            normalized[start : start + quota]
+            for start in range(1, len(normalized) - quota + 1)
+        )
+
+    tried: set[str] = set()
+    for excerpt in excerpts:
+        bounded = re.sub(r"\s+", " ", excerpt).strip()
+        if not bounded or len(bounded) > quota or bounded in tried:
+            continue
+        tried.add(bounded)
+        if bounded not in selected_texts:
+            return bounded
+    return None
+
+
 def _synthesis_evidence_candidates(messages: list[Any]) -> list[SynthesisEvidence]:
     candidates: list[SynthesisEvidence] = []
     list_kinds = {
@@ -298,12 +334,14 @@ def _select_synthesis_evidence(
         group.append(candidate)
 
     representatives: list[SynthesisEvidence] = []
+    representative_sources: list[tuple[list[SynthesisEvidence], int]] = []
     representative_texts: set[str] = set()
     for group in required_groups:
-        for candidate in group:
+        for candidate_index, candidate in enumerate(group):
             normalized = re.sub(r"\s+", " ", candidate.text).strip()
             if normalized and normalized not in representative_texts:
                 representatives.append(candidate)
+                representative_sources.append((group, candidate_index))
                 representative_texts.add(normalized)
                 break
 
@@ -318,11 +356,23 @@ def _select_synthesis_evidence(
         for index, candidate in enumerate(representatives[:representative_slots]):
             remaining_count = representative_slots - index
             quota = remaining_budget // remaining_count
-            text = candidate.text[:quota]
-            truncated = replace(candidate, text=text)
-            if add(truncated):
-                selected_ids.add(id(candidate))
-                remaining_budget -= len(text)
+            group, candidate_index = representative_sources[index]
+            choices = [candidate]
+            choices.extend(
+                later_candidate
+                for later_candidate in group[candidate_index + 1 :]
+                if re.sub(r"\s+", " ", later_candidate.text).strip()
+                not in representative_texts
+            )
+            for choice in choices:
+                excerpt = _unique_bounded_excerpt(choice.text, quota, seen_texts)
+                if excerpt is None:
+                    continue
+                truncated = replace(choice, text=excerpt)
+                if add(truncated):
+                    selected_ids.add(id(choice))
+                    remaining_budget -= len(excerpt)
+                    break
 
     def newest_first(kind: str) -> list[SynthesisEvidence]:
         return sorted(
