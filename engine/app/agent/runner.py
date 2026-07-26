@@ -2,6 +2,7 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -28,6 +29,15 @@ from ..graph.insights import graph_insights_context
 from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
+
+
+@dataclass(frozen=True)
+class SynthesisEvidence:
+    text: str
+    kind: str
+    tool_call_id: str
+    file_uid: str | None
+    result_index: int
 
 
 _TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="agent-tool")
@@ -167,32 +177,173 @@ def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]
     return windows
 
 
-def _tool_evidence_texts(messages: list[Any], limit: int = 12) -> list[str]:
-    texts: list[str] = []
-    seen: set[str] = set()
-    for result in _decoded_tool_results(messages):
-        containers = [result]
+def _bounded_evidence_text(candidate: Any) -> str:
+    text = re.sub(r"\s+", " ", _candidate_text_from_source(candidate)).strip()
+    if len(text) > 700:
+        return text[:697].rstrip() + "..."
+    return text
+
+
+def _synthesis_evidence_candidates(messages: list[Any]) -> list[SynthesisEvidence]:
+    candidates: list[SynthesisEvidence] = []
+    list_kinds = {
+        "matches": "match",
+        "evidence": "semantic",
+        "sources": "semantic",
+        "evidence_items": "semantic",
+        "memories": "memory",
+        "materials": "semantic",
+    }
+    result_index = -1
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        result_index += 1
+        try:
+            payload = json.loads(str(message.content))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        result = _normalized_tool_result(payload)
         data = result.get("data")
-        if isinstance(data, dict):
-            containers.append(data)
-        for container in containers:
-            content = container.get("content")
-            candidates: list[Any] = []
-            if isinstance(content, str) and content.strip():
-                candidates.append({"content": content})
-            for key in ("sources", "evidence", "evidence_items", "memories", "materials", "matches"):
+        if not isinstance(data, dict):
+            data = {}
+        tool_call_id = str(getattr(message, "tool_call_id", "") or "")
+
+        content = data.get("content")
+        if isinstance(content, str) and content.strip():
+            text = _bounded_evidence_text({"content": content})
+            if text:
+                file_uid = data.get("file_uid") or result.get("file_uid")
+                candidates.append(
+                    SynthesisEvidence(
+                        text=text,
+                        kind="document",
+                        tool_call_id=tool_call_id,
+                        file_uid=str(file_uid) if file_uid else None,
+                        result_index=result_index,
+                    )
+                )
+
+        for container in (result, data):
+            for key, kind in list_kinds.items():
                 values = container.get(key)
-                if isinstance(values, list):
-                    candidates.extend(values)
-            for candidate in candidates:
-                text = re.sub(r"\s+", " ", _candidate_text_from_source(candidate)).strip()
-                if not text or text in seen:
+                if not isinstance(values, list):
                     continue
-                seen.add(text)
-                texts.append(text[:700].rstrip() + ("..." if len(text) > 700 else ""))
-                if len(texts) >= limit:
-                    return texts
-    return texts
+                for value in values:
+                    text = _bounded_evidence_text(value)
+                    if not text:
+                        continue
+                    file_uid = (
+                        value.get("file_uid") if isinstance(value, dict) else None
+                    ) or container.get("file_uid") or data.get("file_uid") or result.get("file_uid")
+                    candidates.append(
+                        SynthesisEvidence(
+                            text=text,
+                            kind=kind,
+                            tool_call_id=tool_call_id,
+                            file_uid=str(file_uid) if file_uid else None,
+                            result_index=result_index,
+                        )
+                    )
+
+        coverage = data.get("coverage")
+        if isinstance(coverage, dict):
+            for key in list_kinds:
+                values = coverage.get(key)
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    text = _bounded_evidence_text(value)
+                    if not text:
+                        continue
+                    file_uid = (
+                        value.get("file_uid") if isinstance(value, dict) else None
+                    ) or coverage.get("file_uid") or data.get("file_uid") or result.get("file_uid")
+                    candidates.append(
+                        SynthesisEvidence(
+                            text=text,
+                            kind="coverage",
+                            tool_call_id=tool_call_id,
+                            file_uid=str(file_uid) if file_uid else None,
+                            result_index=result_index,
+                        )
+                    )
+    return candidates
+
+
+def _select_synthesis_evidence(
+    messages: list[Any],
+    required_tool_call_ids: list[str] | None = None,
+    char_budget: int = 8400,
+) -> list[SynthesisEvidence]:
+    candidates = _synthesis_evidence_candidates(messages)
+    selected: list[SynthesisEvidence] = []
+    seen_texts: set[str] = set()
+    selected_ids: set[int] = set()
+    used_chars = 0
+
+    def add(candidate: SynthesisEvidence) -> bool:
+        nonlocal used_chars
+        candidate_id = id(candidate)
+        normalized = re.sub(r"\s+", " ", candidate.text).strip()
+        if candidate_id in selected_ids or not normalized or normalized in seen_texts:
+            return False
+        if selected and used_chars + len(normalized) > char_budget:
+            return False
+        selected.append(candidate)
+        selected_ids.add(candidate_id)
+        seen_texts.add(normalized)
+        used_chars += len(normalized)
+        return True
+
+    required_ids = [str(call_id) for call_id in (required_tool_call_ids or [])]
+    required_groups = [
+        [candidate for candidate in candidates if candidate.tool_call_id == call_id]
+        for call_id in required_ids
+    ]
+    representatives = [group[0] for group in required_groups if group]
+    for index, candidate in enumerate(representatives):
+        remaining_required_chars = sum(len(item.text) for item in representatives[index + 1 :])
+        if remaining_required_chars and used_chars + len(candidate.text) + remaining_required_chars > char_budget:
+            continue
+        add(candidate)
+    for group in required_groups:
+        for candidate in group:
+            add(candidate)
+
+    def newest_first(kind: str) -> list[SynthesisEvidence]:
+        return sorted(
+            (candidate for candidate in candidates if candidate.kind == kind),
+            key=lambda candidate: -candidate.result_index,
+        )
+
+    for candidate in newest_first("match"):
+        add(candidate)
+    for candidate in newest_first("document"):
+        add(candidate)
+
+    coverage = newest_first("coverage")
+    covered_files: set[str] = set()
+    duplicate_coverage: list[SynthesisEvidence] = []
+    for candidate in coverage:
+        coverage_key = candidate.file_uid or f"result:{candidate.result_index}"
+        if coverage_key in covered_files:
+            duplicate_coverage.append(candidate)
+            continue
+        covered_files.add(coverage_key)
+        add(candidate)
+    for candidate in duplicate_coverage:
+        add(candidate)
+
+    for candidate in sorted(candidates, key=lambda item: -item.result_index):
+        add(candidate)
+    return selected
+
+
+def _tool_evidence_texts(messages: list[Any], limit: int = 12) -> list[str]:
+    return [item.text for item in _select_synthesis_evidence(messages)[:limit]]
 
 
 def _partial_document_answer_from_messages(messages: list[Any]) -> str:
@@ -217,8 +368,18 @@ def _partial_document_answer_from_messages(messages: list[Any]) -> str:
     )
 
 
-def _document_cap_synthesis_messages(query: str, messages: list[Any]) -> list[Any]:
-    evidence_texts = _tool_evidence_texts(messages)
+def _document_cap_synthesis_messages(
+    query: str,
+    messages: list[Any],
+    required_tool_call_ids: list[str] | None = None,
+) -> list[Any]:
+    evidence_texts = [
+        item.text
+        for item in _select_synthesis_evidence(
+            messages,
+            required_tool_call_ids=required_tool_call_ids,
+        )
+    ]
     evidence = "\n\n".join(
         f"{index}. {text}" for index, text in enumerate(evidence_texts, start=1)
     ) or "没有可用的文档片段。"
@@ -241,7 +402,7 @@ def _document_cap_synthesis_messages(query: str, messages: list[Any]) -> list[An
 
 
 def _grounded_fallback_answer_from_messages(messages: list[Any]) -> str:
-    snippets = _tool_evidence_texts(messages, limit=5)
+    snippets = [item.text for item in _select_synthesis_evidence(messages)[:5]]
     if not snippets:
         return _partial_document_answer_from_messages(messages)
 
@@ -766,7 +927,11 @@ class LangChainAgentRunner:
                                 )
                             )
                         )
-                        synthesis_messages = _document_cap_synthesis_messages(query, messages)
+                        synthesis_messages = _document_cap_synthesis_messages(
+                            query,
+                            messages,
+                            required_tool_call_ids=[tool_call_id],
+                        )
                         _record_trace_step(
                             trace_recorder,
                             step_type="model_invoke",
@@ -845,7 +1010,13 @@ class LangChainAgentRunner:
                             self._pending_clarify = clarify
 
                 if iteration == self.max_iterations:
-                    synthesis_messages = _document_cap_synthesis_messages(query, messages)
+                    synthesis_messages = _document_cap_synthesis_messages(
+                        query,
+                        messages,
+                        required_tool_call_ids=[
+                            str(_call_value(call, "id", "")) for call in tool_calls
+                        ],
+                    )
                     _record_trace_step(
                         trace_recorder,
                         step_type="model_invoke",

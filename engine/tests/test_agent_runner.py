@@ -750,6 +750,244 @@ def test_runner_forces_final_answer_when_last_iteration_requests_tool_with_evide
     assert recorder.finished_status == "success"
 
 
+def test_synthesis_selection_retains_decisive_final_find_result():
+    old_evidence = [
+        {"text": f"old semantic excerpt {index}", "file_uid": f"file-{index}"}
+        for index in range(10)
+    ]
+    messages = [
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "status": "success",
+                    "payload": {
+                        "summary": {
+                            "status": "ok",
+                            "data": {"evidence": old_evidence},
+                        }
+                    },
+                }
+            ),
+            tool_call_id="call_query",
+        ),
+        ToolMessage(
+            content=json.dumps(
+                {"data": {"file_uid": "older-paper", "content": "older document window one"}}
+            ),
+            tool_call_id="call_old_open_1",
+        ),
+        ToolMessage(
+            content=json.dumps(
+                {"data": {"file_uid": "older-paper", "content": "older document window two"}}
+            ),
+            tool_call_id="call_old_open_2",
+        ),
+        ToolMessage(
+            content=json.dumps(
+                {"data": {"file_uid": "older-paper", "content": "older document window three"}}
+            ),
+            tool_call_id="call_old_open_3",
+        ),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "status": "ok",
+                    "data": {
+                        "file_uid": "optimizer-paper",
+                        "matches": [{"text": "Adam, initial learning rate 0.01"}],
+                    },
+                }
+            ),
+            tool_call_id="call_find",
+        ),
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_find"],
+    )
+    prompt = runner_mod._document_cap_synthesis_messages(
+        "What was Adam's initial learning rate?",
+        messages,
+        required_tool_call_ids=["call_find"],
+    )
+
+    assert selected[0].text == "Adam, initial learning rate 0.01"
+    assert selected[0].kind == "match"
+    assert selected[0].tool_call_id == "call_find"
+    assert "0.01" in prompt[1].content
+
+
+def test_synthesis_selection_orders_distinct_file_coverage_before_duplicate_file():
+    messages = [
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "data": {
+                        "coverage": {
+                            "evidence": [
+                                {"text": "file-a coverage one", "file_uid": "file-a"},
+                                {"text": "file-a coverage two", "file_uid": "file-a"},
+                                {"text": "file-b coverage", "file_uid": "file-b"},
+                                {"text": "file-c coverage", "file_uid": "file-c"},
+                            ]
+                        }
+                    }
+                }
+            ),
+            tool_call_id="call_coverage",
+        )
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(messages)
+
+    assert [item.kind for item in selected] == ["coverage"] * 4
+    assert [item.file_uid for item in selected] == ["file-a", "file-b", "file-c", "file-a"]
+
+
+def test_synthesis_candidates_index_only_tool_results_in_message_order():
+    messages = [
+        FakeToolCall(content="ignored model response"),
+        ToolMessage(
+            content=json.dumps({"data": {"content": "first result"}}),
+            tool_call_id="call_first",
+        ),
+        FakeToolCall(content="another ignored model response"),
+        ToolMessage(
+            content=json.dumps({"data": {"content": "second result"}}),
+            tool_call_id="call_second",
+        ),
+    ]
+
+    candidates = runner_mod._synthesis_evidence_candidates(messages)
+
+    assert [item.result_index for item in candidates] == [0, 1]
+
+
+def test_synthesis_selection_preserves_each_required_tool_result_within_budget():
+    messages = [
+        ToolMessage(
+            content=json.dumps({"data": {"matches": [{"text": "first exact fact"}]}}),
+            tool_call_id="call_first",
+        ),
+        ToolMessage(
+            content=json.dumps({"data": {"content": "second document fact", "file_uid": "file-b"}}),
+            tool_call_id="call_second",
+        ),
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_first", "call_second"],
+    )
+
+    assert [item.tool_call_id for item in selected[:2]] == ["call_first", "call_second"]
+    assert [item.text for item in selected[:2]] == ["first exact fact", "second document fact"]
+
+
+def test_synthesis_selection_reserves_budget_for_last_required_tool_result():
+    messages = [
+        ToolMessage(
+            content=json.dumps({"data": {"content": "a" * 700}}),
+            tool_call_id="call_first",
+        ),
+        ToolMessage(
+            content=json.dumps({"data": {"content": "b" * 700}}),
+            tool_call_id="call_last",
+        ),
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_first", "call_last"],
+        char_budget=800,
+    )
+
+    assert "call_last" in [item.tool_call_id for item in selected]
+
+
+class FakeFinalOpenEvidenceModel:
+    def __init__(self):
+        self.calls = 0
+        self.forced_messages = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[{"id": "call_old", "name": "knowledge_search", "args": {"query": "Adam"}}]
+            )
+        if self.calls == 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_final_open",
+                        "name": "open_kb_document",
+                        "args": {"file_uid": "paper", "offset": 0},
+                    }
+                ]
+            )
+        self.forced_messages = messages
+        return FakeToolCall(content="The initial learning rate was 0.01.")
+
+
+class FakeManyOldEvidenceTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "success",
+                "payload": {
+                    "summary": {
+                        "status": "ok",
+                        "data": {
+                            "evidence": [
+                                {"text": f"old semantic excerpt {index}"}
+                                for index in range(14)
+                            ]
+                        },
+                    }
+                },
+            }
+        )
+
+
+class FakeFinalOpenEvidenceTool:
+    name = "open_kb_document"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "file_uid": args["file_uid"],
+                    "content": "Adam, initial learning rate 0.01",
+                    "has_more_after": False,
+                },
+            }
+        )
+
+
+def test_runner_includes_final_open_result_in_last_iteration_forced_synthesis():
+    model = FakeFinalOpenEvidenceModel()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeManyOldEvidenceTool(), FakeFinalOpenEvidenceTool()],
+        max_iterations=2,
+    )
+
+    lines = list(runner.stream("What was Adam's initial learning rate?", [{"role": "user", "content": "previous"}]))
+
+    assert "0.01" in model.forced_messages[1].content
+    assert "0.01" in "".join(
+        json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token"
+    )
+
+
 def test_runner_forces_answer_after_five_open_kb_document_calls_for_same_run():
     model = FakeLoopingOpenKbDocumentModel()
     tool = FakeOpenKbDocumentTool()
