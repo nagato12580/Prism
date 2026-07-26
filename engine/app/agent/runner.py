@@ -55,6 +55,9 @@ FORCED_PARTIAL_DOCUMENT_ANSWER = (
     "我会先基于已经读取到的内容回答；是否继续读取后续部分，请回复“继续”。"
 )
 FORCED_NO_EVIDENCE_ANSWER = "当前知识库没有可用的有效证据来回答这个问题。"
+FORCED_ITERATION_LIMIT_NO_EVIDENCE_ANSWER = (
+    "本轮工具迭代已达到上限，但当前未获得可用证据，因此无法可靠回答这个问题。"
+)
 
 
 def create_chat_model(settings):
@@ -624,7 +627,7 @@ def _grounded_fallback_answer_from_messages(
         )[:5]
     ]
     if not snippets:
-        return _partial_document_answer_from_messages(messages)
+        return FORCED_ITERATION_LIMIT_NO_EVIDENCE_ANSWER
 
     excerpt_lines = [f"{index}. {text}" for index, text in enumerate(snippets, start=1)]
     return (

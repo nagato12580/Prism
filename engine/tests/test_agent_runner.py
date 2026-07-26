@@ -2912,3 +2912,78 @@ def test_iteration_limit_semantic_synthesis_uses_generic_prompt_after_final_tool
     ):
         assert unsupported not in prompt
     assert token_text == "证据原文：我已读取到第5页。"
+
+
+class FakeIterationLimitNoHitsTool:
+    name = "query_kb"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        return json.dumps({"status": "no_hits", "data": {"evidence": []}})
+
+
+class FakeIterationLimitNoHitsModel:
+    def __init__(self, forced_tool_call):
+        self.calls = 0
+        self.forced_tool_call = forced_tool_call
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_no_hits",
+                        "name": "query_kb",
+                        "args": {"query": "不存在的事实"},
+                    }
+                ]
+            )
+        if self.forced_tool_call:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_forced_retry",
+                        "name": "query_kb",
+                        "args": {"query": "retry"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="")
+
+
+@pytest.mark.parametrize("forced_tool_call", [False, True])
+def test_iteration_limit_no_hits_uses_generic_deterministic_fallback(
+    forced_tool_call,
+):
+    model = FakeIterationLimitNoHitsModel(forced_tool_call)
+    tool = FakeIterationLimitNoHitsTool()
+    runner = LangChainAgentRunner(model=model, tools=[tool], max_iterations=1)
+
+    lines = list(
+        runner.stream(
+            "不存在的事实是什么？",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    types = event_types(lines)
+    token_text = "".join(
+        json.loads(line)["data"]
+        for line in lines
+        if json.loads(line)["type"] == "token"
+    )
+    assert tool.calls == 1
+    assert model.calls == 2
+    assert types.index("tool_result") < types.index("token")
+    assert "工具迭代" in token_text
+    assert "未获得可用证据" in token_text
+    assert "无法可靠回答" in token_text
+    for unsupported in ("文档", "窗口", "未完整", "继续"):
+        assert unsupported not in token_text
