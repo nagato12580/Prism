@@ -55,6 +55,21 @@ def clarify_event(question: str, options: list[dict[str, str]]) -> str:
     return ndjson_event("clarify", {"question": question, "options": options})
 
 
+def continuation_event(state: Any) -> str:
+    """Serialize only the safe, client-persistable continuation cursor."""
+    return ndjson_event(
+        "continuation",
+        {
+            "version": state.version,
+            "objective": state.objective,
+            "kb_uid": state.kb_uid,
+            "file_uid": state.file_uid,
+            "next_offset": state.next_offset,
+            "has_more_after": state.has_more_after,
+        },
+    )
+
+
 def sources_event(
     evidence: list[dict[str, Any]] | None = None,
     *,

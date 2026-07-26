@@ -10,7 +10,9 @@ if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///./_agent_runner_test.db"
 
 from engine.app.agent import runner as runner_mod
+from engine.app.agent import events as events_mod
 from engine.app.agent.prompts import AGENT_SYSTEM_PROMPT
+from engine.app.agent.continuation import AgentContinuation
 from engine.app.agent.runner import FORCED_NO_EVIDENCE_ANSWER, LangChainAgentRunner
 from engine.app.agent.tools.base import ToolContext
 from engine.app.agent.tools.knowledge import build as build_knowledge_tool
@@ -1915,3 +1917,343 @@ def test_runner_stops_after_fallback_clarify():
         "done",
     ]
     assert model.calls == 2
+
+
+CONTINUATION_STATE = {
+    "version": 1,
+    "objective": "层次锚定的超参数怎么设置？",
+    "kb_uid": "kb-hyper",
+    "file_uid": "file-hyper",
+    "next_offset": 1651,
+    "has_more_after": True,
+}
+
+
+def _continuation_history(state=None):
+    return [
+        {"role": "user", "content": "层次锚定的超参数怎么设置？"},
+        {
+            "role": "assistant",
+            "content": "我先读到这里，请回复继续。",
+            "continuation": state or CONTINUATION_STATE,
+        },
+    ]
+
+
+class FakeScriptedOpenModel:
+    def __init__(self, calls, final_text="阶段性答案"):
+        self.calls = list(calls)
+        self.final_text = final_text
+        self.invocations = []
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.invocations.append(messages)
+        index = len(self.invocations) - 1
+        if index < len(self.calls):
+            name, args = self.calls[index]
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_{index + 1}",
+                        "name": name,
+                        "args": dict(args),
+                    }
+                ]
+            )
+        return FakeToolCall(content=self.final_text)
+
+
+class FakeRecordingDocumentTool:
+    name = "open_kb_document"
+
+    def __init__(self, windows=None):
+        self.args = []
+        self.windows = list(windows or [])
+
+    def invoke(self, args):
+        self.args.append(dict(args))
+        index = len(self.args) - 1
+        window = self.windows[index] if index < len(self.windows) else {}
+        offset = window.get("offset", args.get("offset", 0))
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "kb_uid": window.get("kb_uid", args.get("kb_uid", "kb-hyper")),
+                    "file_uid": window.get("file_uid", args.get("file_uid", "file-hyper")),
+                    "offset": offset,
+                    "next_offset": window.get("next_offset", offset + 100),
+                    "content": window.get("content", f"window {index + 1}"),
+                    "has_more_after": window.get("has_more_after", True),
+                },
+            },
+            ensure_ascii=False,
+        )
+
+
+class FakeFindDocumentTool:
+    name = "find_in_kb_document"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "ok",
+                "data": {
+                    "file_uid": args.get("file_uid"),
+                    "matches": [{"line": 1652, "text": "exact hyperparameter"}],
+                },
+            }
+        )
+
+
+def _five_open_calls(offsets=None):
+    offsets = offsets or [0, 100, 200, 300, 400]
+    return [
+        (
+            "open_kb_document",
+            {"kb_uid": "kb-hyper", "file_uid": "file-hyper", "offset": offset},
+        )
+        for offset in offsets
+    ]
+
+
+def test_continuation_event_emits_only_safe_cursor_fields():
+    state = AgentContinuation(**CONTINUATION_STATE)
+
+    payload = json.loads(events_mod.continuation_event(state))
+
+    assert payload == {"type": "continuation", "data": CONTINUATION_STATE}
+    assert "content" not in json.dumps(payload)
+    assert "scope" not in json.dumps(payload)
+
+
+def test_bare_continue_uses_stored_objective_for_clean_synthesis_and_trace():
+    model = FakeScriptedOpenModel(_five_open_calls())
+    tool = FakeRecordingDocumentTool()
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=model, tools=[tool], max_iterations=10)
+
+    list(runner.stream("继续", _continuation_history(), trace_recorder=recorder))
+
+    forced_messages = model.invocations[-1]
+    assert CONTINUATION_STATE["objective"] in forced_messages[1].content
+    assert "用户问题：继续\n" not in forced_messages[1].content
+    resume_messages = [
+        message.content
+        for message in model.invocations[0]
+        if getattr(message, "type", "") == "system" and "1651" in message.content
+    ]
+    assert resume_messages
+    assert CONTINUATION_STATE["objective"] in resume_messages[0]
+    assert "file-hyper" in resume_messages[0]
+    assert "kb-hyper" in resume_messages[0]
+    assert any(
+        getattr(message, "type", "") == "human" and message.content == "继续"
+        for message in model.invocations[0]
+    )
+    invokes = [step for step in recorder.steps if step["step_type"] == "model_invoke"]
+    assert all(
+        step["input_json"]["effective_objective_source"] == "continuation_state"
+        for step in invokes
+    )
+
+
+def test_resume_rewrites_stale_beginning_open_to_saved_cursor():
+    model = FakeScriptedOpenModel(
+        [("open_kb_document", {"file_uid": "file-hyper", "offset": 0})]
+    )
+    tool = FakeRecordingDocumentTool()
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=model, tools=[tool])
+
+    list(runner.stream("继续", _continuation_history(), trace_recorder=recorder))
+
+    resumed_args = {"kb_uid": "kb-hyper", "file_uid": "file-hyper", "offset": 1651}
+    assert tool.args == [resumed_args]
+    tool_steps = [
+        step for step in recorder.steps if step["step_type"] in {"tool_call", "tool_result"}
+    ]
+    assert [step["input_json"]["args"] for step in tool_steps] == [
+        resumed_args,
+        resumed_args,
+    ]
+    returned_data = json.loads(model.invocations[1][-1].content)["data"]
+    assert returned_data["kb_uid"] == "kb-hyper"
+    assert returned_data["file_uid"] == "file-hyper"
+    assert returned_data["offset"] == 1651
+
+
+def test_same_file_explicit_line_is_preserved_and_consumes_resume():
+    model = FakeScriptedOpenModel(
+        [
+            ("find_in_kb_document", {"file_uid": "file-hyper", "query": "hyperparameter"}),
+            ("open_kb_document", {"file_uid": "file-hyper", "line": 1652}),
+            ("open_kb_document", {"file_uid": "file-hyper", "offset": 0}),
+        ]
+    )
+    tool = FakeRecordingDocumentTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeFindDocumentTool(), tool],
+        max_iterations=5,
+    )
+
+    list(runner.stream("继续", _continuation_history()))
+
+    assert tool.args[0] == {"file_uid": "file-hyper", "line": 1652}
+    assert tool.args[1] == {"file_uid": "file-hyper", "offset": 0}
+
+
+def test_wrong_explicit_file_does_not_consume_resume():
+    model = FakeScriptedOpenModel(
+        [
+            ("open_kb_document", {"kb_uid": "kb-other", "file_uid": "file-other", "offset": 0}),
+            ("open_kb_document", {"offset": 0}),
+        ]
+    )
+    tool = FakeRecordingDocumentTool()
+    runner = LangChainAgentRunner(model=model, tools=[tool])
+
+    list(runner.stream("继续", _continuation_history()))
+
+    assert tool.args[0] == {
+        "kb_uid": "kb-other",
+        "file_uid": "file-other",
+        "offset": 0,
+    }
+    assert tool.args[1] == {
+        "kb_uid": "kb-hyper",
+        "file_uid": "file-hyper",
+        "offset": 1651,
+    }
+
+
+def test_fifth_open_emits_safe_continuation_from_furthest_window():
+    requested_offsets = [100, 500, 200, 900, 400]
+    windows = [
+        {"offset": 100, "next_offset": 200},
+        {"offset": 500, "next_offset": 600},
+        {"offset": 200, "next_offset": 300},
+        {"offset": 900, "next_offset": 1000, "content": "furthest secret excerpt"},
+        {"offset": 400, "next_offset": 500},
+    ]
+    model = FakeScriptedOpenModel(_five_open_calls(requested_offsets), final_text="")
+    tool = FakeRecordingDocumentTool(windows)
+    runner = LangChainAgentRunner(model=model, tools=[tool], max_iterations=10)
+
+    lines = list(runner.stream("总结超参数", [{"role": "user", "content": "previous"}]))
+
+    events = [json.loads(line) for line in lines]
+    continuation = next(event for event in events if event["type"] == "continuation")
+    assert continuation["data"] == {
+        "version": 1,
+        "objective": "总结超参数",
+        "kb_uid": "kb-hyper",
+        "file_uid": "file-hyper",
+        "next_offset": 1000,
+        "has_more_after": True,
+    }
+    assert list(continuation["data"]) == [
+        "version",
+        "objective",
+        "kb_uid",
+        "file_uid",
+        "next_offset",
+        "has_more_after",
+    ]
+    assert "furthest secret excerpt" not in json.dumps(continuation, ensure_ascii=False)
+    assert event_types(lines)[-2:] == ["continuation", "done"]
+    assert tool.args == [args for _, args in _five_open_calls(requested_offsets)]
+
+
+def test_furthest_eof_window_emits_no_continuation_state():
+    windows = [
+        {"offset": 0, "next_offset": 100, "has_more_after": True},
+        {"offset": 400, "next_offset": 500, "has_more_after": False},
+        {"offset": 100, "next_offset": 200, "has_more_after": True},
+        {"offset": 200, "next_offset": 300, "has_more_after": True},
+        {"offset": 300, "next_offset": 400, "has_more_after": True},
+    ]
+    model = FakeScriptedOpenModel(_five_open_calls(), final_text="")
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeRecordingDocumentTool(windows)],
+        max_iterations=10,
+    )
+
+    lines = list(runner.stream("总结全文", [{"role": "user", "content": "previous"}]))
+
+    assert "continuation" not in event_types(lines)
+
+
+def test_substantive_current_query_ignores_prior_continuation_state():
+    model = FakeScriptedOpenModel(
+        [("open_kb_document", {"file_uid": "file-hyper", "offset": 0})]
+    )
+    tool = FakeRecordingDocumentTool()
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(model=model, tools=[tool])
+
+    list(
+        runner.stream(
+            "改为比较不同优化器",
+            _continuation_history(),
+            trace_recorder=recorder,
+        )
+    )
+
+    assert tool.args == [{"file_uid": "file-hyper", "offset": 0}]
+    assert not any(
+        getattr(message, "type", "") == "system" and "do not restart" in message.content.lower()
+        for message in model.invocations[0]
+    )
+    first_invoke = next(step for step in recorder.steps if step["step_type"] == "model_invoke")
+    assert first_invoke["input_json"]["effective_objective_source"] == "current"
+
+
+def test_history_fallback_supplies_latest_objective_to_clean_synthesis():
+    history = [
+        {"role": "user", "content": "旧问题"},
+        {"role": "assistant", "content": "旧回答"},
+        {"role": "user", "content": "比较各数据集的学习率"},
+        {"role": "assistant", "content": "请回复继续", "continuation": {"version": 99}},
+    ]
+    model = FakeScriptedOpenModel(_five_open_calls(), final_text="")
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeRecordingDocumentTool()],
+        max_iterations=10,
+    )
+
+    list(runner.stream("继续", history, trace_recorder=recorder))
+
+    assert "用户问题：比较各数据集的学习率" in model.invocations[-1][1].content
+    invokes = [step for step in recorder.steps if step["step_type"] == "model_invoke"]
+    assert all(
+        step["input_json"]["effective_objective_source"] == "history_fallback"
+        for step in invokes
+    )
+
+
+def test_forced_document_cap_answer_uses_window_wording_not_page_number():
+    model = FakeScriptedOpenModel(
+        _five_open_calls(),
+        final_text="我已读取到第5页，层次锚定采用分阶段设置。",
+    )
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeRecordingDocumentTool()],
+        max_iterations=10,
+    )
+
+    lines = list(runner.stream("总结全文", [{"role": "user", "content": "previous"}]))
+    token_text = "".join(
+        json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token"
+    )
+
+    assert "5 个窗口" in token_text
+    assert "第5页" not in token_text

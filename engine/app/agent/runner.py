@@ -15,6 +15,7 @@ except ModuleNotFoundError:
 from .events import (
     agent_status_event,
     clarify_event,
+    continuation_event,
     done_event,
     error_event,
     sources_event,
@@ -22,6 +23,12 @@ from .events import (
     token_event,
     tool_call_event,
     tool_result_event,
+)
+from .continuation import (
+    AgentContinuation,
+    continuation_from_history,
+    is_bare_continuation,
+    resolve_effective_objective,
 )
 from .prompts import AGENT_SYSTEM_PROMPT
 from .active_recall import recall_memory_context
@@ -43,7 +50,7 @@ class SynthesisEvidence:
 _TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="agent-tool")
 OPEN_KB_DOCUMENT_PER_FILE_LIMIT = 5
 FORCED_PARTIAL_DOCUMENT_ANSWER = (
-    "我已经连续读取了这篇文档的前 5 个窗口，但目前还没读取完整篇文档。"
+    "我已经连续读取了这篇文档的 5 个窗口，但目前还没读取完整篇文档。"
     "我会先基于已经读取到的内容回答；是否继续读取后续部分，请回复“继续”。"
 )
 FORCED_NO_EVIDENCE_ANSWER = "当前知识库没有可用的有效证据来回答这个问题。"
@@ -171,18 +178,57 @@ def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]
         if not isinstance(data, dict):
             continue
         content = data.get("content")
+        kb_uid = data.get("kb_uid")
         file_uid = data.get("file_uid")
         if not isinstance(content, str) or not content.strip() or not file_uid:
             continue
         windows.append(
             {
+                "kb_uid": str(kb_uid) if kb_uid else "",
                 "file_uid": str(file_uid),
                 "offset": data.get("offset"),
+                "next_offset": data.get("next_offset"),
                 "content": content.strip(),
                 "has_more_after": bool(data.get("has_more_after")),
             }
         )
     return windows
+
+
+def _document_window_from_payload(
+    payload: dict[str, Any],
+    status: str,
+) -> dict[str, Any] | None:
+    if status != "success":
+        return None
+    result = _normalized_tool_result(payload)
+    data = result.get("data")
+    if not isinstance(data, dict):
+        return None
+    content = data.get("content")
+    kb_uid = data.get("kb_uid")
+    file_uid = data.get("file_uid")
+    next_offset = data.get("next_offset")
+    if (
+        not isinstance(content, str)
+        or not content.strip()
+        or not isinstance(kb_uid, str)
+        or not kb_uid.strip()
+        or not isinstance(file_uid, str)
+        or not file_uid.strip()
+        or not isinstance(next_offset, int)
+        or isinstance(next_offset, bool)
+        or next_offset < 0
+    ):
+        return None
+    return {
+        "kb_uid": kb_uid.strip(),
+        "file_uid": file_uid.strip(),
+        "offset": data.get("offset"),
+        "next_offset": next_offset,
+        "content": content.strip(),
+        "has_more_after": bool(data.get("has_more_after")),
+    }
 
 
 def _bounded_evidence_text(candidate: Any) -> str:
@@ -471,6 +517,14 @@ def _partial_document_answer_from_messages(messages: list[Any]) -> str:
     )
 
 
+def _normalize_document_cap_progress(text: str) -> str:
+    return re.sub(
+        r"(?:已经|已)读取到\s*第\s*5\s*页|读取了\s*5\s*页",
+        "已读取了 5 个窗口",
+        text,
+    )
+
+
 def _document_cap_synthesis_messages(
     query: str,
     messages: list[Any],
@@ -492,6 +546,8 @@ def _document_cap_synthesis_messages(
                 "你负责基于给定的文档片段直接回答用户问题。"
                 "只输出自然语言答案，不得调用工具，不得输出 XML、DSML 或任何工具调用协议。"
                 "请明确说明文档尚未完整读取，并在回答末尾询问用户是否继续读取。"
+                "本轮的五次读取是 5 个窗口，不是五页；除非片段明确提供页码元数据，"
+                "不得推断或声称已经读取到第5页。"
             )
         ),
         HumanMessage(
@@ -755,6 +811,11 @@ class LangChainAgentRunner:
         self._forced_answer_text: str | None = None
         self._ungrounded_insufficient_results = 0
         self._open_kb_document_counts: dict[str, int] = {}
+        self._active_continuation: AgentContinuation | None = None
+        self._resume_consumed = False
+        self._document_windows_by_file: dict[str, list[dict[str, Any]]] = {}
+        self._effective_query = ""
+        self._effective_objective_source = "current"
 
     def stream(
         self,
@@ -768,20 +829,45 @@ class LangChainAgentRunner:
         self._forced_answer_text = None
         self._ungrounded_insufficient_results = 0
         self._open_kb_document_counts = {}
+        self._active_continuation = None
+        self._resume_consumed = False
+        self._document_windows_by_file = {}
+        validated_continuation = continuation_from_history(history)
+        if is_bare_continuation(query):
+            self._active_continuation = validated_continuation
+        self._effective_query = resolve_effective_objective(
+            query,
+            history,
+            self._active_continuation,
+        )
+        if not is_bare_continuation(query):
+            self._effective_objective_source = "current"
+        elif self._active_continuation is not None:
+            self._effective_objective_source = "continuation_state"
+        elif self._effective_query == query:
+            self._effective_objective_source = "current"
+        else:
+            self._effective_objective_source = "history_fallback"
         is_casual_chat = _is_casual_chat_query(query)
         is_first_exchange = not history or not any(
             msg.get("role") == "user" for msg in history
         )
         logger.info(
-            "[agent] start query=%s history_messages=%s max_iterations=%s",
+            "[agent] start query=%s history_messages=%s max_iterations=%s effective_objective_source=%s",
             quoted(query),
             len(history),
             self.max_iterations,
+            self._effective_objective_source,
         )
         yield agent_status_event("chat" if is_casual_chat else "analyzing question")
 
         try:
-            messages = self._build_messages(query, history)
+            messages = self._build_messages(
+                query,
+                history,
+                effective_query=self._effective_query,
+                active_continuation=self._active_continuation,
+            )
             model = self.model.bind_tools(self.tools) if self.tools else self.model
 
             for iteration in range(1, self.max_iterations + 1):
@@ -802,6 +888,7 @@ class LangChainAgentRunner:
                         "iteration": iteration,
                         "message_count": len(messages),
                         "message_roles": _message_roles(messages),
+                        "effective_objective_source": self._effective_objective_source,
                     },
                 )
                 active_model = self.model if self._force_answer_with_available_evidence else model
@@ -886,6 +973,7 @@ class LangChainAgentRunner:
                     args = _call_value(tool_call, "args", {}) or {}
                     if not isinstance(args, dict):
                         args = {}
+                    args = self._apply_active_resume(name, args)
                     query_arg = str(args.get("query") or args.get("question") or "")
                     logger.info(
                         "[agent] tool_call tool=%s tool_call_id=%s query=%s",
@@ -992,6 +1080,8 @@ class LangChainAgentRunner:
                             tool_call_id=tool_call_id,
                         )
                     )
+                    if name == "open_kb_document":
+                        self._track_document_window(payload, status)
                     logger.info(
                         "[agent] appended_tool_message tool=%s tool_call_id=%s message_roles=%s",
                         name,
@@ -1040,7 +1130,7 @@ class LangChainAgentRunner:
                             )
                         )
                         synthesis_messages = _document_cap_synthesis_messages(
-                            query,
+                            self._effective_query,
                             messages,
                             required_tool_call_ids=[tool_call_id],
                         )
@@ -1051,6 +1141,7 @@ class LangChainAgentRunner:
                                 "iteration": "forced_final_after_open_limit",
                                 "message_count": len(synthesis_messages),
                                 "message_roles": _message_roles(synthesis_messages),
+                                "effective_objective_source": self._effective_objective_source,
                             },
                         )
                         forced_response = self.model.invoke(synthesis_messages)
@@ -1073,7 +1164,9 @@ class LangChainAgentRunner:
                                 quoted(forced_text, limit=300),
                             )
                             forced_text = ""
-                        final_text = forced_text or _partial_document_answer_from_messages(messages)
+                        final_text = _normalize_document_cap_progress(
+                            forced_text or _partial_document_answer_from_messages(messages)
+                        )
                         _record_trace_step(
                             trace_recorder,
                             step_type="final_answer",
@@ -1085,6 +1178,9 @@ class LangChainAgentRunner:
                         )
                         yield agent_status_event("generating answer")
                         yield token_event(final_text)
+                        continuation = self._continuation_for_file(args)
+                        if continuation is not None:
+                            yield continuation_event(continuation)
                         logger.info("[agent] done")
                         yield done_event()
                         return
@@ -1126,7 +1222,7 @@ class LangChainAgentRunner:
                         _resolved_tool_call_id(call) for call in tool_calls
                     ]
                     synthesis_messages = _document_cap_synthesis_messages(
-                        query,
+                        self._effective_query,
                         messages,
                         required_tool_call_ids=required_tool_call_ids,
                     )
@@ -1137,6 +1233,7 @@ class LangChainAgentRunner:
                             "iteration": "forced_final_after_iteration_limit",
                             "message_count": len(synthesis_messages),
                             "message_roles": _message_roles(synthesis_messages),
+                            "effective_objective_source": self._effective_objective_source,
                         },
                     )
                     forced_response = self.model.invoke(synthesis_messages)
@@ -1208,22 +1305,113 @@ class LangChainAgentRunner:
         self._open_kb_document_counts[key] = count
         return count
 
-    def _build_messages(self, query: str, history: list[dict[str, Any]]) -> list[Any]:
+    def _apply_active_resume(
+        self,
+        name: str,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        rewritten = dict(args)
+        state = self._active_continuation
+        if name != "open_kb_document" or state is None or self._resume_consumed:
+            return rewritten
+
+        file_uid = str(rewritten.get("file_uid") or "").strip()
+        if file_uid and file_uid != state.file_uid:
+            return rewritten
+
+        line = rewritten.get("line")
+        offset = rewritten.get("offset")
+        explicit_line = isinstance(line, int) and not isinstance(line, bool) and line > 1
+        explicit_offset = (
+            isinstance(offset, int)
+            and not isinstance(offset, bool)
+            and offset >= state.next_offset
+        )
+        if file_uid == state.file_uid and (explicit_line or explicit_offset):
+            self._resume_consumed = True
+            return rewritten
+
+        starts_at_beginning = line is None or line == 1
+        stale_offset = (
+            offset is None
+            or (
+                isinstance(offset, int)
+                and not isinstance(offset, bool)
+                and offset < state.next_offset
+            )
+        )
+        if starts_at_beginning and stale_offset:
+            rewritten["kb_uid"] = state.kb_uid
+            rewritten["file_uid"] = state.file_uid
+            rewritten["offset"] = state.next_offset
+            rewritten.pop("line", None)
+            self._resume_consumed = True
+        return rewritten
+
+    def _track_document_window(self, payload: dict[str, Any], status: str) -> None:
+        window = _document_window_from_payload(payload, status)
+        if window is None:
+            return
+        self._document_windows_by_file.setdefault(window["file_uid"], []).append(window)
+
+    def _continuation_for_file(
+        self,
+        args: dict[str, Any],
+    ) -> AgentContinuation | None:
+        file_uid = str(args.get("file_uid") or "").strip()
+        windows = self._document_windows_by_file.get(file_uid, [])
+        if not windows:
+            return None
+        furthest = max(windows, key=lambda window: window["next_offset"])
+        if not furthest["has_more_after"]:
+            return None
+        return AgentContinuation(
+            version=1,
+            objective=self._effective_query,
+            kb_uid=furthest["kb_uid"],
+            file_uid=furthest["file_uid"],
+            next_offset=furthest["next_offset"],
+            has_more_after=True,
+        )
+
+    def _build_messages(
+        self,
+        query: str,
+        history: list[dict[str, Any]],
+        *,
+        effective_query: str | None = None,
+        active_continuation: AgentContinuation | None = None,
+    ) -> list[Any]:
         messages: list[Any] = [SystemMessage(content=self.system_prompt)]
+        context_query = effective_query or query
         try:
-            recall_block = recall_memory_context(query)
+            recall_block = recall_memory_context(context_query)
             if recall_block:
                 messages.append(SystemMessage(content=recall_block))
                 logger.info("[agent] active_recall injected chars=%s", len(recall_block))
         except Exception as exc:
             logger.warning("[agent] active_recall failed (ignored): %s", quoted(str(exc), limit=200))
         try:
-            insights_block = graph_insights_context(query)
+            insights_block = graph_insights_context(context_query)
             if insights_block:
                 messages.append(SystemMessage(content=insights_block))
                 logger.info("[agent] graph_insights injected chars=%s", len(insights_block))
         except Exception as exc:
             logger.warning("[agent] graph_insights failed (ignored): %s", quoted(str(exc), limit=200))
+        if active_continuation is not None:
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "Resume the prior document-reading objective from its saved cursor. "
+                        f"Effective objective: {effective_query or query}\n"
+                        f"kb_uid: {active_continuation.kb_uid}\n"
+                        f"file_uid: {active_continuation.file_uid}\n"
+                        f"next_offset: {active_continuation.next_offset}\n"
+                        "Do not restart the document from the beginning. Continue from this cursor "
+                        "unless a later explicit location is required by the visible conversation."
+                    )
+                )
+            )
         for item in history:
             role = item.get("role")
             content = item.get("content", "")
