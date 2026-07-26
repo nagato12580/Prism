@@ -1,3 +1,5 @@
+import base64
+
 from types import SimpleNamespace
 
 from backend.app.models import KnowledgeFile, KnowledgeTopic
@@ -19,6 +21,50 @@ class FakeRetrievalService:
                 "excerpt": "grounded text",
             }],
             "warnings": [],
+        }
+
+
+class CoverageRetrievalService:
+    def __init__(self, global_file_uids=(), unavailable_file_uids=()):
+        self.calls = []
+        self.global_file_uids = tuple(global_file_uids)
+        self.unavailable_file_uids = set(unavailable_file_uids)
+
+    @staticmethod
+    def _evidence(kb_uid, file_uid, suffix):
+        return {
+            "kb_uid": kb_uid,
+            "file_uid": file_uid,
+            "chunk_uid": f"chunk-{file_uid}-{suffix}",
+            "excerpt": f"evidence for {file_uid}",
+        }
+
+    def query(self, **kwargs):
+        self.calls.append(kwargs)
+        requested = tuple(kwargs["file_uids"])
+        if len(requested) == 1:
+            file_uid = requested[0]
+            if file_uid in self.unavailable_file_uids:
+                return {
+                    "status": "unavailable",
+                    "evidence": [],
+                    "warnings": [{"code": "FILE_UNAVAILABLE", "message": file_uid}],
+                    "retrieval_health": {file_uid: "unavailable"},
+                }
+            return {
+                "status": "ok",
+                "evidence": [self._evidence(kwargs["kb_uid"], file_uid, "directed")],
+                "warnings": [],
+                "retrieval_health": {file_uid: "ok"},
+            }
+        return {
+            "status": "ok",
+            "evidence": [
+                self._evidence(kwargs["kb_uid"], file_uid, f"global-{index}")
+                for index, file_uid in enumerate(self.global_file_uids)
+            ],
+            "warnings": [],
+            "retrieval_health": {"global": "ok"},
         }
 
 
@@ -89,6 +135,32 @@ def _seed(db_session):
         content_text="second body",
     )
     db_session.add_all([topic, forbidden, file_a, file_b])
+    db_session.commit()
+
+
+def _seed_numbered_files(db_session, count):
+    topic = KnowledgeTopic(
+        id="topic-a",
+        kb_uid="kb-a",
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        name="Safe KB",
+        status="active",
+    )
+    files = [
+        KnowledgeFile(
+            id=f"row-{index:03d}",
+            file_uid=f"file-{index:03d}",
+            kb_uid="kb-a",
+            tenant_id="tenant-a",
+            topic_id="topic-a",
+            title=f"Paper {index:03d}",
+            parse_status="succeeded" if index else "pending",
+            content_text=f"body {index}",
+        )
+        for index in range(count)
+    ]
+    db_session.add_all([topic, *files])
     db_session.commit()
 
 
@@ -192,6 +264,273 @@ def test_query_kb_normalizes_empty_warning_messages(db_session):
 
     assert result["status"] == "degraded"
     assert result["warnings"][0]["message"] == "RERANK_UNAVAILABLE"
+
+
+def test_query_kb_relevance_keeps_single_top_ten_call_without_coverage(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    ctx = _context(db_session)
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "architecture",
+    })
+
+    assert result["status"] == "ok"
+    assert result["data"]["coverage"] is None
+    assert len(ctx.retrieval_service.calls) == 1
+    assert ctx.retrieval_service.calls[0]["top_k"] == 10
+
+
+def test_query_kb_per_file_coverage_fills_all_eleven_files(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 11)
+    service = CoverageRetrievalService(global_file_uids=("file-000",) * 10)
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "summarize every paper",
+        "coverage": "per_file",
+    })
+
+    expected = [f"file-{index:03d}" for index in range(11)]
+    coverage = result["data"]["coverage"]
+    assert result["status"] == "ok"
+    assert coverage == {
+        "requested_file_uids": expected,
+        "covered_file_uids": expected,
+        "missing_file_uids": [],
+        "complete": True,
+        "next_cursor": None,
+    }
+    assert [item["file_uid"] for item in result["data"]["evidence"]] == expected
+    assert len({item["file_uid"] for item in result["data"]["evidence"]}) == 11
+    assert service.calls[0]["top_k"] == 22
+    assert [call["file_uids"] for call in service.calls[1:]] == [
+        (file_uid,) for file_uid in expected[1:]
+    ]
+    assert all(call["mode"] == "fast" and call["top_k"] == 1 for call in service.calls[1:])
+
+
+def test_query_kb_per_file_coverage_only_directs_missing_files(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 4)
+    service = CoverageRetrievalService(global_file_uids=("file-002", "file-000", "file-002"))
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "compare all files",
+        "coverage": "per_file",
+    })
+
+    assert [call["file_uids"] for call in service.calls[1:]] == [
+        ("file-001",),
+        ("file-003",),
+    ]
+    assert [item["file_uid"] for item in result["data"]["evidence"]] == [
+        "file-002", "file-000", "file-001", "file-003",
+    ]
+
+
+def test_query_kb_per_file_coverage_reports_unavailable_file_as_missing(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 3)
+    service = CoverageRetrievalService(
+        global_file_uids=("file-001", "file-002"),
+        unavailable_file_uids=("file-000",),
+    )
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "cover every file",
+        "coverage": "per_file",
+    })
+
+    assert result["status"] == "degraded"
+    assert result["data"]["coverage"]["requested_file_uids"] == [
+        "file-000", "file-001", "file-002",
+    ]
+    assert result["data"]["coverage"]["covered_file_uids"] == ["file-001", "file-002"]
+    assert result["data"]["coverage"]["missing_file_uids"] == ["file-000"]
+    assert result["data"]["coverage"]["complete"] is False
+    assert result["data"]["retrieval_health"] == {
+        "global": "ok", "file-000": "unavailable",
+    }
+    assert result["warnings"][0]["code"] == "FILE_UNAVAILABLE"
+
+
+def test_query_kb_per_file_coverage_pages_thirty_files_by_file_uid_cursor(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 31)
+    service = CoverageRetrievalService(
+        global_file_uids=tuple(f"file-{index:03d}" for index in range(31))
+    )
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+    tool = build_tools(ctx)["query_kb"]
+
+    first = tool.invoke({
+        "kb_uid": "kb-a", "query_text": "all documents", "coverage": "per_file",
+    })
+    second = tool.invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all documents",
+        "coverage": "per_file",
+        "coverage_cursor": first["data"]["coverage"]["next_cursor"],
+    })
+
+    first_coverage = first["data"]["coverage"]
+    assert len(first_coverage["requested_file_uids"]) == 30
+    assert first_coverage["requested_file_uids"][-1] == "file-029"
+    assert first_coverage["next_cursor"]
+    assert first_coverage["complete"] is False
+    assert second["data"]["coverage"] == {
+        "requested_file_uids": ["file-030"],
+        "covered_file_uids": ["file-030"],
+        "missing_file_uids": [],
+        "complete": True,
+        "next_cursor": None,
+    }
+
+
+def test_query_kb_per_file_coverage_respects_file_filter_and_rejects_invalid_cursor(db_session):
+    from engine.app.agent.tools.knowledge_base import _encode_cursor, build_tools
+
+    _seed_numbered_files(db_session, 4)
+    service = CoverageRetrievalService(global_file_uids=("file-001", "file-003"))
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+    tool = build_tools(ctx)["query_kb"]
+
+    filtered = tool.invoke({
+        "kb_uid": "kb-a",
+        "query_text": "selected files",
+        "coverage": "per_file",
+        "file_filter": ["Paper 001", "file-003"],
+    })
+    raw_offset = tool.invoke({
+        "kb_uid": "kb-a",
+        "query_text": "selected files",
+        "coverage": "per_file",
+        "coverage_cursor": "30",
+    })
+    internal_db_id = tool.invoke({
+        "kb_uid": "kb-a",
+        "query_text": "selected files",
+        "coverage": "per_file",
+        "coverage_cursor": _encode_cursor("row-001"),
+    })
+
+    assert filtered["data"]["coverage"]["requested_file_uids"] == ["file-001", "file-003"]
+    assert service.calls[0]["file_uids"] == ("file-001", "file-003")
+    assert raw_offset["status"] == "error"
+    assert raw_offset["error"]["code"] == "INVALID_REQUEST"
+    assert internal_db_id["status"] == "error"
+    assert internal_db_id["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_query_kb_per_file_coverage_rejects_non_object_cursor(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 2)
+
+    result = build_tools(_context(db_session))["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all files",
+        "coverage": "per_file",
+        "coverage_cursor": "W10",
+    })
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_query_kb_per_file_coverage_rejects_wrong_cursor_version(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 2)
+    cursor = base64.urlsafe_b64encode(
+        b'{"v":2,"after":"file-000"}'
+    ).decode("ascii").rstrip("=")
+
+    result = build_tools(_context(db_session))["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all files",
+        "coverage": "per_file",
+        "coverage_cursor": cursor,
+    })
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_query_kb_per_file_coverage_rejects_non_integer_cursor_version(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed_numbered_files(db_session, 2)
+    cursor = base64.urlsafe_b64encode(
+        b'{"v":true,"after":"file-000"}'
+    ).decode("ascii").rstrip("=")
+
+    result = build_tools(_context(db_session))["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all files",
+        "coverage": "per_file",
+        "coverage_cursor": cursor,
+    })
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_query_kb_per_file_coverage_preserves_conflicting_retrieval_health(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    class CollidingHealthService(CoverageRetrievalService):
+        def query(self, **kwargs):
+            response = super().query(**kwargs)
+            response["retrieval_health"] = {
+                "dense": "unavailable" if len(kwargs["file_uids"]) > 1 else "ok"
+            }
+            return response
+
+    _seed_numbered_files(db_session, 2)
+    service = CollidingHealthService(global_file_uids=("file-000",))
+    ctx = _context(db_session)
+    ctx.retrieval_service = service
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all files",
+        "coverage": "per_file",
+    })
+
+    assert result["data"]["retrieval_health"]["dense"] == ["unavailable", "ok"]
+
+
+def test_query_kb_rejects_coverage_cursor_in_relevance_mode(db_session):
+    from engine.app.agent.tools.knowledge_base import _encode_cursor, build_tools
+
+    _seed_numbered_files(db_session, 2)
+    result = build_tools(_context(db_session))["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "all files",
+        "coverage_cursor": _encode_cursor("file-000"),
+    })
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_REQUEST"
 
 
 def test_search_file_is_scoped_and_cursor_paginated(db_session):

@@ -102,9 +102,18 @@ class EvidenceItem(_StrictDTO):
     evidence_id: str | None = None
 
 
+class QueryKbCoverage(_StrictDTO):
+    requested_file_uids: list[str] = Field(default_factory=list)
+    covered_file_uids: list[str] = Field(default_factory=list)
+    missing_file_uids: list[str] = Field(default_factory=list)
+    complete: bool
+    next_cursor: str | None = None
+
+
 class QueryKbData(_StrictDTO):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     retrieval_health: dict[str, Any] = Field(default_factory=dict)
+    coverage: QueryKbCoverage | None = None
 
 
 class FileSummary(_StrictDTO):
@@ -172,6 +181,8 @@ class QueryKbInput(BaseModel):
     query_text: str = Field(min_length=1, max_length=4000)
     mode: Literal["standard", "deep"] = "standard"
     file_filter: tuple[str, ...] = Field(default=(), max_length=100)
+    coverage: Literal["relevance", "per_file"] = "relevance"
+    coverage_cursor: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class SearchFileInput(BaseModel):
@@ -224,6 +235,7 @@ class GetMindmapInput(BaseModel):
 
 
 _CURSOR_VERSION = 1
+_COVERAGE_PAGE_SIZE = 30
 _MAX_PATTERN_LEN = 256
 _MAX_PATTERN_COUNT = 32
 
@@ -279,28 +291,19 @@ def _encode_cursor(after: str) -> str:
 
 def _decode_cursor(cursor: str) -> str:
     try:
-        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_")
-        data = json.loads(raw)
-        after = data["after"]
-        if not isinstance(after, str) or not after:
-            raise ValueError
-    except (ValueError, binascii.Error, KeyError) as exc:
-        raise KnowledgeToolInvalidRequest("invalid search cursor") from exc
-    return after
-
-
-def _decode_cursor(cursor: str) -> str:
-    try:
         raw = base64.b64decode(
             cursor + "=" * (-len(cursor) % 4),
             altchars=b"-_",
             validate=True,
         )
         data = json.loads(raw)
-        after = data["after"]
+        version = data.get("v") if isinstance(data, dict) else None
+        if type(version) is not int or version != _CURSOR_VERSION:
+            raise ValueError
+        after = data.get("after")
         if not isinstance(after, str) or not after:
             raise ValueError
-    except (ValueError, binascii.Error, KeyError) as exc:
+    except (TypeError, ValueError, binascii.Error) as exc:
         raise KnowledgeToolInvalidRequest("invalid search cursor") from exc
     return after
 
@@ -420,6 +423,75 @@ def _evidence_item_from_raw(raw: dict[str, Any]) -> EvidenceItem:
     )
 
 
+def _warnings_from_response(response: dict[str, Any]) -> list[ToolWarning]:
+    return [
+        ToolWarning(
+            code=str(w.get("code") or "WARNING"),
+            message=str(w.get("message") or w.get("code") or "WARNING"),
+        )
+        for w in (response.get("warnings") or [])
+        if isinstance(w, dict)
+    ]
+
+
+def _merge_retrieval_health(
+    merged: dict[str, Any], incoming: dict[str, Any]
+) -> None:
+    for key, value in incoming.items():
+        if key not in merged:
+            merged[key] = value
+            continue
+        existing = merged[key]
+        if existing == value:
+            continue
+        if not isinstance(existing, list):
+            existing = [existing]
+            merged[key] = existing
+        if value not in existing:
+            existing.append(value)
+
+
+def _coverage_file_page(
+    db: Session,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+    file_uids: tuple[str, ...],
+    cursor: str | None,
+) -> tuple[tuple[str, ...], str | None]:
+    def scoped_query():
+        query = db.query(KnowledgeFile).filter(
+            KnowledgeFile.tenant_id == tenant_id,
+            KnowledgeFile.kb_uid == kb_uid,
+            KnowledgeFile.deleted_at.is_(None),
+        )
+        if file_uids:
+            query = query.filter(KnowledgeFile.file_uid.in_(list(file_uids)))
+        return query
+
+    after = _decode_cursor(cursor) if cursor else None
+    if after:
+        cursor_target = scoped_query().filter(KnowledgeFile.file_uid == after).first()
+        if cursor_target is None:
+            raise KnowledgeToolInvalidRequest("invalid coverage cursor")
+
+    query = scoped_query()
+    if after:
+        query = query.filter(KnowledgeFile.file_uid > after)
+    rows = (
+        query.order_by(asc(KnowledgeFile.file_uid))
+        .limit(_COVERAGE_PAGE_SIZE + 1)
+        .all()
+    )
+    page = rows[:_COVERAGE_PAGE_SIZE]
+    next_cursor = (
+        _encode_cursor(page[-1].file_uid)
+        if len(rows) > _COVERAGE_PAGE_SIZE
+        else None
+    )
+    return tuple(row.file_uid for row in page), next_cursor
+
+
 def _compile_patterns(
     patterns: list[str], use_regex: bool, case_sensitive: bool
 ) -> re.Pattern[str]:
@@ -499,34 +571,150 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
         kb_uid: str | None = None,
         mode: Literal["standard", "deep"] = "standard",
         file_filter: tuple[str, ...] = (),
+        coverage: Literal["relevance", "per_file"] = "relevance",
+        coverage_cursor: str | None = None,
     ) -> dict[str, Any]:
         try:
             scope, resolved_kb_uid = _resolve_allowed_kb(ctx, kb_uid)
             db = _require_db(ctx)
             retrieval = _require_retrieval(ctx)
+            if coverage_cursor and coverage != "per_file":
+                raise KnowledgeToolInvalidRequest(
+                    "coverage_cursor requires coverage='per_file'"
+                )
             resolved_file_uids = _resolve_file_references(
                 db,
                 tenant_id=scope.tenant_id,
                 kb_uid=resolved_kb_uid,
                 file_refs=tuple(file_filter),
             )
+
+            if coverage == "per_file":
+                requested_file_uids, next_cursor = _coverage_file_page(
+                    db,
+                    tenant_id=scope.tenant_id,
+                    kb_uid=resolved_kb_uid,
+                    file_uids=resolved_file_uids,
+                    cursor=coverage_cursor,
+                )
+                warnings: list[ToolWarning] = []
+                retrieval_health: dict[str, Any] = {}
+                selected_by_file: dict[str, EvidenceItem] = {}
+                degraded = False
+
+                def merge_response(response: dict[str, Any]) -> None:
+                    nonlocal degraded
+                    warnings.extend(_warnings_from_response(response))
+                    health = response.get("retrieval_health")
+                    if isinstance(health, dict):
+                        _merge_retrieval_health(retrieval_health, health)
+                    if str(response.get("status") or "ok") in {
+                        "degraded", "unavailable", "invalid_request",
+                    }:
+                        degraded = True
+
+                if requested_file_uids:
+                    global_top_k = min(100, max(10, len(requested_file_uids) * 2))
+                    try:
+                        global_response = retrieval.query(
+                            tenant_id=scope.tenant_id,
+                            kb_uid=resolved_kb_uid,
+                            query=query_text,
+                            mode="deep" if mode == "deep" else "fast",
+                            file_uids=requested_file_uids,
+                            top_k=global_top_k,
+                        )
+                    except Exception as exc:  # isolate retrieval provider failures
+                        global_response = {
+                            "status": "unavailable",
+                            "warnings": [{
+                                "code": "RETRIEVAL_UNAVAILABLE",
+                                "message": str(exc) or "retrieval is unavailable",
+                            }],
+                        }
+                    merge_response(global_response)
+                    target_set = set(requested_file_uids)
+                    for raw in global_response.get("evidence") or []:
+                        if not isinstance(raw, dict):
+                            continue
+                        file_uid = str(raw.get("file_uid") or "")
+                        if (
+                            file_uid in target_set
+                            and file_uid not in selected_by_file
+                            and str(raw.get("kb_uid") or "") == resolved_kb_uid
+                        ):
+                            selected_by_file[file_uid] = _evidence_item_from_raw(raw)
+
+                    for file_uid in requested_file_uids:
+                        if file_uid in selected_by_file:
+                            continue
+                        try:
+                            directed_response = retrieval.query(
+                                tenant_id=scope.tenant_id,
+                                kb_uid=resolved_kb_uid,
+                                query=query_text,
+                                mode="fast",
+                                file_uids=(file_uid,),
+                                top_k=1,
+                            )
+                        except Exception as exc:  # keep successful files usable
+                            directed_response = {
+                                "status": "unavailable",
+                                "warnings": [{
+                                    "code": "RETRIEVAL_UNAVAILABLE",
+                                    "message": str(exc) or "retrieval is unavailable",
+                                }],
+                                "retrieval_health": {file_uid: "unavailable"},
+                            }
+                        merge_response(directed_response)
+                        for raw in directed_response.get("evidence") or []:
+                            if not isinstance(raw, dict):
+                                continue
+                            if (
+                                str(raw.get("file_uid") or "") == file_uid
+                                and str(raw.get("kb_uid") or "") == resolved_kb_uid
+                            ):
+                                selected_by_file[file_uid] = _evidence_item_from_raw(raw)
+                                break
+
+                covered_file_uids = [
+                    file_uid
+                    for file_uid in requested_file_uids
+                    if file_uid in selected_by_file
+                ]
+                missing_file_uids = [
+                    file_uid
+                    for file_uid in requested_file_uids
+                    if file_uid not in selected_by_file
+                ]
+                data = QueryKbData(
+                    evidence=list(selected_by_file.values()),
+                    retrieval_health=retrieval_health,
+                    coverage=QueryKbCoverage(
+                        requested_file_uids=list(requested_file_uids),
+                        covered_file_uids=covered_file_uids,
+                        missing_file_uids=missing_file_uids,
+                        complete=not missing_file_uids and next_cursor is None,
+                        next_cursor=next_cursor,
+                    ),
+                )
+                if missing_file_uids or degraded or warnings:
+                    return ToolEnvelope.degraded(data, warnings, _trace(ctx)).model_dump()
+                if not selected_by_file:
+                    return ToolEnvelope.no_hits(data, _trace(ctx)).model_dump()
+                return ToolEnvelope.ok(data, _trace(ctx)).model_dump()
+
             response = retrieval.query(
                 tenant_id=scope.tenant_id,
                 kb_uid=resolved_kb_uid,
                 query=query_text,
                 mode="deep" if mode == "deep" else "fast",
                 file_uids=resolved_file_uids,
+                top_k=10,
             )
             status = str(response.get("status") or "ok")
             raw_evidence = list(response.get("evidence") or [])
-            warnings = [
-                ToolWarning(
-                    code=str(w.get("code") or "WARNING"),
-                    message=str(w.get("message") or w.get("code") or "WARNING"),
-                )
-                for w in (response.get("warnings") or [])
-                if isinstance(w, dict)
-            ]
+            warnings = _warnings_from_response(response)
             evidence = [_evidence_item_from_raw(item) for item in raw_evidence if isinstance(item, dict)]
             data = QueryKbData(
                 evidence=evidence,
@@ -554,6 +742,7 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
         description=(
             "Query a knowledge base in the authorized run scope for grounded evidence. "
             "Use 'standard' for fast retrieval and 'deep' for multi-round graph-aware retrieval. "
+            "Use coverage='per_file' for bounded, cursor-paginated evidence from every file. "
             "Cite the returned evidence_id values in the answer."
         ),
         args_schema=QueryKbInput,

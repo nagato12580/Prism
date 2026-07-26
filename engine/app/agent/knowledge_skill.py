@@ -28,6 +28,7 @@ scope is verified server-side and cannot be overridden by arguments.
 
 Policy:
 - For uploaded资料, 文档, papers, files, or knowledge-base questions, use query_kb first. Use memory_search only when the user's remembered preferences, goals, constraints, project background, or prior personal context are needed to interpret the answer.
+- For requests covering all files, every paper, or the complete uploaded set, call query_kb with coverage="per_file". Report covered/total and track missing_file_uids across all pages; only claim the whole collection is complete when every page had no missing files and the final page's complete is true. If next_cursor is present, continue with coverage="per_file" and pass it as coverage_cursor until pagination finishes.
 - Separate evidence types in the final answer: knowledge-base facts must be grounded in query_kb/open_kb_document evidence; memory_search may provide user context but must not replace document evidence.
 - Prefer query_kb first. Use open_kb_document / find_kb_document only to read context the semantic evidence already pointed at.
 - Citation rule: every factual claim needs a citation to an evidence_id returned by these tools in this run. Reuse only the evidence_id values present in the current tool results; do not invent, back-fill, or carry over evidence ids from memory or earlier runs.

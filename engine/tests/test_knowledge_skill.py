@@ -92,3 +92,18 @@ def test_render_knowledge_skill_prioritizes_kb_over_memory_for_document_question
     assert "query_kb" in prompt
     assert "资料" in prompt or "文档" in prompt or "document" in prompt.lower()
     assert "优先" in prompt or "first" in prompt.lower()
+
+
+def test_render_knowledge_skill_all_document_coverage_contract():
+    from engine.app.agent.knowledge_skill import render_knowledge_skill
+
+    prompt = render_knowledge_skill().lower()
+    assert 'coverage="per_file"' in prompt
+    assert "all files" in prompt
+    assert "every paper" in prompt
+    assert "complete uploaded set" in prompt
+    assert "covered/total" in prompt
+    assert "missing_file_uids" in prompt
+    assert "complete is true" in prompt
+    assert "next_cursor" in prompt and "continue" in prompt
+    assert "across all pages" in prompt

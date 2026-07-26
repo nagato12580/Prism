@@ -16,7 +16,7 @@ from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
 from ..api.retrieval import AuthorizedKnowledgeScope as RetrievalScope
-from ..api.retrieval import RetrievalRequest, execute_retrieval
+from ..api.retrieval import RetrievalOverrides, RetrievalRequest, execute_retrieval
 from ..retrieval.unified import make_unified_search
 
 
@@ -36,6 +36,7 @@ class _KnowledgeRetrievalService:
         query: str,
         mode: str = "fast",
         file_uids: tuple[str, ...] = (),
+        top_k: int = 10,
     ) -> dict[str, Any]:
         from backend.app.models import KnowledgeTopic
 
@@ -64,6 +65,7 @@ class _KnowledgeRetrievalService:
             query=query,
             mode="deep" if mode == "deep" else "fast",
             filters={"file_uids": tuple(file_uids), "source_types": ()},
+            config=RetrievalOverrides(top_k=top_k),
         )
         scope = RetrievalScope(
             tenant_id=tenant_id,

@@ -7,6 +7,40 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./_answer_import.db")
 from engine.app.chat import answer
 
 
+def test_knowledge_retrieval_service_passes_explicit_top_k_override(monkeypatch):
+    class Topic:
+        active_index_generation = "index-1"
+        active_graph_generation = None
+
+    class Query:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return Topic()
+
+    class DB:
+        def query(self, model):
+            return Query()
+
+    captured = {}
+
+    def fake_execute(request, scope):
+        captured["request"] = request
+        return type("Response", (), {"model_dump": lambda self: {"status": "no_hits"}})()
+
+    monkeypatch.setattr(answer, "execute_retrieval", fake_execute)
+
+    answer._KnowledgeRetrievalService(DB()).query(
+        tenant_id="tenant-a",
+        kb_uid="kb-a",
+        query="all papers",
+        top_k=37,
+    )
+
+    assert captured["request"].config.top_k == 37
+
+
 def test_load_chunks_resolves_public_chunk_uid_not_internal_id(monkeypatch):
     class Chunk:
         id = "internal-row-id"; chunk_uid = "public-chunk-uid"; parent_id = None
