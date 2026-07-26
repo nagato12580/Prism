@@ -2,7 +2,7 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -265,6 +265,7 @@ def _select_synthesis_evidence(
     seen_texts: set[str] = set()
     selected_ids: set[int] = set()
     used_chars = 0
+    allow_oversized_first = True
 
     def add(candidate: SynthesisEvidence) -> bool:
         nonlocal used_chars
@@ -272,7 +273,10 @@ def _select_synthesis_evidence(
         normalized = re.sub(r"\s+", " ", candidate.text).strip()
         if candidate_id in selected_ids or not normalized or normalized in seen_texts:
             return False
-        if selected and used_chars + len(normalized) > char_budget:
+        if (
+            used_chars + len(normalized) > char_budget
+            and (selected or not allow_oversized_first)
+        ):
             return False
         selected.append(candidate)
         selected_ids.add(candidate_id)
@@ -293,12 +297,32 @@ def _select_synthesis_evidence(
             required_groups.append(group)
         group.append(candidate)
 
+    representatives: list[SynthesisEvidence] = []
+    representative_texts: set[str] = set()
     for group in required_groups:
         for candidate in group:
             normalized = re.sub(r"\s+", " ", candidate.text).strip()
-            if normalized and normalized not in seen_texts:
-                add(candidate)
+            if normalized and normalized not in representative_texts:
+                representatives.append(candidate)
+                representative_texts.add(normalized)
                 break
+
+    representative_chars = sum(len(candidate.text) for candidate in representatives)
+    allow_oversized_first = len(representatives) <= 1
+    if len(representatives) <= 1 or representative_chars <= char_budget:
+        for candidate in representatives:
+            add(candidate)
+    else:
+        representative_slots = min(len(representatives), max(char_budget, 0))
+        remaining_budget = max(char_budget, 0)
+        for index, candidate in enumerate(representatives[:representative_slots]):
+            remaining_count = representative_slots - index
+            quota = remaining_budget // remaining_count
+            text = candidate.text[:quota]
+            truncated = replace(candidate, text=text)
+            if add(truncated):
+                selected_ids.add(id(candidate))
+                remaining_budget -= len(text)
 
     def newest_first(kind: str) -> list[SynthesisEvidence]:
         return sorted(

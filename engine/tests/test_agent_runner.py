@@ -933,7 +933,16 @@ def test_synthesis_selection_keeps_required_results_within_total_budget():
         char_budget=800,
     )
 
+    assert [item.tool_call_id for item in selected] == ["call_first", "call_last"]
+    assert all(item.text for item in selected)
     assert sum(len(re.sub(r"\s+", " ", item.text).strip()) for item in selected) <= 800
+
+    impossible = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_first", "call_last"],
+        char_budget=0,
+    )
+    assert impossible == []
 
 
 class FakeFinalOpenEvidenceModel:
