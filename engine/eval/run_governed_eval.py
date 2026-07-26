@@ -35,8 +35,9 @@ from backend.app.models.knowledge_governance import (
 )
 from backend.app.models.knowledge_item import KnowledgeChunk
 from engine.app.config import settings
-from engine.app.retrieval.hybrid import hybrid_search, RRF_K, VECTOR_WEIGHT, BM25_WEIGHT
+from engine.app.retrieval.hybrid import RRF_K, VECTOR_WEIGHT, BM25_WEIGHT
 from engine.app.retrieval.contracts import SearchScope
+from engine.app.retrieval.unified import scoped_text_hybrid_search
 from engine.app.agent.tools.governed_knowledge_v2 import _query_governed_v2
 
 # ─── 配置 ──────────────────────────────────────────────
@@ -177,7 +178,7 @@ def main():
 
         # ── A: baseline hybrid_search ──
         try:
-            a_hits = hybrid_search(question, scope, top_k=max(K_VALUES))
+            a_hits = scoped_text_hybrid_search(question, scope, top_k=max(K_VALUES))
         except Exception as e:
             a_hits = []
             print(f"  [{i+1}/{len(queries)}] {qid} A-ERROR: {e}")

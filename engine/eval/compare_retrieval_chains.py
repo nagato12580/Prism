@@ -35,8 +35,9 @@ from engine.app.agent.tools.governed_knowledge import (
 from engine.app.agent.tools.governed_knowledge_v2 import _query_governed_v2
 from engine.app.config import settings
 from engine.app.retrieval.page_index import PageIndexService
-from engine.app.retrieval.hybrid import BM25_WEIGHT, RRF_K, VECTOR_WEIGHT, hybrid_search
+from engine.app.retrieval.hybrid import BM25_WEIGHT, RRF_K, VECTOR_WEIGHT
 from engine.app.retrieval.contracts import SearchScope
+from engine.app.retrieval.unified import scoped_text_hybrid_search
 
 _EVAL_SCOPE: SearchScope | None = None
 
@@ -185,7 +186,7 @@ def _traditional_hybrid(query: str, top_k: int) -> list[dict[str, Any]]:
             "score": float(hit.get("score") or 0.0),
             "source": "traditional_hybrid",
         }
-        for hit in hybrid_search(query, _EVAL_SCOPE, top_k=top_k)
+        for hit in scoped_text_hybrid_search(query, _EVAL_SCOPE, top_k=top_k)
     ]
 
 

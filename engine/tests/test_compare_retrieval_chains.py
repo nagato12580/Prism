@@ -3,6 +3,43 @@ from pathlib import Path
 from engine.eval import compare_retrieval_chains as eval_compare
 
 
+def test_evaluation_modules_import_scoped_text_hybrid_adapter():
+    from engine.app.retrieval.unified import scoped_text_hybrid_search
+    from engine.eval import run_governed_eval, run_retrieval
+
+    assert eval_compare.scoped_text_hybrid_search is scoped_text_hybrid_search
+    assert run_retrieval.scoped_text_hybrid_search is scoped_text_hybrid_search
+    assert run_governed_eval.scoped_text_hybrid_search is scoped_text_hybrid_search
+
+
+def test_traditional_hybrid_uses_scoped_text_hybrid_adapter(monkeypatch):
+    from engine.app.retrieval.contracts import SearchScope
+
+    scope = SearchScope(
+        tenant_id="tenant",
+        kb_uid="kb",
+        index_generation="index-v1",
+    )
+    calls = []
+
+    def scoped_search(query, actual_scope, top_k):
+        calls.append((query, actual_scope, top_k))
+        return [{"chunk_id": "chunk-1", "item_id": "item-1", "score": 0.75}]
+
+    monkeypatch.setattr(eval_compare, "_EVAL_SCOPE", scope)
+    monkeypatch.setattr(eval_compare, "scoped_text_hybrid_search", scoped_search)
+
+    assert eval_compare._traditional_hybrid("question", 7) == [
+        {
+            "chunk_id": "chunk-1",
+            "item_id": "item-1",
+            "score": 0.75,
+            "source": "traditional_hybrid",
+        }
+    ]
+    assert calls == [("question", scope, 7)]
+
+
 def test_compute_metrics_reports_recall_precision_hit_ndcg_and_mrr():
     metrics = eval_compare._compute_metrics(
         ["a", "x", "b", "c"],

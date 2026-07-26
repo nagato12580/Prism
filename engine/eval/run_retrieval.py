@@ -20,8 +20,9 @@ _project_root = Path(__file__).resolve().parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from engine.app.retrieval.hybrid import hybrid_search, RRF_K, VECTOR_WEIGHT, BM25_WEIGHT
+from engine.app.retrieval.hybrid import RRF_K, VECTOR_WEIGHT, BM25_WEIGHT
 from engine.app.retrieval.contracts import SearchScope
+from engine.app.retrieval.unified import scoped_text_hybrid_search
 from engine.app.config import settings
 
 # ─── 配置 ──────────────────────────────────────────────
@@ -169,7 +170,7 @@ def main():
             relevant_ids = set(q["relevant_child_ids"])
 
         try:
-            hits = hybrid_search(question, scope, top_k=max(K_VALUES))
+            hits = scoped_text_hybrid_search(question, scope, top_k=max(K_VALUES))
         except Exception as e:
             print(f"  [{i + 1}/{len(queries)}] {qid} ERROR: {e}")
             failures.append({"query_id": qid, "question": question, "error": str(e)})

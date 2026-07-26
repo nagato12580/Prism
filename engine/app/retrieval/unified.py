@@ -91,6 +91,37 @@ def recall(
     return {"status": status, "results": fused, "channels": channels}
 
 
+def scoped_text_hybrid_search(
+    query: str,
+    scope: SearchScope,
+    top_k: int = 10,
+) -> list[dict]:
+    """Return scoped dense + BM25 recall in the compatibility SearchHit shape."""
+    if not isinstance(scope, SearchScope):
+        raise ValueError("SearchScope is required for scoped text hybrid retrieval")
+
+    recalled = recall(
+        query,
+        embed_query(query),
+        scope,
+        graph_client=None,
+        top_k=top_k,
+    )
+    hits = []
+    for row in recalled["results"]:
+        hits.append(
+            {
+                **dict(row.get("metadata") or {}),
+                "chunk_id": row["chunk_uid"],
+                "item_id": row["item_id"],
+                "file_uid": row["file_uid"],
+                "score": row["rrf_score"],
+                "channels": row["channels"],
+            }
+        )
+    return hits[:top_k]
+
+
 def _filter_stale_hits(db, hits: list[dict]) -> list[dict]:
     """Drop retrieval hits that no longer resolve to live primary records."""
     if db is None or not hits:
