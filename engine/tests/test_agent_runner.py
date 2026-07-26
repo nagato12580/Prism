@@ -722,6 +722,12 @@ def test_runner_gives_model_one_no_tool_answer_pass_at_open_limit():
     )
 
     token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    forced_messages = model.last_messages
+    assert [message.type for message in forced_messages] == ["system", "human"]
+    assert not any(isinstance(message, ToolMessage) for message in forced_messages)
+    assert "Explain the paper in detail" in forced_messages[1].content
+    assert "window 1" in forced_messages[1].content
+    assert "window 5" in forced_messages[1].content
     assert tool.calls == 5
     assert model.calls == 6
     assert "Based on the five windows" in token_text

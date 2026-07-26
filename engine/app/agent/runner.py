@@ -117,7 +117,7 @@ def _looks_like_textual_tool_call(content: str) -> bool:
     )
 
 
-def _partial_document_answer_from_messages(messages: list[Any]) -> str:
+def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, ToolMessage):
@@ -143,6 +143,11 @@ def _partial_document_answer_from_messages(messages: list[Any]) -> str:
                 "has_more_after": bool(data.get("has_more_after")),
             }
         )
+    return windows
+
+
+def _partial_document_answer_from_messages(messages: list[Any]) -> str:
+    windows = _document_windows_from_messages(messages)
     if not windows:
         return FORCED_PARTIAL_DOCUMENT_ANSWER
 
@@ -162,6 +167,35 @@ def _partial_document_answer_from_messages(messages: list[Any]) -> str:
         + "\n\n是否继续读取后续部分？如果需要，请回复“继续”。"
     )
 
+
+def _document_cap_synthesis_messages(query: str, messages: list[Any]) -> list[Any]:
+    windows = _document_windows_from_messages(messages)[-OPEN_KB_DOCUMENT_PER_FILE_LIMIT:]
+    excerpts: list[str] = []
+    for index, window in enumerate(windows, start=1):
+        text = re.sub(r"\s+", " ", str(window["content"])).strip()
+        if len(text) > 700:
+            text = text[:700].rstrip() + "..."
+        offset = window.get("offset")
+        location = f"offset {offset}" if offset is not None else f"窗口 {index}"
+        excerpts.append(f"{index}. {location}: {text}")
+
+    evidence = "\n\n".join(excerpts) or "没有可用的文档片段。"
+    return [
+        SystemMessage(
+            content=(
+                "你负责基于给定的文档片段直接回答用户问题。"
+                "只输出自然语言答案，不得调用工具，不得输出 XML、DSML 或任何工具调用协议。"
+                "请明确说明文档尚未完整读取，并在回答末尾询问用户是否继续读取。"
+            )
+        ),
+        HumanMessage(
+            content=(
+                f"用户问题：{query}\n\n"
+                "以下是本轮已经读取的文档片段：\n\n"
+                f"{evidence}"
+            )
+        ),
+    ]
 
 def _tool_call_summaries(tool_calls: list[Any]) -> list[dict[str, Any]]:
     return [
@@ -665,16 +699,17 @@ class LangChainAgentRunner:
                                 )
                             )
                         )
+                        synthesis_messages = _document_cap_synthesis_messages(query, messages)
                         _record_trace_step(
                             trace_recorder,
                             step_type="model_invoke",
                             input_json={
                                 "iteration": "forced_final_after_open_limit",
-                                "message_count": len(messages),
-                                "message_roles": _message_roles(messages),
+                                "message_count": len(synthesis_messages),
+                                "message_roles": _message_roles(synthesis_messages),
                             },
                         )
-                        forced_response = self.model.invoke(messages)
+                        forced_response = self.model.invoke(synthesis_messages)
                         forced_tool_calls = getattr(forced_response, "tool_calls", None) or []
                         forced_text = _message_content(forced_response)
                         _record_trace_step(
