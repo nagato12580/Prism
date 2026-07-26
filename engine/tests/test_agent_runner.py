@@ -531,6 +531,49 @@ class FakeLoopingToolModel:
         )
 
 
+class FakeLastIterationToolRequestModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_search",
+                        "name": "knowledge_search",
+                        "args": {"query": "hierarchical anchoring"},
+                    }
+                ]
+            )
+        if self.calls == 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_mindmap",
+                        "name": "get_mindmap",
+                        "args": {"kb_uid": "kb-a"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="Final answer from existing evidence.")
+
+
+class FakeMindmapTool:
+    name = "get_mindmap"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        return json.dumps({"status": "ok", "data": {"mindmap": {"nodes": []}}})
+
+
 class FakeOpenKbDocumentTool:
     name = "open_kb_document"
 
@@ -547,6 +590,27 @@ class FakeOpenKbDocumentTool:
                     "offset": args.get("offset", 0),
                     "content": f"window {self.calls}",
                     "has_more_after": True,
+                },
+            }
+        )
+
+
+class FakeNestedOpenKbDocumentTool(FakeOpenKbDocumentTool):
+    def invoke(self, args):
+        self.calls += 1
+        return json.dumps(
+            {
+                "status": "success",
+                "payload": {
+                    "summary": {
+                        "status": "ok",
+                        "data": {
+                            "file_uid": args["file_uid"],
+                            "offset": args.get("offset", 0),
+                            "content": f"nested window {self.calls}",
+                            "has_more_after": True,
+                        },
+                    }
                 },
             }
         )
@@ -633,7 +697,7 @@ class FakeAnswersAfterOpenLimitModel(FakeLoopingOpenKbDocumentModel):
         return FakeToolCall(content="Based on the five windows, hierarchical anchoring means staged grounding.")
 
 
-def test_runner_records_max_iterations_error_trace():
+def test_runner_synthesizes_after_tool_on_last_iteration():
     recorder = FakeTraceRecorder()
     runner = LangChainAgentRunner(
         model=FakeLoopingToolModel(),
@@ -649,12 +713,41 @@ def test_runner_records_max_iterations_error_trace():
         )
     )
 
-    assert recorder.steps[-1]["step_type"] == "error"
-    assert recorder.steps[-1]["status"] == "error"
-    assert recorder.steps[-1]["output_json"]["message"] == "Agent reached the maximum tool iteration limit."
-    assert recorder.steps[-1]["output_json"]["iteration_limit"] == 1
-    assert recorder.steps[-1]["output_json"]["message_count"] > 0
-    assert recorder.finished_status == "error"
+    forced_invoke = next(
+        step for step in recorder.steps
+        if step["step_type"] == "model_invoke"
+        and step["input_json"].get("iteration") == "forced_final_after_iteration_limit"
+    )
+    assert forced_invoke["input_json"]["message_roles"] == ["system", "human"]
+    assert recorder.steps[-1]["step_type"] == "final_answer"
+    assert recorder.finished_status == "success"
+
+
+def test_runner_forces_final_answer_when_last_iteration_requests_tool_with_evidence():
+    recorder = FakeTraceRecorder()
+    model = FakeLastIterationToolRequestModel()
+    mindmap_tool = FakeMindmapTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[FakeTool(), mindmap_tool],
+        max_iterations=2,
+    )
+
+    lines = list(
+        runner.stream(
+            "Explain hierarchical anchoring",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+
+    token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    assert mindmap_tool.calls == 1
+    assert model.calls == 3
+    assert "Final answer from existing evidence." in token_text
+    assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
+    assert recorder.steps[-1]["step_type"] == "final_answer"
+    assert recorder.finished_status == "success"
 
 
 def test_runner_forces_answer_after_five_open_kb_document_calls_for_same_run():
@@ -707,7 +800,7 @@ def test_runner_immediately_answers_when_open_limit_reached_on_final_iteration()
 
 def test_runner_gives_model_one_no_tool_answer_pass_at_open_limit():
     model = FakeAnswersAfterOpenLimitModel()
-    tool = FakeOpenKbDocumentTool()
+    tool = FakeNestedOpenKbDocumentTool()
     runner = LangChainAgentRunner(
         model=model,
         tools=[tool],
@@ -726,8 +819,8 @@ def test_runner_gives_model_one_no_tool_answer_pass_at_open_limit():
     assert [message.type for message in forced_messages] == ["system", "human"]
     assert not any(isinstance(message, ToolMessage) for message in forced_messages)
     assert "Explain the paper in detail" in forced_messages[1].content
-    assert "window 1" in forced_messages[1].content
-    assert "window 5" in forced_messages[1].content
+    assert "nested window 1" in forced_messages[1].content
+    assert "nested window 5" in forced_messages[1].content
     assert tool.calls == 5
     assert model.calls == 6
     assert "Based on the five windows" in token_text

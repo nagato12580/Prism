@@ -117,8 +117,23 @@ def _looks_like_textual_tool_call(content: str) -> bool:
     )
 
 
-def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
-    windows: list[dict[str, Any]] = []
+def _normalized_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
+    nested_payload = payload.get("payload")
+    if isinstance(nested_payload, dict):
+        nested_summary = nested_payload.get("summary")
+        if isinstance(nested_summary, dict):
+            return nested_summary
+        if isinstance(nested_payload.get("data"), dict):
+            return nested_payload
+
+    summary = payload.get("summary")
+    if isinstance(summary, dict) and isinstance(summary.get("data"), dict):
+        return summary
+    return payload
+
+
+def _decoded_tool_results(messages: list[Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, ToolMessage):
             continue
@@ -126,9 +141,15 @@ def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]
             payload = json.loads(str(message.content))
         except Exception:
             continue
-        if not isinstance(payload, dict):
-            continue
-        data = payload.get("data")
+        if isinstance(payload, dict):
+            results.append(_normalized_tool_result(payload))
+    return results
+
+
+def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    for result in _decoded_tool_results(messages):
+        data = result.get("data")
         if not isinstance(data, dict):
             continue
         content = data.get("content")
@@ -144,6 +165,34 @@ def _document_windows_from_messages(messages: list[Any]) -> list[dict[str, Any]]
             }
         )
     return windows
+
+
+def _tool_evidence_texts(messages: list[Any], limit: int = 12) -> list[str]:
+    texts: list[str] = []
+    seen: set[str] = set()
+    for result in _decoded_tool_results(messages):
+        containers = [result]
+        data = result.get("data")
+        if isinstance(data, dict):
+            containers.append(data)
+        for container in containers:
+            content = container.get("content")
+            candidates: list[Any] = []
+            if isinstance(content, str) and content.strip():
+                candidates.append({"content": content})
+            for key in ("sources", "evidence", "evidence_items", "memories", "materials", "matches"):
+                values = container.get(key)
+                if isinstance(values, list):
+                    candidates.extend(values)
+            for candidate in candidates:
+                text = re.sub(r"\s+", " ", _candidate_text_from_source(candidate)).strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                texts.append(text[:700].rstrip() + ("..." if len(text) > 700 else ""))
+                if len(texts) >= limit:
+                    return texts
+    return texts
 
 
 def _partial_document_answer_from_messages(messages: list[Any]) -> str:
@@ -169,17 +218,10 @@ def _partial_document_answer_from_messages(messages: list[Any]) -> str:
 
 
 def _document_cap_synthesis_messages(query: str, messages: list[Any]) -> list[Any]:
-    windows = _document_windows_from_messages(messages)[-OPEN_KB_DOCUMENT_PER_FILE_LIMIT:]
-    excerpts: list[str] = []
-    for index, window in enumerate(windows, start=1):
-        text = re.sub(r"\s+", " ", str(window["content"])).strip()
-        if len(text) > 700:
-            text = text[:700].rstrip() + "..."
-        offset = window.get("offset")
-        location = f"offset {offset}" if offset is not None else f"窗口 {index}"
-        excerpts.append(f"{index}. {location}: {text}")
-
-    evidence = "\n\n".join(excerpts) or "没有可用的文档片段。"
+    evidence_texts = _tool_evidence_texts(messages)
+    evidence = "\n\n".join(
+        f"{index}. {text}" for index, text in enumerate(evidence_texts, start=1)
+    ) or "没有可用的文档片段。"
     return [
         SystemMessage(
             content=(
@@ -196,6 +238,21 @@ def _document_cap_synthesis_messages(query: str, messages: list[Any]) -> list[An
             )
         ),
     ]
+
+
+def _grounded_fallback_answer_from_messages(messages: list[Any]) -> str:
+    snippets = _tool_evidence_texts(messages, limit=5)
+    if not snippets:
+        return _partial_document_answer_from_messages(messages)
+
+    excerpt_lines = [f"{index}. {text}" for index, text in enumerate(snippets, start=1)]
+    return (
+        "当前工具调用已达到本轮上限，我先基于已经检索到的证据给出阶段性回答。\n\n"
+        "已获得的关键证据如下：\n\n"
+        + "\n\n".join(excerpt_lines)
+        + "\n\n如果需要更完整的上下文，请继续追问，我会在下一轮继续检索。"
+    )
+
 
 def _tool_call_summaries(tool_calls: list[Any]) -> list[dict[str, Any]]:
     return [
@@ -218,24 +275,34 @@ def _candidate_text_from_source(source: Any) -> str:
 
 
 def _payload_has_meaningful_evidence(payload: dict[str, Any]) -> bool:
-    evidence_items = payload.get("evidence_items")
+    result = _normalized_tool_result(payload)
+    data = result.get("data")
+    containers = [result]
+    if isinstance(data, dict):
+        containers.append(data)
+
+    if any(isinstance(container.get("content"), str) and container["content"].strip() for container in containers):
+        return True
+
+    evidence_items = result.get("evidence_items")
     if isinstance(evidence_items, list) and evidence_items:
         return True
 
-    for key in ("sources", "evidence", "memories", "materials"):
-        values = payload.get(key)
-        if not isinstance(values, list):
-            continue
-        for value in values:
-            if _candidate_text_from_source(value):
-                return True
-            if key == "materials" and isinstance(value, dict):
-                source = value.get("source")
-                if _candidate_text_from_source(source):
+    for container in containers:
+        for key in ("sources", "evidence", "memories", "materials", "matches"):
+            values = container.get(key)
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if _candidate_text_from_source(value):
                     return True
-                for raw in value.get("raw_evidence") or []:
-                    if _candidate_text_from_source(raw):
+                if key == "materials" and isinstance(value, dict):
+                    source = value.get("source")
+                    if _candidate_text_from_source(source):
                         return True
+                    for raw in value.get("raw_evidence") or []:
+                        if _candidate_text_from_source(raw):
+                            return True
     return False
 
 
@@ -776,6 +843,44 @@ class LangChainAgentRunner:
                                 len(clarify[1]),
                             )
                             self._pending_clarify = clarify
+
+                if iteration == self.max_iterations:
+                    synthesis_messages = _document_cap_synthesis_messages(query, messages)
+                    _record_trace_step(
+                        trace_recorder,
+                        step_type="model_invoke",
+                        input_json={
+                            "iteration": "forced_final_after_iteration_limit",
+                            "message_count": len(synthesis_messages),
+                            "message_roles": _message_roles(synthesis_messages),
+                        },
+                    )
+                    forced_response = self.model.invoke(synthesis_messages)
+                    forced_tool_calls = getattr(forced_response, "tool_calls", None) or []
+                    forced_text = _message_content(forced_response)
+                    _record_trace_step(
+                        trace_recorder,
+                        step_type="model_response",
+                        input_json={"iteration": "forced_final_after_iteration_limit"},
+                        output_json={
+                            "iteration": "forced_final_after_iteration_limit",
+                            "tool_calls": _tool_call_summaries(forced_tool_calls),
+                            "content_preview": _content_preview(forced_text),
+                        },
+                    )
+                    if forced_tool_calls or _looks_like_textual_tool_call(forced_text):
+                        forced_text = ""
+                    final_text = forced_text or _grounded_fallback_answer_from_messages(messages)
+                    _record_trace_step(
+                        trace_recorder,
+                        step_type="final_answer",
+                        output_json={"content": final_text},
+                    )
+                    _finish_trace(trace_recorder, "success")
+                    yield agent_status_event("generating answer")
+                    yield token_event(final_text)
+                    yield done_event()
+                    return
 
             logger.warning("[agent] max_iterations_exceeded limit=%s", self.max_iterations)
             _record_trace_step(
