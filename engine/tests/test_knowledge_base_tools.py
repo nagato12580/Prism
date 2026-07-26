@@ -306,6 +306,25 @@ def test_open_document_returns_document_end_for_tail_request(db_session):
     assert result["data"]["has_more_after"] is False
 
 
+def test_open_document_clamps_beyond_end_offset_for_nonempty_content(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    content = "alpha line\nneedle appears here\nomega line"
+    result = build_tools(_context(db_session))["open_kb_document"].invoke({
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "offset": 1000,
+        "window_size": 12,
+    })
+
+    assert result["data"]["offset"] == len(content)
+    assert result["data"]["next_offset"] == len(content)
+    assert result["data"]["content"] == ""
+    assert result["data"]["has_more_after"] is False
+    assert result["data"]["has_more_before"] is True
+
+
 def test_open_document_returns_next_offset_for_line_window(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 
