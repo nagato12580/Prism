@@ -969,6 +969,132 @@ def test_synthesis_selection_keeps_required_truncated_excerpts_distinct():
     assert len(set(normalized)) == 2
 
 
+def test_synthesis_selection_prioritizes_all_final_tool_candidates():
+    historical = [
+        {"text": f"historical match {index} ".ljust(700, "x")}
+        for index in range(11)
+    ]
+    messages = [
+        ToolMessage(
+            content=json.dumps({"data": {"matches": historical}}),
+            tool_call_id="call_old",
+        ),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "data": {
+                        "evidence": [
+                            {"text": "Adam optimizer ".ljust(700, "a")},
+                            {"text": "initial learning rate 0.01 ".ljust(700, "b")},
+                        ]
+                    }
+                }
+            ),
+            tool_call_id="call_final",
+        ),
+    ]
+
+    selected = runner_mod._select_synthesis_evidence(
+        messages,
+        required_tool_call_ids=["call_final"],
+    )
+
+    assert "Adam optimizer" in selected[0].text
+    assert "initial learning rate 0.01" in selected[1].text
+
+
+def test_resolved_tool_call_id_falls_back_to_tool_name():
+    assert runner_mod._resolved_tool_call_id({"id": "", "name": "knowledge_search"}) == "knowledge_search"
+    assert runner_mod._resolved_tool_call_id({"name": "open_kb_document"}) == "open_kb_document"
+
+
+class FakeRequiredFallbackModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_old",
+                        "name": "knowledge_search",
+                        "args": {"query": "historical"},
+                    }
+                ]
+            )
+        if self.calls == 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": "call_final",
+                        "name": "knowledge_search",
+                        "args": {"query": "decisive"},
+                    }
+                ]
+            )
+        return FakeToolCall(
+            tool_calls=[
+                {
+                    "id": "call_ignored",
+                    "name": "knowledge_search",
+                    "args": {"query": "ignored"},
+                }
+            ]
+        )
+
+
+class FakeRequiredFallbackTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        if args["query"] == "historical":
+            return json.dumps(
+                {
+                    "data": {
+                        "matches": [
+                            {"text": f"historical match {index} ".ljust(700, "x")}
+                            for index in range(11)
+                        ]
+                    }
+                }
+            )
+        return json.dumps(
+            {
+                "data": {
+                    "evidence": [
+                        {"text": "Adam optimizer ".ljust(700, "a")},
+                        {"text": "initial learning rate 0.01 ".ljust(700, "b")},
+                    ]
+                }
+            }
+        )
+
+
+def test_runner_fallback_prioritizes_final_required_tool_evidence():
+    runner = LangChainAgentRunner(
+        model=FakeRequiredFallbackModel(),
+        tools=[FakeRequiredFallbackTool()],
+        max_iterations=2,
+    )
+
+    lines = list(
+        runner.stream(
+            "What was Adam's initial learning rate?",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+    token_text = "".join(
+        json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token"
+    )
+
+    assert "initial learning rate 0.01" in token_text
+
+
 class FakeFinalOpenEvidenceModel:
     def __init__(self):
         self.calls = 0

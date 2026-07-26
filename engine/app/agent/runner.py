@@ -88,6 +88,14 @@ def _call_value(tool_call: Any, key: str, default: Any = None) -> Any:
     return getattr(tool_call, key, default)
 
 
+def _resolved_tool_call_id(tool_call: Any) -> str:
+    return str(
+        _call_value(tool_call, "id", None)
+        or _call_value(tool_call, "name", "")
+        or "tool"
+    )
+
+
 def _message_role_summary(messages: list[Any]) -> str:
     summary: list[str] = []
     for index, message in enumerate(messages):
@@ -374,6 +382,40 @@ def _select_synthesis_evidence(
                     remaining_budget -= len(excerpt)
                     break
 
+    def prioritize_required_group(
+        group: list[SynthesisEvidence],
+    ) -> list[SynthesisEvidence]:
+        coverage_candidates = [candidate for candidate in group if candidate.kind == "coverage"]
+        distinct_coverage: list[SynthesisEvidence] = []
+        duplicate_coverage: list[SynthesisEvidence] = []
+        covered_files: set[str] = set()
+        for candidate in coverage_candidates:
+            coverage_key = candidate.file_uid or f"result:{candidate.result_index}"
+            if coverage_key in covered_files:
+                duplicate_coverage.append(candidate)
+            else:
+                covered_files.add(coverage_key)
+                distinct_coverage.append(candidate)
+        prioritized_coverage = iter(distinct_coverage + duplicate_coverage)
+        return [
+            next(prioritized_coverage) if candidate.kind == "coverage" else candidate
+            for candidate in group
+        ]
+
+    required_group_queues = [prioritize_required_group(group) for group in required_groups]
+    required_group_positions = [0] * len(required_group_queues)
+    while True:
+        advanced = False
+        for index, group in enumerate(required_group_queues):
+            position = required_group_positions[index]
+            if position >= len(group):
+                continue
+            add(group[position])
+            required_group_positions[index] += 1
+            advanced = True
+        if not advanced:
+            break
+
     def newest_first(kind: str) -> list[SynthesisEvidence]:
         return sorted(
             (candidate for candidate in candidates if candidate.kind == kind),
@@ -462,8 +504,17 @@ def _document_cap_synthesis_messages(
     ]
 
 
-def _grounded_fallback_answer_from_messages(messages: list[Any]) -> str:
-    snippets = [item.text for item in _select_synthesis_evidence(messages)[:5]]
+def _grounded_fallback_answer_from_messages(
+    messages: list[Any],
+    required_tool_call_ids: list[str] | None = None,
+) -> str:
+    snippets = [
+        item.text
+        for item in _select_synthesis_evidence(
+            messages,
+            required_tool_call_ids=required_tool_call_ids,
+        )[:5]
+    ]
     if not snippets:
         return _partial_document_answer_from_messages(messages)
 
@@ -831,7 +882,7 @@ class LangChainAgentRunner:
                 messages.append(response)
                 for tool_call in tool_calls:
                     name = str(_call_value(tool_call, "name", ""))
-                    tool_call_id = str(_call_value(tool_call, "id", name))
+                    tool_call_id = _resolved_tool_call_id(tool_call)
                     args = _call_value(tool_call, "args", {}) or {}
                     if not isinstance(args, dict):
                         args = {}
@@ -1071,12 +1122,13 @@ class LangChainAgentRunner:
                             self._pending_clarify = clarify
 
                 if iteration == self.max_iterations:
+                    required_tool_call_ids = [
+                        _resolved_tool_call_id(call) for call in tool_calls
+                    ]
                     synthesis_messages = _document_cap_synthesis_messages(
                         query,
                         messages,
-                        required_tool_call_ids=[
-                            str(_call_value(call, "id", "")) for call in tool_calls
-                        ],
+                        required_tool_call_ids=required_tool_call_ids,
                     )
                     _record_trace_step(
                         trace_recorder,
@@ -1102,7 +1154,10 @@ class LangChainAgentRunner:
                     )
                     if forced_tool_calls or _looks_like_textual_tool_call(forced_text):
                         forced_text = ""
-                    final_text = forced_text or _grounded_fallback_answer_from_messages(messages)
+                    final_text = forced_text or _grounded_fallback_answer_from_messages(
+                        messages,
+                        required_tool_call_ids=required_tool_call_ids,
+                    )
                     _record_trace_step(
                         trace_recorder,
                         step_type="final_answer",
