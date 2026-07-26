@@ -621,15 +621,45 @@ class LangChainAgentRunner:
                         )
                         _record_trace_step(
                             trace_recorder,
+                            step_type="model_invoke",
+                            input_json={
+                                "iteration": "forced_final_after_open_limit",
+                                "message_count": len(messages),
+                                "message_roles": _message_roles(messages),
+                            },
+                        )
+                        forced_response = self.model.invoke(messages)
+                        forced_tool_calls = getattr(forced_response, "tool_calls", None) or []
+                        forced_text = _message_content(forced_response)
+                        _record_trace_step(
+                            trace_recorder,
+                            step_type="model_response",
+                            input_json={"iteration": "forced_final_after_open_limit"},
+                            output_json={
+                                "iteration": "forced_final_after_open_limit",
+                                "tool_calls": _tool_call_summaries(forced_tool_calls),
+                                "content_preview": _content_preview(forced_text),
+                            },
+                        )
+                        if forced_tool_calls or _looks_like_textual_tool_call(forced_text):
+                            logger.warning(
+                                "[agent] forced_final_after_open_limit_ignored_tool_call tool_calls=%s preview=%s",
+                                len(forced_tool_calls),
+                                quoted(forced_text, limit=300),
+                            )
+                            forced_text = ""
+                        final_text = forced_text or FORCED_PARTIAL_DOCUMENT_ANSWER
+                        _record_trace_step(
+                            trace_recorder,
                             step_type="final_answer",
-                            output_json={"content": FORCED_PARTIAL_DOCUMENT_ANSWER},
+                            output_json={"content": final_text},
                         )
                         _finish_trace(trace_recorder, "success")
                         logger.info(
-                            "[agent] open_kb_document_limit_reached; returning forced partial answer"
+                            "[agent] open_kb_document_limit_reached; returning forced final answer"
                         )
                         yield agent_status_event("generating answer")
-                        yield token_event(FORCED_PARTIAL_DOCUMENT_ANSWER)
+                        yield token_event(final_text)
                         logger.info("[agent] done")
                         yield done_event()
                         return

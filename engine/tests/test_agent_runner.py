@@ -611,6 +611,28 @@ class FakeDsmlAfterOpenLimitModel(FakeLoopingOpenKbDocumentModel):
         )
 
 
+class FakeAnswersAfterOpenLimitModel(FakeLoopingOpenKbDocumentModel):
+    def invoke(self, messages):
+        self.calls += 1
+        self.last_messages = messages
+        if self.calls <= 5:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_open_{self.calls}",
+                        "name": "open_kb_document",
+                        "args": {
+                            "kb_uid": "kb-a",
+                            "file_uid": "file-a",
+                            "offset": (self.calls - 1) * 1000,
+                            "window_size": 1000,
+                        },
+                    }
+                ]
+            )
+        return FakeToolCall(content="Based on the five windows, hierarchical anchoring means staged grounding.")
+
+
 def test_runner_records_max_iterations_error_trace():
     recorder = FakeTraceRecorder()
     runner = LangChainAgentRunner(
@@ -681,6 +703,30 @@ def test_runner_immediately_answers_when_open_limit_reached_on_final_iteration()
     token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
     assert "还没读取完整篇文档" in token_text
     assert "是否继续" in token_text
+
+
+def test_runner_gives_model_one_no_tool_answer_pass_at_open_limit():
+    model = FakeAnswersAfterOpenLimitModel()
+    tool = FakeOpenKbDocumentTool()
+    runner = LangChainAgentRunner(
+        model=model,
+        tools=[tool],
+        max_iterations=5,
+    )
+
+    lines = list(
+        runner.stream(
+            "Explain the paper in detail",
+            [{"role": "user", "content": "previous"}],
+        )
+    )
+
+    token_text = "".join(json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "token")
+    assert tool.calls == 5
+    assert model.calls == 6
+    assert "Based on the five windows" in token_text
+    assert "我已经连续读取了这篇文档的前 5 个窗口" not in token_text
+    assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
 
 
 def test_runner_suppresses_textual_dsml_tool_call_after_open_limit():
