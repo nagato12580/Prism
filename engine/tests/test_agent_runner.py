@@ -751,6 +751,8 @@ def test_runner_suppresses_textual_dsml_tool_call_after_open_limit():
     assert "open_kb_document" not in token_text
     assert "还没读取完整篇文档" in token_text
     assert "是否继续" in token_text
+    assert "window 1" in token_text
+    assert "window 5" in token_text
 
 
 class FakeEmptyEvidenceTool:

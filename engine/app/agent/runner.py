@@ -117,6 +117,52 @@ def _looks_like_textual_tool_call(content: str) -> bool:
     )
 
 
+def _partial_document_answer_from_messages(messages: list[Any]) -> str:
+    windows: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        try:
+            payload = json.loads(str(message.content))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            continue
+        content = data.get("content")
+        file_uid = data.get("file_uid")
+        if not isinstance(content, str) or not content.strip() or not file_uid:
+            continue
+        windows.append(
+            {
+                "file_uid": str(file_uid),
+                "offset": data.get("offset"),
+                "content": content.strip(),
+                "has_more_after": bool(data.get("has_more_after")),
+            }
+        )
+    if not windows:
+        return FORCED_PARTIAL_DOCUMENT_ANSWER
+
+    excerpts: list[str] = []
+    for index, window in enumerate(windows[-OPEN_KB_DOCUMENT_PER_FILE_LIMIT:], start=1):
+        text = re.sub(r"\s+", " ", str(window["content"])).strip()
+        if len(text) > 700:
+            text = text[:700].rstrip() + "..."
+        offset = window.get("offset")
+        location = f"offset {offset}" if offset is not None else f"窗口 {index}"
+        excerpts.append(f"{index}. {location}: {text}")
+
+    return (
+        "我已经连续读取了这篇文档的 5 个窗口，但目前还没读取完整篇文档。\n\n"
+        "基于已经读取到的内容，当前可提取的信息如下：\n\n"
+        + "\n\n".join(excerpts)
+        + "\n\n是否继续读取后续部分？如果需要，请回复“继续”。"
+    )
+
+
 def _tool_call_summaries(tool_calls: list[Any]) -> list[dict[str, Any]]:
     return [
         {
@@ -648,7 +694,7 @@ class LangChainAgentRunner:
                                 quoted(forced_text, limit=300),
                             )
                             forced_text = ""
-                        final_text = forced_text or FORCED_PARTIAL_DOCUMENT_ANSWER
+                        final_text = forced_text or _partial_document_answer_from_messages(messages)
                         _record_trace_step(
                             trace_recorder,
                             step_type="final_answer",
