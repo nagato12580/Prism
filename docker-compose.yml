@@ -7,7 +7,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: "CHANGE-ME"
       MYSQL_DATABASE: "prism_db"
-    volumes: ["mysql_data:/var/lib/mysql"]
+    # Reuse the populated local data volume; do not create an empty per-worktree MySQL volume.
+    volumes: ["prism_mysql_data:/var/lib/mysql"]
 
   redis:
     image: redis:7-alpine
@@ -78,7 +79,6 @@ services:
   elasticsearch:
     build: ./docker/es
     image: prism-es-ik:8.17.0
-    container_name: prism-es
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -96,7 +96,6 @@ services:
   faster-whisper:
     build: ./docker/faster-whisper
     image: prism-whisper:latest
-    container_name: prism-whisper
     ports:
       - "5199:5199"
     environment:
@@ -106,7 +105,8 @@ services:
     restart: unless-stopped
 
 volumes:
-  mysql_data:
+  prism_mysql_data:
+    external: true
   etcd_data:
   minio_data:
   milvus_data:

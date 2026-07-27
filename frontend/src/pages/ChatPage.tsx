@@ -323,13 +323,21 @@ export function ChatPage() {
   const loadTopics = async () => {
     setLoadingTopics(true)
     try {
-      setTopics((await knowledgeBasesApi.list({ limit: 100 })).items)
+      const items = (await knowledgeBasesApi.list({ limit: 100 })).items
+      setTopics(items)
+      if (!selectedTopicId && items.length === 1) {
+        setSelectedTopic(items[0].kb_uid, items[0].name)
+      }
     } catch {
       // 静默失败
     } finally {
       setLoadingTopics(false)
     }
   }
+
+  useEffect(() => {
+    loadTopics()
+  }, [])
 
   const handleOpenTopicPicker = () => {
     if (!showTopicPicker) {
@@ -348,16 +356,40 @@ export function ChatPage() {
   const send = async (value = input) => {
     if (!value.trim() || sending) return
 
-    const query = value.trim()
-    setInput('')
     setSending(true)
+    const query = value.trim()
+
+    let effectiveTopicId = selectedTopicId
+    if (!effectiveTopicId) {
+      let availableTopics = topics
+      if (availableTopics.length === 0) {
+        try {
+          availableTopics = (await knowledgeBasesApi.list({ limit: 100 })).items
+          setTopics(availableTopics)
+        } catch {
+          availableTopics = []
+        }
+      }
+      if (availableTopics.length === 1) {
+        const topic = availableTopics[0]
+        effectiveTopicId = topic.kb_uid
+        setSelectedTopic(topic.kb_uid, topic.name)
+      }
+    }
+    if (!effectiveTopicId) {
+      window.alert('请先创建或选择知识库')
+      setSending(false)
+      return
+    }
+
+    setInput('')
 
     // 确保会话存在（首次发消息时创建）
     let sessionId = currentSessionId
     if (!sessionId) {
       try {
         const session = await chatApi.createSession({
-          topic_id: selectedTopicId || undefined,
+          topic_id: effectiveTopicId,
           source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
         })
         sessionId = session.id
@@ -543,7 +575,7 @@ export function ChatPage() {
         signal: streamAbortController.signal,
         body: JSON.stringify({
           query,
-          kb_uids: selectedTopicId ? [selectedTopicId] : [],
+          kb_uids: [effectiveTopicId],
           history,
           session_id: sessionId,
           user_message_id: engineUserMessageId,
