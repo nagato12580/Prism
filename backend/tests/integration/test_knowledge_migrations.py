@@ -27,6 +27,7 @@ EXPECTED_COLUMNS = {
         "embedding_profile", "parser_config", "chunk_config", "retrieval_config", "graph_config",
         "active_index_generation", "active_graph_generation", "mindmap", "mindmap_version",
         "mindmap_generated_at", "sample_questions", "sample_questions_version",
+        "system_type", "is_system", "delete_disabled",
     },
     "knowledge_file": {
         "file_uid", "kb_uid", "tenant_id", "storage_uri", "relative_path", "original_name", "media_type",
@@ -34,6 +35,7 @@ EXPECTED_COLUMNS = {
         "index_status", "graph_status", "parsed_content_version", "active_index_generation", "parse_error",
         "index_error", "graph_error", "parse_started_at", "parse_finished_at", "index_started_at",
         "index_finished_at", "graph_started_at", "graph_finished_at", "last_job_id", "deleted_at", "md5",
+        "source_kind", "source_id", "system_type",
     },
     "knowledge_item": {"tenant_id", "kb_uid", "normalized_markdown", "summary", "source_type", "content_version"},
     "knowledge_chunk": {
@@ -191,9 +193,19 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
         assert topic_columns["active_index_generation"]["nullable"] is True
         assert topic_columns["active_index_generation"]["type"].length == 36
         assert topic_columns["active_graph_generation"]["type"].length == 36
+        assert topic_columns["system_type"]["type"].length == 64
+        assert topic_columns["system_type"]["nullable"] is True
+        assert topic_columns["is_system"]["nullable"] is False
+        assert topic_columns["delete_disabled"]["nullable"] is False
         file_columns = {column["name"]: column for column in inspector.get_columns("knowledge_file")}
         assert "original_name" in file_columns
         assert "original_filename" not in file_columns
+        assert file_columns["source_kind"]["type"].length == 64
+        assert file_columns["source_id"]["type"].length == 128
+        assert file_columns["system_type"]["type"].length == 64
+        assert file_columns["source_kind"]["nullable"] is True
+        assert file_columns["source_id"]["nullable"] is True
+        assert file_columns["system_type"]["nullable"] is True
         item_columns = {column["name"]: column for column in inspector.get_columns("knowledge_item")}
         chunk_columns = {column["name"]: column for column in inspector.get_columns("knowledge_chunk")}
         job_columns = {column["name"]: column for column in inspector.get_columns("knowledge_job")}
@@ -220,6 +232,8 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
         assert job_columns["idempotency_key"]["nullable"] is False
         assert _default_value(topic_columns["active_index_generation"]) is None
         assert _default_value(topic_columns["active_graph_generation"]) is None
+        assert _default_value(topic_columns["is_system"]) == "0"
+        assert _default_value(topic_columns["delete_disabled"]) == "0"
         assert _default_value(file_columns["active_index_generation"]) is None
         assert _default_value(item_columns["content_version"]) == "1"
         assert _default_value(chunk_columns["generation"]) == "0"
@@ -240,6 +254,16 @@ def test_fresh_mysql_upgrade_creates_knowledge_schema_and_is_repeatable():
             (("item_id",), "knowledge_item", ("id",), "CASCADE"),
             (("parent_id",), "knowledge_chunk", ("id",), "SET NULL"),
         }
+        topic_indexes = {
+            index["name"]: index["column_names"] for index in inspector.get_indexes("knowledge_topic")
+        }
+        file_indexes = {
+            index["name"]: index["column_names"] for index in inspector.get_indexes("knowledge_file")
+        }
+        assert topic_indexes["ix_knowledge_topic_system_type"] == ["system_type"]
+        assert file_indexes["ix_knowledge_file_source_kind"] == ["source_kind"]
+        assert file_indexes["ix_knowledge_file_source_id"] == ["source_id"]
+        assert file_indexes["ix_knowledge_file_system_type"] == ["system_type"]
         job_indexes = {
             index["name"]: index["column_names"] for index in inspector.get_indexes("knowledge_job")
         }
