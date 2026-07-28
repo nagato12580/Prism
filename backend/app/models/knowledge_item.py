@@ -1,6 +1,7 @@
 # prism/backend/app/models/knowledge_item.py
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -54,6 +55,9 @@ class KnowledgeTopic(Base):
     mindmap_generated_at = Column(DateTime, nullable=True)
     sample_questions = Column(JSON, nullable=True)
     sample_questions_version = Column(Integer, nullable=True)
+    system_type = Column(String(64), nullable=True, index=True)
+    is_system = Column(Boolean, nullable=False, default=False, server_default="0")
+    delete_disabled = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
@@ -137,6 +141,9 @@ class KnowledgeFile(Base):
     storage_uri = Column(String(1024), nullable=True)
     relative_path = Column(String(1024), nullable=True)
     original_filename = Column("original_name", String(255), nullable=True, comment="Original filename")
+    source_kind = Column(String(64), nullable=True, index=True)
+    source_id = Column(String(128), nullable=True, index=True)
+    system_type = Column(String(64), nullable=True, index=True)
     media_type = Column(String(64), nullable=True, comment="document/image/audio/video")
     mime_type = Column(String(100), comment="MIME type")
     file_type = Column(String(20), nullable=True, comment="Legacy file extension")

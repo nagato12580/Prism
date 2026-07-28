@@ -112,6 +112,47 @@ def test_topic_resource_relationship_and_metadata(db_session):
     assert loaded.resources[0].uploaded_at is not None
 
 
+def test_knowledge_topic_system_flags(db_session):
+    from backend.app.models import KnowledgeTopic
+
+    topic = KnowledgeTopic(
+        tenant_id="tenant-a",
+        owner_user_id="user-a",
+        name="个人随手记",
+        system_type="personal_inbox",
+        is_system=True,
+        delete_disabled=True,
+    )
+    db_session.add(topic)
+    db_session.commit()
+
+    saved = db_session.query(KnowledgeTopic).filter_by(kb_uid=topic.kb_uid).one()
+    assert saved.system_type == "personal_inbox"
+    assert saved.is_system is True
+    assert saved.delete_disabled is True
+
+
+def test_knowledge_file_source_markers(db_session):
+    from backend.app.models import KnowledgeFile
+
+    file_row = KnowledgeFile(
+        tenant_id="tenant-a",
+        kb_uid="kb-a",
+        file_uid="file-a",
+        original_filename="unit.md",
+        source_kind="personal_asset_unit",
+        source_id="unit-a",
+        system_type="personal_inbox",
+    )
+    db_session.add(file_row)
+    db_session.commit()
+
+    saved = db_session.query(KnowledgeFile).filter_by(file_uid="file-a").one()
+    assert saved.source_kind == "personal_asset_unit"
+    assert saved.source_id == "unit-a"
+    assert saved.system_type == "personal_inbox"
+
+
 def test_legacy_md5_does_not_replace_public_file_identity(db_session):
     topic = KnowledgeTopic(
         user_id="default-user",
