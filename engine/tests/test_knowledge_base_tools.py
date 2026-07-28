@@ -247,6 +247,45 @@ def test_query_kb_maps_missing_kb_uid_to_single_authorized_kb(db_session):
     assert ctx.retrieval_service.calls[0]["kb_uid"] == "kb-a"
 
 
+def test_query_kb_defaults_to_all_authorized_kbs_when_multiple_scoped(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    ctx = _context(db_session, allowed=("kb-main", "kb-inbox"))
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "query_text": "architecture",
+    })
+
+    assert result["status"] == "ok"
+    assert [call["kb_uid"] for call in ctx.retrieval_service.calls] == [
+        "kb-main",
+        "kb-inbox",
+    ]
+    assert [item["kb_uid"] for item in result["data"]["evidence"]] == [
+        "kb-main",
+        "kb-inbox",
+    ]
+
+
+def test_query_kb_per_file_coverage_rejects_all_when_multiple_scoped(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    ctx = _context(db_session, allowed=("kb-main", "kb-inbox"))
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "all",
+        "query_text": "architecture",
+        "coverage": "per_file",
+    })
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_REQUEST"
+    assert result["error"]["message"] == (
+        "coverage='per_file' requires exactly one knowledge base"
+    )
+    assert ctx.retrieval_service.calls == []
+
+
 def test_query_kb_normalizes_empty_warning_messages(db_session):
     from engine.app.agent.tools.knowledge_base import build_tools
 

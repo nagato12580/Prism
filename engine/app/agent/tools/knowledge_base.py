@@ -259,18 +259,23 @@ def _require_allowed_kb(ctx: ToolContext, kb_uid: str):
     return scope
 
 
-def _resolve_allowed_kb(ctx: ToolContext, kb_uid: str | None) -> tuple[Any, str]:
+def _resolve_allowed_kbs(ctx: ToolContext, kb_uid: str | None) -> tuple[Any, tuple[str, ...]]:
     scope = _require_scope(ctx)
     normalized = (kb_uid or "").strip()
-    if normalized and normalized != "default":
+    if normalized and normalized not in {"default", "all"}:
         if normalized not in scope.allowed_kb_uids:
             raise KnowledgeToolDenied(normalized)
-        return scope, normalized
-    if len(scope.allowed_kb_uids) == 1:
-        return scope, scope.allowed_kb_uids[0]
-    raise KnowledgeToolInvalidRequest(
-        "kb_uid is required when more than one knowledge base is authorized"
-    )
+        return scope, (normalized,)
+    return scope, tuple(scope.allowed_kb_uids)
+
+
+def _resolve_single_allowed_kb(ctx: ToolContext, kb_uid: str | None) -> tuple[Any, str]:
+    scope, kb_uids = _resolve_allowed_kbs(ctx, kb_uid)
+    if len(kb_uids) != 1:
+        raise KnowledgeToolInvalidRequest(
+            "coverage='per_file' requires exactly one knowledge base"
+        )
+    return scope, kb_uids[0]
 
 
 def _require_db(ctx: ToolContext) -> Session:
@@ -576,21 +581,22 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
         coverage_cursor: str | None = None,
     ) -> dict[str, Any]:
         try:
-            scope, resolved_kb_uid = _resolve_allowed_kb(ctx, kb_uid)
+            scope, target_kb_uids = _resolve_allowed_kbs(ctx, kb_uid)
             db = _require_db(ctx)
             retrieval = _require_retrieval(ctx)
             if coverage_cursor and coverage != "per_file":
                 raise KnowledgeToolInvalidRequest(
                     "coverage_cursor requires coverage='per_file'"
                 )
-            resolved_file_uids = _resolve_file_references(
-                db,
-                tenant_id=scope.tenant_id,
-                kb_uid=resolved_kb_uid,
-                file_refs=tuple(file_filter),
-            )
 
             if coverage == "per_file":
+                scope, resolved_kb_uid = _resolve_single_allowed_kb(ctx, kb_uid)
+                resolved_file_uids = _resolve_file_references(
+                    db,
+                    tenant_id=scope.tenant_id,
+                    kb_uid=resolved_kb_uid,
+                    file_refs=tuple(file_filter),
+                )
                 requested_file_uids, next_cursor = _coverage_file_page(
                     db,
                     tenant_id=scope.tenant_id,
@@ -723,30 +729,76 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
                     return ToolEnvelope.no_hits(data, _trace(ctx)).model_dump()
                 return ToolEnvelope.ok(data, _trace(ctx)).model_dump()
 
-            response = retrieval.query(
-                tenant_id=scope.tenant_id,
-                kb_uid=resolved_kb_uid,
-                query=query_text,
-                mode="deep" if mode == "deep" else "fast",
-                file_uids=resolved_file_uids,
-                top_k=10,
-            )
-            status = str(response.get("status") or "ok")
-            raw_evidence = list(response.get("evidence") or [])
-            warnings = _warnings_from_response(response)
-            evidence = [_evidence_item_from_raw(item) for item in raw_evidence if isinstance(item, dict)]
+            warnings: list[ToolWarning] = []
+            warning_keys: set[tuple[str, str]] = set()
+            retrieval_health: dict[str, Any] = {}
+            evidence: list[EvidenceItem] = []
+            statuses: list[str] = []
+
+            for target_kb_uid in target_kb_uids:
+                resolved_file_uids = _resolve_file_references(
+                    db,
+                    tenant_id=scope.tenant_id,
+                    kb_uid=target_kb_uid,
+                    file_refs=tuple(file_filter),
+                )
+                try:
+                    response = retrieval.query(
+                        tenant_id=scope.tenant_id,
+                        kb_uid=target_kb_uid,
+                        query=query_text,
+                        mode="deep" if mode == "deep" else "fast",
+                        file_uids=resolved_file_uids,
+                        top_k=10,
+                    )
+                except Exception:  # keep other authorized KBs usable
+                    logger.exception(
+                        "[knowledge.query_kb] retrieval failed "
+                        "phase=relevance trace_id=%s kb_uid=%s",
+                        _trace(ctx),
+                        target_kb_uid,
+                    )
+                    response = {
+                        "status": "unavailable",
+                        "warnings": [{
+                            "code": "RETRIEVAL_UNAVAILABLE",
+                            "message": "retrieval is unavailable",
+                        }],
+                        "retrieval_health": {target_kb_uid: "unavailable"},
+                    }
+
+                status = str(response.get("status") or "ok")
+                statuses.append(status)
+                for warning in _warnings_from_response(response):
+                    key = (warning.code, warning.message)
+                    if key not in warning_keys:
+                        warning_keys.add(key)
+                        warnings.append(warning)
+                health = response.get("retrieval_health")
+                if isinstance(health, dict):
+                    _merge_retrieval_health(retrieval_health, health)
+                evidence.extend(
+                    _evidence_item_from_raw(item)
+                    for item in (response.get("evidence") or [])
+                    if isinstance(item, dict)
+                )
+
             data = QueryKbData(
                 evidence=evidence,
-                retrieval_health=dict(response.get("retrieval_health") or {}),
+                retrieval_health=retrieval_health,
             )
-            if status == "unavailable":
+            if statuses and all(status == "unavailable" for status in statuses):
                 return ToolEnvelope.from_error(
                     ToolProblem(code="RETRIEVAL_UNAVAILABLE", message="retrieval is unavailable", retryable=True),
                     _trace(ctx),
                 ).model_dump()
-            if status == "no_hits":
+            if (
+                not evidence
+                and not warnings
+                and not any(status in {"degraded", "unavailable", "invalid_request"} for status in statuses)
+            ):
                 return ToolEnvelope.no_hits(data, _trace(ctx)).model_dump()
-            if warnings or status == "degraded":
+            if warnings or any(status in {"degraded", "unavailable", "invalid_request"} for status in statuses):
                 return ToolEnvelope.degraded(data, warnings, _trace(ctx)).model_dump()
             return ToolEnvelope.ok(data, _trace(ctx)).model_dump()
         except KnowledgeToolError as exc:
