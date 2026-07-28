@@ -87,6 +87,41 @@ def test_v1_delete_kb_tombstones_resource(client):
     assert resp.status_code == 404
 
 
+def test_system_personal_inbox_kb_is_listed_with_flags(client, db_session):
+    from backend.app.services.personal_inbox import ensure_personal_inbox_kb
+
+    topic = ensure_personal_inbox_kb(
+        db_session,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+    )
+    db_session.commit()
+
+    body = client.get("/api/v1/knowledge-bases").json()
+    item = next(row for row in body["items"] if row["kb_uid"] == topic.kb_uid)
+
+    assert item["name"] == "个人随手记"
+    assert item["system_type"] == "personal_inbox"
+    assert item["is_system"] is True
+    assert item["delete_disabled"] is True
+
+
+def test_system_personal_inbox_kb_cannot_be_deleted(client, db_session):
+    from backend.app.services.personal_inbox import ensure_personal_inbox_kb
+
+    topic = ensure_personal_inbox_kb(
+        db_session,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+    )
+    db_session.commit()
+
+    response = client.delete(f"/api/v1/knowledge-bases/{topic.kb_uid}")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "SYSTEM_KB_DELETE_DISABLED"
+
+
 def test_v1_list_supports_cursor_pagination(client):
     headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
 

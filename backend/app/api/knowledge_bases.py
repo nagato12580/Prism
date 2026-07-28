@@ -36,6 +36,9 @@ class KnowledgeBaseResponse(BaseModel):
     owner_user_id: str
     name: str
     description: str | None = None
+    system_type: str | None = None
+    is_system: bool = False
+    delete_disabled: bool = False
     status: str
     version: int
     active_index_generation: str | None = None
@@ -180,6 +183,13 @@ def delete_knowledge_base(
         .with_for_update()
         .one()
     )
+
+    if topic.is_system or topic.delete_disabled:
+        raise ApiProblem(
+            409,
+            "SYSTEM_KB_DELETE_DISABLED",
+            "System knowledge bases cannot be deleted",
+        )
 
     active_run_ids = db.query(EvaluationRun.id).filter(
         EvaluationRun.tenant_id == actor.tenant_id,
