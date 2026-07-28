@@ -71,6 +71,9 @@ def _public_file(file_row: KnowledgeFile) -> dict:
         "last_job_id": file_row.last_job_id,
         "content_sha256": file_row.content_sha256,
         "size_bytes": file_row.size_bytes,
+        "source_kind": file_row.source_kind,
+        "source_id": file_row.source_id,
+        "system_type": file_row.system_type,
         "preview_url": f"{base}/preview",
         "download_url": f"{base}/download",
     }

@@ -15,7 +15,39 @@ def test_v1_create_and_list_use_actor_scope(client):
         "/api/v1/knowledge-bases",
         headers={"X-Prism-Actor": "bob", "X-Prism-Tenant": "tenant-a"},
     )
-    assert other.json()["items"] == []
+    assert all(item["owner_user_id"] == "bob" for item in other.json()["items"])
+    assert body["kb_uid"] not in {item["kb_uid"] for item in other.json()["items"]}
+
+
+def test_system_personal_inbox_kb_is_listed_for_fresh_actor(client, db_session):
+    from backend.app.models import KnowledgeTopic
+
+    headers = {"X-Prism-Actor": "fresh-user", "X-Prism-Tenant": "fresh-tenant"}
+    assert (
+        db_session.query(KnowledgeTopic)
+        .filter_by(
+            tenant_id="fresh-tenant",
+            owner_user_id="fresh-user",
+            system_type="personal_inbox",
+            deleted_at=None,
+        )
+        .count()
+        == 0
+    )
+
+    response = client.get("/api/v1/knowledge-bases", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    personal_inbox_items = [
+        item for item in items if item["system_type"] == "personal_inbox"
+    ]
+    assert len(personal_inbox_items) == 1
+    item = personal_inbox_items[0]
+    assert item["owner_user_id"] == "fresh-user"
+    assert item["tenant_id"] == "fresh-tenant"
+    assert item["is_system"] is True
+    assert item["delete_disabled"] is True
 
 
 def test_v1_error_envelope_is_structured(client):

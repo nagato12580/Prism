@@ -490,6 +490,61 @@ def test_delete_tombstone_and_job_are_committed_atomically(client, db_session, m
     assert commits[0][1] == 1
 
 
+def test_personal_inbox_file_response_includes_source_markers(client, db_session, monkeypatch, tmp_path):
+    from backend.app.models import PersonalAssetItem, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+    monkeypatch.setattr(personal_inbox, "_publish_job", lambda job_id: None)
+
+    item = PersonalAssetItem(
+        id="api-marker-item",
+        user_id="alice",
+        raw_text="raw",
+        title="API Marker Item",
+        status="confirmed",
+    )
+    unit = PersonalAssetUnit(
+        id="api-marker-unit",
+        user_id="alice",
+        title="API Marker Unit",
+        content="content",
+        source_asset_ids=["api-marker-item"],
+        status="confirmed",
+    )
+    db_session.add_all([item, unit])
+    db_session.commit()
+    file_row = personal_inbox.sync_personal_asset_unit_to_kb(
+        db_session,
+        unit,
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        publish=False,
+    )
+
+    get_response = client.get(
+        f"/api/v1/knowledge-bases/{file_row.kb_uid}/files/{file_row.file_uid}",
+        headers=headers,
+    )
+    list_response = client.get(
+        f"/api/v1/knowledge-bases/{file_row.kb_uid}/files",
+        headers=headers,
+    )
+
+    assert get_response.status_code == 200
+    assert list_response.status_code == 200
+    get_body = get_response.json()
+    list_body = next(
+        item for item in list_response.json()["items"] if item["file_uid"] == file_row.file_uid
+    )
+    for body in [get_body, list_body]:
+        assert body["source_kind"] == "personal_asset_unit"
+        assert body["source_id"] == "api-marker-unit"
+        assert body["system_type"] == "personal_inbox"
+
+
 def test_delete_personal_inbox_file_cascades_asset_unit(client, db_session, monkeypatch, tmp_path):
     from backend.app.api import knowledge_files
     from backend.app.models import PersonalAssetItem, PersonalAssetUnit

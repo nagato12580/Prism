@@ -13,6 +13,7 @@ from backend.app.services.knowledge_access import (
     KnowledgeAccessPolicy,
     KnowledgeNotFound,
 )
+from backend.app.services.personal_inbox import ensure_personal_inbox_kb
 from backend.app.api.errors import ApiProblem
 from backend.app.utils.time import local_now
 
@@ -78,6 +79,11 @@ def list_knowledge_bases(
     cursor: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
 ):
+    ensure_personal_inbox_kb(
+        db,
+        tenant_id=actor.tenant_id,
+        owner_user_id=actor.actor_id,
+    )
     query = (
         db.query(KnowledgeTopic)
         .filter_by(tenant_id=actor.tenant_id, owner_user_id=actor.actor_id, deleted_at=None)
