@@ -1,7 +1,11 @@
 # prism/backend/app/utils/auto_migrate.py
+import logging
+
 from sqlalchemy import UniqueConstraint, inspect, text
 from sqlalchemy.sql.sqltypes import Text
 from sqlalchemy.types import Boolean, Float, Integer, String
+
+logger = logging.getLogger(__name__)
 
 KNOWN_UNIQUE_CONSTRAINTS = {
     "uq_knowledge_topic_user_name",
@@ -88,6 +92,75 @@ def auto_migrate(Base, engine) -> None:
                     conn.commit()
                 except Exception as exc:
                     print(f"[auto_migrate] Skip constraint {constraint.name}: {exc}")
+
+    if _is_application_engine(engine):
+        ensure_personal_inbox_backfill()
+
+
+def ensure_personal_inbox_backfill() -> None:
+    """Create personal inbox KBs and sync existing confirmed personal asset units.
+
+    Startup backfill intentionally avoids publishing parse jobs so Redis is not
+    required for application startup. The database job rows are still created by
+    the personal inbox service and can be picked up by later queue/retry flows.
+    """
+    from backend.app.database import SessionLocal
+    from backend.app.models import PersonalAssetUnit
+    from backend.app.services import personal_inbox
+
+    db = SessionLocal()
+    try:
+        owner_user_ids = [
+            row[0]
+            for row in (
+                db.query(PersonalAssetUnit.user_id)
+                .filter(PersonalAssetUnit.status == "confirmed")
+                .distinct()
+                .all()
+            )
+            if row[0]
+        ]
+        if not owner_user_ids:
+            return
+
+        total = 0
+        for owner_user_id in owner_user_ids:
+            tenant_id = owner_user_id
+            try:
+                personal_inbox.ensure_personal_inbox_kb(
+                    db,
+                    tenant_id=tenant_id,
+                    owner_user_id=owner_user_id,
+                )
+                total += personal_inbox.backfill_personal_inbox(
+                    db,
+                    tenant_id=tenant_id,
+                    owner_user_id=owner_user_id,
+                    publish=False,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to backfill personal inbox for user: owner_user_id=%s",
+                    owner_user_id,
+                )
+                db.rollback()
+                continue
+        if total:
+            print(f"[auto_migrate] Personal inbox backfilled files: {total}")
+    except Exception:
+        logger.exception("Failed to run personal inbox startup backfill")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _is_application_engine(engine) -> bool:
+    try:
+        from backend.app.database import engine as application_engine
+    except Exception:
+        logger.exception("Failed to resolve application engine for personal inbox backfill")
+        return False
+    return engine is application_engine
 
 
 def _infer_default(col):

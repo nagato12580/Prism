@@ -216,8 +216,21 @@ def backfill_personal_inbox(
         .all()
     )
     synced = 0
+    topic = ensure_personal_inbox_kb(
+        db,
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
+    )
     for unit in units:
         try:
+            if _personal_inbox_file_is_current(
+                db,
+                unit,
+                topic,
+                tenant_id=tenant_id,
+                owner_user_id=owner_user_id,
+            ):
+                continue
             sync_personal_asset_unit_to_kb(
                 db,
                 unit,
@@ -231,6 +244,43 @@ def backfill_personal_inbox(
             continue
         synced += 1
     return synced
+
+
+def _personal_inbox_file_is_current(
+    db: Session,
+    unit: PersonalAssetUnit,
+    topic: KnowledgeTopic,
+    *,
+    tenant_id: str,
+    owner_user_id: str,
+) -> bool:
+    file_row = _load_personal_inbox_file(db, tenant_id, topic.kb_uid, unit.id, lock=False)
+    if file_row is None:
+        file_row = _load_personal_inbox_file_by_uid(
+            db,
+            _personal_inbox_file_uid(tenant_id, owner_user_id, unit.id),
+            lock=False,
+        )
+    if file_row is None:
+        return False
+
+    markdown = render_personal_asset_unit_markdown(db, unit)
+    content_sha256 = sha256(markdown.encode("utf-8")).hexdigest()
+    content_matches = file_row.content_sha256 == content_sha256
+    if not content_matches and file_row.content_text is not None:
+        content_matches = file_row.content_text == markdown
+
+    return (
+        content_matches
+        and file_row.tenant_id == tenant_id
+        and file_row.user_id == owner_user_id
+        and file_row.kb_uid == topic.kb_uid
+        and file_row.topic_id == topic.id
+        and file_row.source_kind == PERSONAL_ASSET_UNIT_SOURCE_KIND
+        and file_row.source_id == unit.id
+        and file_row.system_type == PERSONAL_INBOX_SYSTEM_TYPE
+        and file_row.deleted_at is None
+    )
 
 
 def _reset_processing_state(file_row: KnowledgeFile) -> None:

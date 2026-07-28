@@ -283,3 +283,89 @@ def test_backfill_personal_inbox_syncs_confirmed_units_only(db_session, tmp_path
     rows = db_session.query(KnowledgeFile).filter_by(source_kind="personal_asset_unit").all()
     assert count == 1
     assert [row.source_id for row in rows] == ["unit-confirmed"]
+
+
+def test_backfill_personal_inbox_syncs_existing_confirmed_units(db_session, tmp_path, monkeypatch):
+    from backend.app.models import KnowledgeFile, KnowledgeTopic, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+    monkeypatch.setattr(personal_inbox, "_publish_job", lambda job_id: None)
+    confirmed = PersonalAssetUnit(
+        id="confirmed-unit",
+        user_id="default-user",
+        title="Confirmed",
+        content="Confirmed content",
+        source_asset_ids=[],
+        status="confirmed",
+    )
+    pending = PersonalAssetUnit(
+        id="pending-unit",
+        user_id="default-user",
+        title="Pending",
+        content="Pending content",
+        source_asset_ids=[],
+        status="pending_review",
+    )
+    db_session.add_all([confirmed, pending])
+    db_session.commit()
+
+    count = personal_inbox.backfill_personal_inbox(
+        db_session,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        publish=False,
+    )
+
+    assert count == 1
+    file_row = db_session.query(KnowledgeFile).filter_by(source_id="confirmed-unit").one()
+    assert file_row.tenant_id == "default-user"
+    assert file_row.user_id == "default-user"
+    assert db_session.query(KnowledgeFile).filter_by(source_id="pending-unit").count() == 0
+    topic = db_session.query(KnowledgeTopic).filter_by(kb_uid=file_row.kb_uid).one()
+    assert topic.owner_user_id == "default-user"
+
+
+def test_backfill_personal_inbox_skips_unchanged_existing_units(db_session, tmp_path, monkeypatch):
+    from backend.app.models import KnowledgeFile, KnowledgeJob, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+    monkeypatch.setattr(personal_inbox, "_publish_job", lambda job_id: None)
+    unit = PersonalAssetUnit(
+        id="confirmed-unit-idempotent",
+        user_id="default-user",
+        title="Confirmed",
+        content="Confirmed content",
+        source_asset_ids=[],
+        status="confirmed",
+    )
+    db_session.add(unit)
+    db_session.commit()
+
+    first_count = personal_inbox.backfill_personal_inbox(
+        db_session,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        publish=False,
+    )
+    file_row = db_session.query(KnowledgeFile).filter_by(source_id=unit.id).one()
+    first_version = file_row.parsed_content_version
+    first_job_count = db_session.query(KnowledgeJob).filter_by(file_uid=file_row.file_uid).count()
+
+    second_count = personal_inbox.backfill_personal_inbox(
+        db_session,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        publish=False,
+    )
+    db_session.refresh(file_row)
+    second_job_count = db_session.query(KnowledgeJob).filter_by(file_uid=file_row.file_uid).count()
+
+    assert first_count == 1
+    assert second_count == 0
+    assert file_row.parsed_content_version == first_version
+    assert first_job_count == 1
+    assert second_job_count == 1
