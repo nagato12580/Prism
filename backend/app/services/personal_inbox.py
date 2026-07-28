@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import logging
 from pathlib import Path
 from re import sub
+from uuid import NAMESPACE_URL, uuid5
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.models import KnowledgeFile, KnowledgeTopic, PersonalAssetItem, PersonalAssetUnit
-from backend.app.models.knowledge_types import StageStatus, uuid4_str
+from backend.app.models.knowledge_types import StageStatus
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.services.knowledge_uploads import RedisJobPublisher
 from backend.app.storage.files import LocalFileStorage
 
+
+logger = logging.getLogger(__name__)
 
 PERSONAL_INBOX_NAME = "个人随手记"
 PERSONAL_INBOX_SYSTEM_TYPE = "personal_inbox"
@@ -41,12 +46,14 @@ def ensure_personal_inbox_kb(
             system_type=PERSONAL_INBOX_SYSTEM_TYPE,
             deleted_at=None,
         )
-        .one_or_none()
+        .order_by(KnowledgeTopic.created_at.asc(), KnowledgeTopic.id.asc())
+        .first()
     )
     if topic is not None:
         return topic
 
     topic = KnowledgeTopic(
+        kb_uid=_personal_inbox_kb_uid(tenant_id, owner_user_id),
         tenant_id=tenant_id,
         owner_user_id=owner_user_id,
         user_id=owner_user_id,
@@ -57,8 +64,23 @@ def ensure_personal_inbox_kb(
         delete_disabled=True,
     )
     db.add(topic)
-    db.flush()
-    return topic
+    try:
+        db.flush()
+        return topic
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(KnowledgeTopic)
+            .filter_by(
+                kb_uid=_personal_inbox_kb_uid(tenant_id, owner_user_id),
+                deleted_at=None,
+            )
+            .order_by(KnowledgeTopic.created_at.asc(), KnowledgeTopic.id.asc())
+            .first()
+        )
+        if existing is not None:
+            return existing
+        raise
 
 
 def render_personal_asset_unit_markdown(db: Session, unit: PersonalAssetUnit) -> str:
@@ -115,6 +137,8 @@ def sync_personal_asset_unit_to_kb(
 ) -> KnowledgeFile:
     if unit.status != "confirmed":
         raise ValueError("Only confirmed personal asset units can be synced")
+    if unit.user_id != owner_user_id:
+        raise ValueError("Personal asset unit does not belong to owner_user_id")
 
     storage = _storage()
     old_storage_uri: str | None = None
@@ -128,7 +152,7 @@ def sync_personal_asset_unit_to_kb(
         markdown = render_personal_asset_unit_markdown(db, unit)
         content = markdown.encode("utf-8")
         title = unit.title or unit.id
-        filename = _markdown_filename(title, unit.id)
+        original_filename = _markdown_filename(title, unit.id)
         file_row = (
             db.query(KnowledgeFile)
             .filter_by(
@@ -138,10 +162,17 @@ def sync_personal_asset_unit_to_kb(
                 source_id=unit.id,
                 deleted_at=None,
             )
-            .one_or_none()
+            .order_by(KnowledgeFile.created_at.asc(), KnowledgeFile.id.asc())
+            .first()
         )
-        file_uid = file_row.file_uid if file_row is not None else uuid4_str()
-        staged = storage.stage(tenant_id, topic.kb_uid, file_uid, filename, content)
+        next_version = (file_row.parsed_content_version + 1) if file_row is not None else 0
+        file_uid = file_row.file_uid if file_row is not None else _personal_inbox_file_uid(
+            tenant_id,
+            owner_user_id,
+            unit.id,
+        )
+        storage_filename = _storage_markdown_filename(title, unit.id, next_version)
+        staged = storage.stage(tenant_id, topic.kb_uid, file_uid, storage_filename, content)
         new_storage_uri = storage.commit(staged)
 
         if file_row is None:
@@ -152,7 +183,7 @@ def sync_personal_asset_unit_to_kb(
                 kb_uid=topic.kb_uid,
                 topic_id=topic.id,
                 title=title,
-                original_filename=filename,
+                original_filename=original_filename,
                 relative_path="personal-inbox",
                 media_type="document",
                 mime_type="text/markdown",
@@ -175,7 +206,7 @@ def sync_personal_asset_unit_to_kb(
             old_storage_uri = file_row.storage_uri
             file_row.topic_id = topic.id
             file_row.title = title
-            file_row.original_filename = filename
+            file_row.original_filename = original_filename
             file_row.relative_path = "personal-inbox"
             file_row.media_type = "document"
             file_row.mime_type = "text/markdown"
@@ -186,10 +217,29 @@ def sync_personal_asset_unit_to_kb(
             file_row.md5 = sha256(content).hexdigest()[:32]
             file_row.content_text = markdown
             file_row.system_type = PERSONAL_INBOX_SYSTEM_TYPE
-            file_row.parsed_content_version = (file_row.parsed_content_version or 0) + 1
+            file_row.parsed_content_version = next_version
 
         _reset_processing_state(file_row)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            existing = (
+                db.query(KnowledgeFile)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    kb_uid=topic.kb_uid,
+                    source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+                    source_id=unit.id,
+                    deleted_at=None,
+                )
+                .order_by(KnowledgeFile.created_at.asc(), KnowledgeFile.id.asc())
+                .first()
+            )
+            if existing is None:
+                raise
+            file_row = existing
+            raise
 
         job = KnowledgeJobService(db).create(
             JobCommand(
@@ -209,6 +259,10 @@ def sync_personal_asset_unit_to_kb(
             try:
                 storage.delete(old_storage_uri)
             except Exception:
+                logger.exception(
+                    "Failed to delete previous personal inbox storage: storage_uri=%s",
+                    old_storage_uri,
+                )
                 pass
 
         if publish:
@@ -216,6 +270,7 @@ def sync_personal_asset_unit_to_kb(
                 _publish_job(job.id)
                 KnowledgeJobService(db).stage_enqueued(job.id)
             except Exception:
+                logger.exception("Failed to publish personal inbox parse job: job_id=%s", job.id)
                 db.rollback()
 
         db.refresh(file_row)
@@ -224,8 +279,13 @@ def sync_personal_asset_unit_to_kb(
         db.rollback()
         if new_storage_uri is not None:
             try:
-                storage.delete(new_storage_uri)
+                if not _storage_uri_is_referenced(db, new_storage_uri):
+                    storage.delete(new_storage_uri)
             except Exception:
+                logger.exception(
+                    "Failed to clean up personal inbox storage after sync failure: storage_uri=%s",
+                    new_storage_uri,
+                )
                 pass
         raise
 
@@ -254,6 +314,7 @@ def backfill_personal_inbox(
                 publish=publish,
             )
         except Exception:
+            logger.exception("Failed to backfill personal inbox unit: unit_id=%s", unit.id)
             db.rollback()
             continue
         synced += 1
@@ -277,8 +338,33 @@ def _reset_processing_state(file_row: KnowledgeFile) -> None:
     file_row.error_message = None
 
 
+def _storage_uri_is_referenced(db: Session, storage_uri: str) -> bool:
+    return (
+        db.query(KnowledgeFile.id)
+        .filter_by(storage_uri=storage_uri, deleted_at=None)
+        .first()
+        is not None
+    )
+
+
 def _markdown_filename(title: str, unit_id: str) -> str:
     safe_title = sub(r"[\\/:*?\"<>|]+", "-", (title or "").strip()).strip(" .")
     if not safe_title:
         safe_title = unit_id
     return f"{safe_title[:120]}.md"
+
+
+def _storage_markdown_filename(title: str, unit_id: str, version: int) -> str:
+    safe_title = sub(r"[\\/:*?\"<>|]+", "-", (title or "").strip()).strip(" .")
+    if not safe_title:
+        safe_title = unit_id
+    suffix = f"{unit_id[:8]}-v{version}"
+    return f"{safe_title[:100]}-{suffix}.md"
+
+
+def _personal_inbox_kb_uid(tenant_id: str, owner_user_id: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"prism:personal-inbox-kb:{tenant_id}:{owner_user_id}"))
+
+
+def _personal_inbox_file_uid(tenant_id: str, owner_user_id: str, unit_id: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"prism:personal-inbox-file:{tenant_id}:{owner_user_id}:{unit_id}"))

@@ -124,6 +124,86 @@ def test_sync_unconfirmed_unit_raises_value_error_and_creates_no_file(db_session
     assert rows == []
 
 
+def test_sync_rejects_unit_owned_by_another_user(db_session, tmp_path, monkeypatch):
+    from backend.app.models import KnowledgeFile, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+
+    unit = PersonalAssetUnit(
+        id="unit-other-owner",
+        user_id="user-b",
+        title="Other Owner Unit",
+        content="Other owner content",
+        status="confirmed",
+    )
+    db_session.add(unit)
+    db_session.commit()
+
+    with pytest.raises(ValueError):
+        personal_inbox.sync_personal_asset_unit_to_kb(
+            db_session,
+            unit,
+            tenant_id="tenant-a",
+            owner_user_id="user-a",
+        )
+
+    rows = db_session.query(KnowledgeFile).filter_by(source_kind="personal_asset_unit").all()
+    assert rows == []
+
+
+def test_sync_update_commit_failure_preserves_previous_storage(db_session, tmp_path, monkeypatch):
+    from backend.app.models import PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    storage = LocalFileStorage(tmp_path)
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: storage)
+    monkeypatch.setattr(personal_inbox, "_publish_job", lambda job_id: None)
+
+    unit = PersonalAssetUnit(
+        id="unit-storage-safe",
+        user_id="user-a",
+        title="Storage Safe",
+        content="Old content",
+        status="confirmed",
+    )
+    db_session.add(unit)
+    db_session.commit()
+    file_row = personal_inbox.sync_personal_asset_unit_to_kb(
+        db_session,
+        unit,
+        tenant_id="tenant-a",
+        owner_user_id="user-a",
+        publish=False,
+    )
+    old_storage_uri = file_row.storage_uri
+    assert old_storage_uri
+    assert b"Old content" in storage.read_bytes(old_storage_uri)
+
+    unit.content = "New content"
+    db_session.commit()
+    real_commit = db_session.commit
+
+    def fail_next_commit():
+        raise RuntimeError("simulated commit failure")
+
+    monkeypatch.setattr(db_session, "commit", fail_next_commit)
+    with pytest.raises(RuntimeError, match="simulated commit failure"):
+        personal_inbox.sync_personal_asset_unit_to_kb(
+            db_session,
+            unit,
+            tenant_id="tenant-a",
+            owner_user_id="user-a",
+            publish=False,
+        )
+
+    monkeypatch.setattr(db_session, "commit", real_commit)
+    assert storage.exists(old_storage_uri)
+    assert b"Old content" in storage.read_bytes(old_storage_uri)
+
+
 def test_backfill_personal_inbox_syncs_confirmed_units_only(db_session, tmp_path, monkeypatch):
     from backend.app.models import KnowledgeFile, PersonalAssetUnit
     from backend.app.services import personal_inbox
