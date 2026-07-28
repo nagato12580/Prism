@@ -358,3 +358,82 @@ def test_confirm_personal_asset_unit_does_not_run_governance_settlement(
     assert payload["canonical_count"] == 0
     assert payload["governance_link_count"] == 0
     assert payload["pku_relation_count"] == 0
+
+
+def test_confirm_personal_asset_unit_syncs_to_personal_inbox(client, db_session, monkeypatch):
+    from backend.app.models import KnowledgeFile
+    from backend.app.services import personal_inbox
+
+    monkeypatch.setattr("backend.app.api.assets._ai_parse_asset", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "backend.app.api.assets._ai_synthesize_knowledge",
+        lambda assets, title="", instruction="": {
+            "title": title or "Unit",
+            "summary": "Unit summary",
+            "content": "Unit content",
+            "tags": [],
+            "outline": [],
+            "confidence": {},
+            "rationale": "",
+        },
+    )
+    monkeypatch.setattr(personal_inbox, "_publish_job", lambda job_id: None)
+
+    item = client.post(
+        "/api/v1/assets/items",
+        json={"raw_text": "fragment content", "raw_title": "Fragment"},
+    ).json()
+    client.post(f"/api/v1/assets/items/{item['id']}/confirm", json={})
+    unit = client.post(
+        "/api/v1/assets/personal_asset_units",
+        json={"asset_ids": [item["id"]], "title": "Unit"},
+    ).json()
+
+    response = client.post(f"/api/v1/assets/personal_asset_units/{unit['id']}/confirm")
+
+    assert response.status_code == 200
+    file_row = (
+        db_session.query(KnowledgeFile)
+        .filter_by(source_kind="personal_asset_unit", source_id=unit["id"])
+        .one()
+    )
+    assert file_row.tenant_id == "default-user"
+    assert file_row.user_id == "default-user"
+    assert file_row.original_filename.endswith(".md")
+    assert file_row.content_text and "Unit content" in file_row.content_text
+
+
+def test_update_confirmed_personal_asset_unit_resyncs_existing_file(client, db_session, monkeypatch):
+    from backend.app.models import KnowledgeFile, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+
+    monkeypatch.setattr(personal_inbox, "_publish_job", lambda job_id: None)
+    unit = PersonalAssetUnit(
+        id="unit-a",
+        user_id="default-user",
+        title="Old",
+        summary="Old summary",
+        content="Old content",
+        source_asset_ids=[],
+        status="confirmed",
+    )
+    db_session.add(unit)
+    db_session.commit()
+    personal_inbox.sync_personal_asset_unit_to_kb(
+        db_session,
+        unit,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        publish=False,
+    )
+    file_uid = db_session.query(KnowledgeFile).filter_by(source_id="unit-a").one().file_uid
+
+    response = client.put(
+        "/api/v1/assets/personal_asset_units/unit-a",
+        json={"title": "New", "content": "New content"},
+    )
+
+    assert response.status_code == 200
+    updated = db_session.query(KnowledgeFile).filter_by(source_id="unit-a").one()
+    assert updated.file_uid == file_uid
+    assert "New content" in updated.content_text

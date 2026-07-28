@@ -27,6 +27,7 @@ from ..services.knowledge_governance import GovernanceResult
 from ..services.memory_context import recall_preference_context
 from ..services.memory_entity import extract_and_link_entities
 from ..services.memory_vectors import upsert_entry_vector
+from ..services.personal_inbox import sync_personal_asset_unit_to_kb
 from ..utils.time import local_now
 from ..schemas.asset import (
     AssetConfirmRequest,
@@ -49,6 +50,7 @@ from engine.app.graph.pipeline import run_graph_ingest_pipeline
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 DEFAULT_USER_ID = "default-user"
+DEFAULT_TENANT_ID = "default-user"
 log = logging.getLogger(__name__)
 
 
@@ -961,8 +963,9 @@ def update_personal_asset_unit(unit_id: str, payload: PersonalAssetUnitUpdate, d
     unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == unit_id, PersonalAssetUnit.user_id == DEFAULT_USER_ID).first()
     if not unit:
         raise HTTPException(status_code=404, detail={"code": "personal_asset_unit_not_found", "message": "Personal asset unit not found"})
-    if unit.status not in {"pending", "pending_review"}:
+    if unit.status not in {"pending", "pending_review", "confirmed"}:
         raise HTTPException(status_code=409, detail={"code": "personal_asset_unit_closed", "message": "Personal asset unit is already closed"})
+    was_confirmed = unit.status == "confirmed"
     for key, value in payload.model_dump(exclude_unset=True).items():
         if value is None:
             continue
@@ -971,9 +974,26 @@ def update_personal_asset_unit(unit_id: str, payload: PersonalAssetUnitUpdate, d
         elif key == "outline":
             value = _clean_dict_list(value)
         setattr(unit, key, value)
-    unit.status = "pending_review"
+    if not was_confirmed:
+        unit.status = "pending_review"
     unit.edited_at = local_now()
-    db.commit()
+    if was_confirmed:
+        try:
+            db.flush()
+            sync_personal_asset_unit_to_kb(
+                db,
+                unit,
+                tenant_id=DEFAULT_TENANT_ID,
+                owner_user_id=DEFAULT_USER_ID,
+            )
+        except Exception as exc:
+            log.exception("Failed to sync edited personal asset unit to personal inbox", extra={"unit_id": unit.id})
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "personal_asset_unit_sync_failed", "message": "Failed to sync personal asset unit to personal inbox"},
+            ) from exc
+    else:
+        db.commit()
     db.refresh(unit)
     return unit
 
@@ -988,7 +1008,20 @@ def confirm_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
 
     unit.status = "confirmed"
     unit.confirmed_at = local_now()
-    db.commit()
+    try:
+        db.flush()
+        sync_personal_asset_unit_to_kb(
+            db,
+            unit,
+            tenant_id=DEFAULT_TENANT_ID,
+            owner_user_id=DEFAULT_USER_ID,
+        )
+    except Exception as exc:
+        log.exception("Failed to sync confirmed personal asset unit to personal inbox", extra={"unit_id": unit.id})
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "personal_asset_unit_sync_failed", "message": "Failed to sync personal asset unit to personal inbox"},
+        ) from exc
     db.refresh(unit)
     try:
         _schedule_asset_unit_entity_graph_ingestion(unit.id)
