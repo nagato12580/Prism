@@ -84,6 +84,11 @@ def list_knowledge_bases(
         tenant_id=actor.tenant_id,
         owner_user_id=actor.actor_id,
     )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     query = (
         db.query(KnowledgeTopic)
         .filter_by(tenant_id=actor.tenant_id, owner_user_id=actor.actor_id, deleted_at=None)

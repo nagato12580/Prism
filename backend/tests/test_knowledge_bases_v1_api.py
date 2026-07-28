@@ -50,6 +50,72 @@ def test_system_personal_inbox_kb_is_listed_for_fresh_actor(client, db_session):
     assert item["delete_disabled"] is True
 
 
+def test_system_personal_inbox_kb_is_persisted_after_fresh_actor_list(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from backend.app.database import Base, get_db
+    from backend.app.main import create_app
+
+    monkeypatch.setenv("SKIP_ENGINE", "1")
+    engine = create_engine(f"sqlite:///{tmp_path / 'personal-inbox.db'}")
+    Base.metadata.create_all(engine)
+    committed_sessions = []
+
+    class CountingSession(Session):
+        def commit(self):
+            committed_sessions.append(self)
+            return super().commit()
+
+    TestingSession = sessionmaker(
+        bind=engine,
+        class_=CountingSession,
+        autocommit=False,
+        autoflush=False,
+    )
+    app = create_app()
+
+    def override_get_db():
+        db = TestingSession()
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.rollback()
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    headers = {
+        "X-Prism-Actor": "persisted-fresh-user",
+        "X-Prism-Tenant": "persisted-fresh-tenant",
+    }
+    try:
+        with TestClient(app) as isolated_client:
+            listed = isolated_client.get("/api/v1/knowledge-bases", headers=headers)
+
+            assert listed.status_code == 200
+            personal_inbox_items = [
+                item
+                for item in listed.json()["items"]
+                if item["system_type"] == "personal_inbox"
+            ]
+            assert len(personal_inbox_items) == 1
+            kb_uid = personal_inbox_items[0]["kb_uid"]
+            assert committed_sessions
+
+            fetched = isolated_client.get(f"/api/v1/knowledge-bases/{kb_uid}", headers=headers)
+
+            assert fetched.status_code == 200
+            assert fetched.json()["kb_uid"] == kb_uid
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
 def test_v1_error_envelope_is_structured(client):
     response = client.get("/api/v1/knowledge-bases/missing")
     assert response.status_code == 404
