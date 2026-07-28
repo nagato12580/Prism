@@ -4,7 +4,7 @@ from hashlib import sha256
 import logging
 from pathlib import Path
 from re import sub
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -63,12 +63,12 @@ def ensure_personal_inbox_kb(
         is_system=True,
         delete_disabled=True,
     )
-    db.add(topic)
     try:
-        db.flush()
+        with db.begin_nested():
+            db.add(topic)
+            db.flush()
         return topic
     except IntegrityError:
-        db.rollback()
         existing = (
             db.query(KnowledgeTopic)
             .filter_by(
@@ -153,93 +153,20 @@ def sync_personal_asset_unit_to_kb(
         content = markdown.encode("utf-8")
         title = unit.title or unit.id
         original_filename = _markdown_filename(title, unit.id)
-        file_row = (
-            db.query(KnowledgeFile)
-            .filter_by(
-                tenant_id=tenant_id,
-                kb_uid=topic.kb_uid,
-                source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
-                source_id=unit.id,
-                deleted_at=None,
-            )
-            .order_by(KnowledgeFile.created_at.asc(), KnowledgeFile.id.asc())
-            .first()
+        file_row = _upsert_personal_inbox_file(
+            db,
+            storage,
+            topic,
+            unit,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            title=title,
+            original_filename=original_filename,
+            markdown=markdown,
+            content=content,
         )
-        next_version = (file_row.parsed_content_version + 1) if file_row is not None else 0
-        file_uid = file_row.file_uid if file_row is not None else _personal_inbox_file_uid(
-            tenant_id,
-            owner_user_id,
-            unit.id,
-        )
-        storage_filename = _storage_markdown_filename(title, unit.id, next_version)
-        staged = storage.stage(tenant_id, topic.kb_uid, file_uid, storage_filename, content)
-        new_storage_uri = storage.commit(staged)
-
-        if file_row is None:
-            file_row = KnowledgeFile(
-                file_uid=file_uid,
-                tenant_id=tenant_id,
-                user_id=owner_user_id,
-                kb_uid=topic.kb_uid,
-                topic_id=topic.id,
-                title=title,
-                original_filename=original_filename,
-                relative_path="personal-inbox",
-                media_type="document",
-                mime_type="text/markdown",
-                storage_uri=new_storage_uri,
-                content_sha256=staged.sha256,
-                size_bytes=staged.size_bytes,
-                file_size=staged.size_bytes,
-                md5=sha256(content).hexdigest()[:32],
-                content_text=markdown,
-                source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
-                source_id=unit.id,
-                system_type=PERSONAL_INBOX_SYSTEM_TYPE,
-                parse_status=StageStatus.PENDING.value,
-                index_status=StageStatus.PENDING.value,
-                graph_status=StageStatus.PENDING.value,
-                parsed_content_version=0,
-            )
-            db.add(file_row)
-        else:
-            old_storage_uri = file_row.storage_uri
-            file_row.topic_id = topic.id
-            file_row.title = title
-            file_row.original_filename = original_filename
-            file_row.relative_path = "personal-inbox"
-            file_row.media_type = "document"
-            file_row.mime_type = "text/markdown"
-            file_row.storage_uri = new_storage_uri
-            file_row.content_sha256 = staged.sha256
-            file_row.size_bytes = staged.size_bytes
-            file_row.file_size = staged.size_bytes
-            file_row.md5 = sha256(content).hexdigest()[:32]
-            file_row.content_text = markdown
-            file_row.system_type = PERSONAL_INBOX_SYSTEM_TYPE
-            file_row.parsed_content_version = next_version
-
-        _reset_processing_state(file_row)
-        try:
-            db.flush()
-        except IntegrityError:
-            db.rollback()
-            existing = (
-                db.query(KnowledgeFile)
-                .filter_by(
-                    tenant_id=tenant_id,
-                    kb_uid=topic.kb_uid,
-                    source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
-                    source_id=unit.id,
-                    deleted_at=None,
-                )
-                .order_by(KnowledgeFile.created_at.asc(), KnowledgeFile.id.asc())
-                .first()
-            )
-            if existing is None:
-                raise
-            file_row = existing
-            raise
+        old_storage_uri = getattr(file_row, "_previous_storage_uri", None)
+        new_storage_uri = file_row.storage_uri
 
         job = KnowledgeJobService(db).create(
             JobCommand(
@@ -256,14 +183,7 @@ def sync_personal_asset_unit_to_kb(
         db.commit()
 
         if old_storage_uri and old_storage_uri != new_storage_uri:
-            try:
-                storage.delete(old_storage_uri)
-            except Exception:
-                logger.exception(
-                    "Failed to delete previous personal inbox storage: storage_uri=%s",
-                    old_storage_uri,
-                )
-                pass
+            _delete_storage_if_unreferenced(db, storage, old_storage_uri)
 
         if publish:
             try:
@@ -278,15 +198,7 @@ def sync_personal_asset_unit_to_kb(
     except Exception:
         db.rollback()
         if new_storage_uri is not None:
-            try:
-                if not _storage_uri_is_referenced(db, new_storage_uri):
-                    storage.delete(new_storage_uri)
-            except Exception:
-                logger.exception(
-                    "Failed to clean up personal inbox storage after sync failure: storage_uri=%s",
-                    new_storage_uri,
-                )
-                pass
+            _delete_storage_if_unreferenced(db, storage, new_storage_uri)
         raise
 
 
@@ -338,6 +250,127 @@ def _reset_processing_state(file_row: KnowledgeFile) -> None:
     file_row.error_message = None
 
 
+def _upsert_personal_inbox_file(
+    db: Session,
+    storage: LocalFileStorage,
+    topic: KnowledgeTopic,
+    unit: PersonalAssetUnit,
+    *,
+    tenant_id: str,
+    owner_user_id: str,
+    title: str,
+    original_filename: str,
+    markdown: str,
+    content: bytes,
+) -> KnowledgeFile:
+    file_uid = _personal_inbox_file_uid(tenant_id, owner_user_id, unit.id)
+    file_row = _load_personal_inbox_file(db, tenant_id, topic.kb_uid, unit.id, lock=True)
+    if file_row is None:
+        file_row = _load_personal_inbox_file_by_uid(db, file_uid, lock=True)
+
+    while True:
+        next_version = (file_row.parsed_content_version + 1) if file_row is not None else 0
+        storage_filename = _storage_markdown_filename(title, unit.id, next_version)
+        staged = storage.stage(tenant_id, topic.kb_uid, file_uid, storage_filename, content)
+        new_storage_uri = storage.commit(staged)
+
+        if file_row is None:
+            candidate = KnowledgeFile(
+                file_uid=file_uid,
+                tenant_id=tenant_id,
+                user_id=owner_user_id,
+                kb_uid=topic.kb_uid,
+                topic_id=topic.id,
+                title=title,
+                original_filename=original_filename,
+                relative_path="personal-inbox",
+                media_type="document",
+                mime_type="text/markdown",
+                storage_uri=new_storage_uri,
+                content_sha256=staged.sha256,
+                size_bytes=staged.size_bytes,
+                file_size=staged.size_bytes,
+                md5=sha256(content).hexdigest()[:32],
+                content_text=markdown,
+                source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+                source_id=unit.id,
+                system_type=PERSONAL_INBOX_SYSTEM_TYPE,
+                parse_status=StageStatus.PENDING.value,
+                index_status=StageStatus.PENDING.value,
+                graph_status=StageStatus.PENDING.value,
+                parsed_content_version=0,
+            )
+            _reset_processing_state(candidate)
+            try:
+                with db.begin_nested():
+                    db.add(candidate)
+                    db.flush()
+                candidate._previous_storage_uri = None
+                return candidate
+            except IntegrityError:
+                _delete_storage_if_unreferenced(db, storage, new_storage_uri)
+                file_row = _load_personal_inbox_file(db, tenant_id, topic.kb_uid, unit.id, lock=True)
+                if file_row is None:
+                    file_row = _load_personal_inbox_file_by_uid(db, file_uid, lock=True)
+                if file_row is None:
+                    raise
+                continue
+
+        old_storage_uri = file_row.storage_uri
+        file_row.topic_id = topic.id
+        file_row.title = title
+        file_row.original_filename = original_filename
+        file_row.relative_path = "personal-inbox"
+        file_row.media_type = "document"
+        file_row.mime_type = "text/markdown"
+        file_row.storage_uri = new_storage_uri
+        file_row.content_sha256 = staged.sha256
+        file_row.size_bytes = staged.size_bytes
+        file_row.file_size = staged.size_bytes
+        file_row.md5 = sha256(content).hexdigest()[:32]
+        file_row.content_text = markdown
+        file_row.source_kind = PERSONAL_ASSET_UNIT_SOURCE_KIND
+        file_row.source_id = unit.id
+        file_row.system_type = PERSONAL_INBOX_SYSTEM_TYPE
+        file_row.parsed_content_version = next_version
+        _reset_processing_state(file_row)
+        db.flush()
+        file_row._previous_storage_uri = old_storage_uri
+        return file_row
+
+
+def _load_personal_inbox_file(
+    db: Session,
+    tenant_id: str,
+    kb_uid: str,
+    unit_id: str,
+    *,
+    lock: bool,
+) -> KnowledgeFile | None:
+    query = db.query(KnowledgeFile).filter_by(
+        tenant_id=tenant_id,
+        kb_uid=kb_uid,
+        source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+        source_id=unit_id,
+        deleted_at=None,
+    )
+    if lock:
+        query = query.with_for_update()
+    return query.order_by(KnowledgeFile.created_at.asc(), KnowledgeFile.id.asc()).first()
+
+
+def _load_personal_inbox_file_by_uid(
+    db: Session,
+    file_uid: str,
+    *,
+    lock: bool,
+) -> KnowledgeFile | None:
+    query = db.query(KnowledgeFile).filter_by(file_uid=file_uid, deleted_at=None)
+    if lock:
+        query = query.with_for_update()
+    return query.order_by(KnowledgeFile.created_at.asc(), KnowledgeFile.id.asc()).first()
+
+
 def _storage_uri_is_referenced(db: Session, storage_uri: str) -> bool:
     return (
         db.query(KnowledgeFile.id)
@@ -345,6 +378,22 @@ def _storage_uri_is_referenced(db: Session, storage_uri: str) -> bool:
         .first()
         is not None
     )
+
+
+def _delete_storage_if_unreferenced(
+    db: Session,
+    storage: LocalFileStorage,
+    storage_uri: str | None,
+) -> None:
+    if storage_uri is None or _storage_uri_is_referenced(db, storage_uri):
+        return
+    try:
+        storage.delete(storage_uri)
+    except Exception:
+        logger.exception(
+            "Failed to delete unreferenced personal inbox storage: storage_uri=%s",
+            storage_uri,
+        )
 
 
 def _markdown_filename(title: str, unit_id: str) -> str:
@@ -358,7 +407,7 @@ def _storage_markdown_filename(title: str, unit_id: str, version: int) -> str:
     safe_title = sub(r"[\\/:*?\"<>|]+", "-", (title or "").strip()).strip(" .")
     if not safe_title:
         safe_title = unit_id
-    suffix = f"{unit_id[:8]}-v{version}"
+    suffix = f"{unit_id[:8]}-v{version}-{uuid4().hex[:8]}"
     return f"{safe_title[:100]}-{suffix}.md"
 
 

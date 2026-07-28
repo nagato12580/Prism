@@ -1,4 +1,7 @@
+from datetime import datetime
+
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 
 def test_render_personal_asset_unit_markdown_includes_unit_and_source_items(db_session):
@@ -49,6 +52,41 @@ def test_ensure_personal_inbox_kb_is_idempotent(db_session):
     assert first.system_type == "personal_inbox"
     assert first.is_system is True
     assert first.delete_disabled is True
+
+
+def test_ensure_personal_inbox_kb_integrity_error_preserves_pending_work(db_session):
+    from backend.app.models import KnowledgeTopic, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+
+    conflicting_deleted = KnowledgeTopic(
+        kb_uid=personal_inbox._personal_inbox_kb_uid("tenant-a", "user-a"),
+        tenant_id="tenant-a",
+        owner_user_id="user-a",
+        name="Deleted Inbox",
+        system_type="personal_inbox",
+        deleted_at=datetime(2026, 1, 1),
+    )
+    db_session.add(conflicting_deleted)
+    db_session.commit()
+
+    pending_unit = PersonalAssetUnit(
+        id="pending-work",
+        user_id="user-a",
+        title="Pending Work",
+        content="Must survive nested conflict",
+        status="confirmed",
+    )
+    db_session.add(pending_unit)
+
+    with pytest.raises(IntegrityError):
+        personal_inbox.ensure_personal_inbox_kb(
+            db_session,
+            tenant_id="tenant-a",
+            owner_user_id="user-a",
+        )
+
+    db_session.flush()
+    assert db_session.get(PersonalAssetUnit, "pending-work") is not None
 
 
 def test_sync_confirmed_unit_creates_single_markdown_file(db_session, tmp_path, monkeypatch):
