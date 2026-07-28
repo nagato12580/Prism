@@ -35,6 +35,10 @@ from backend.app.services.knowledge_access import (
     KnowledgeAccessPolicy,
     KnowledgeNotFound,
 )
+from backend.app.services.personal_inbox import (
+    PERSONAL_INBOX_SYSTEM_TYPE,
+    ensure_personal_inbox_kb,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["chat-proxy"])
@@ -47,6 +51,7 @@ class ChatAnswerRequest(BaseModel):
 
     query: str = Field(min_length=1, max_length=8000)
     kb_uids: list[str] = Field(default_factory=list, max_length=50)
+    include_personal_inbox: bool = False
     history: list[dict[str, Any]] | None = None
     session_id: str | None = None
     user_message_id: str | None = None
@@ -64,6 +69,7 @@ def _public_payload(req: ChatAnswerRequest) -> dict[str, Any]:
         "deep_search_top_k": req.deep_search_top_k,
         "graph_hops": req.graph_hops,
         "rag_max_iterations": req.rag_max_iterations,
+        "include_personal_inbox": req.include_personal_inbox,
     }
     if req.history is not None:
         payload["history"] = req.history
@@ -98,11 +104,13 @@ def _authorize_kbs(
     allowed: list[str] = []
     for kb_uid in kb_uids:
         try:
-            policy.require_read(actor, kb_uid)
+            topic = policy.require_read(actor, kb_uid)
         except KnowledgeNotFound:
             raise HTTPException(status_code=404, detail=f"knowledge base not found: {kb_uid}")
         except KnowledgeAccessDenied:
             raise HTTPException(status_code=403, detail=f"access denied to knowledge base: {kb_uid}")
+        if topic.system_type == PERSONAL_INBOX_SYSTEM_TYPE:
+            continue
         allowed.append(kb_uid)
     return allowed
 
@@ -116,6 +124,15 @@ async def chat_answer_proxy(
 ):
     policy = KnowledgeAccessPolicy(db)
     allowed_kb_uids = _authorize_kbs(policy, actor, req.kb_uids)
+    if req.include_personal_inbox:
+        personal_inbox = ensure_personal_inbox_kb(
+            db,
+            tenant_id=actor.tenant_id,
+            owner_user_id=actor.actor_id,
+        )
+        if personal_inbox.kb_uid not in allowed_kb_uids:
+            allowed_kb_uids.append(personal_inbox.kb_uid)
+        db.commit()
     if not allowed_kb_uids:
         raise HTTPException(status_code=400, detail="no authorized knowledge base for this answer")
 

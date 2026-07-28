@@ -6,8 +6,12 @@ AuthorizedKnowledgeScope, and only then forwards to Engine. A forbidden KB is
 rejected with 403 before Engine is contacted.
 """
 
+import base64
+import json
+
 import backend.app.api.agent_chat_proxy as proxy_module
 from backend.app.api.agent_chat_proxy import ChatAnswerRequest
+from backend.app.models import KnowledgeTopic
 
 
 def _seed_owned_kb(db, kb_uid, owner="default-user", tenant="default-user"):
@@ -29,6 +33,11 @@ def _enable_scope_secret(monkeypatch):
     monkeypatch.setattr(proxy_module.settings, "KNOWLEDGE_SCOPE_SECRET", "test-secret")
 
 
+def _decoded_scope_payload(signed_token):
+    payload, _signature = signed_token.split(".", 1)
+    return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+
+
 def test_chat_answer_request_schema_has_no_secrets():
     fields = set(ChatAnswerRequest.model_fields)
     assert "query" in fields
@@ -38,6 +47,12 @@ def test_chat_answer_request_schema_has_no_secrets():
     assert "actor_id" not in fields
     assert "storage_uri" not in fields
     assert "secret" not in fields
+
+
+def test_chat_answer_request_defaults_exclude_personal_inbox():
+    req = ChatAnswerRequest(query="summarize", kb_uids=["kb-a"])
+
+    assert req.include_personal_inbox is False
 
 
 def test_chat_answer_request_defaults_allow_multi_step_knowledge_synthesis():
@@ -132,3 +147,88 @@ def test_backend_proxy_forwards_public_continuation_history_without_scope_leaks(
     assert "actor_id" not in forwarded
     assert "scope" not in forwarded
     assert captured["token"]
+
+
+def test_chat_proxy_appends_personal_inbox_scope_when_requested(client, db_session, monkeypatch):
+    _enable_scope_secret(monkeypatch)
+    _seed_owned_kb(db_session, "kb-a")
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["token"] = signed_token
+        captured["payload"] = payload
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={"query": "hi", "kb_uids": ["kb-a"], "include_personal_inbox": True},
+    )
+
+    assert response.status_code == 200
+    scope = _decoded_scope_payload(captured["token"])
+    assert "kb-a" in scope["allowed_kb_uids"]
+    assert len(scope["allowed_kb_uids"]) == 2
+    inbox_kb_uid = next(kb_uid for kb_uid in scope["allowed_kb_uids"] if kb_uid != "kb-a")
+    assert db_session.query(KnowledgeTopic).filter_by(
+        kb_uid=inbox_kb_uid,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        system_type="personal_inbox",
+    ).one()
+    assert captured["payload"]["include_personal_inbox"] is True
+
+
+def test_chat_proxy_does_not_append_personal_inbox_scope_by_default(
+    client, db_session, monkeypatch
+):
+    _enable_scope_secret(monkeypatch)
+    _seed_owned_kb(db_session, "kb-a")
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["token"] = signed_token
+        captured["payload"] = payload
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post("/api/v1/chat/answer", json={"query": "hi", "kb_uids": ["kb-a"]})
+
+    assert response.status_code == 200
+    scope = _decoded_scope_payload(captured["token"])
+    assert scope["allowed_kb_uids"] == ["kb-a"]
+    assert captured["payload"]["include_personal_inbox"] is False
+
+
+def test_chat_proxy_ignores_frontend_supplied_personal_inbox_when_switch_is_false(
+    client, db_session, monkeypatch
+):
+    from backend.app.services.personal_inbox import ensure_personal_inbox_kb
+
+    _enable_scope_secret(monkeypatch)
+    _seed_owned_kb(db_session, "kb-a")
+    personal_inbox = ensure_personal_inbox_kb(
+        db_session,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+    )
+    db_session.commit()
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["token"] = signed_token
+        captured["payload"] = payload
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={"query": "hi", "kb_uids": ["kb-a", personal_inbox.kb_uid]},
+    )
+
+    assert response.status_code == 200
+    scope = _decoded_scope_payload(captured["token"])
+    assert scope["allowed_kb_uids"] == ["kb-a"]
