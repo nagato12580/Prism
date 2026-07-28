@@ -20,6 +20,10 @@ from backend.app.services.knowledge_uploads import (
     RedisJobPublisher,
     UploadRequest,
 )
+from backend.app.services.personal_inbox import (
+    delete_personal_inbox_file_cascade,
+    is_personal_inbox_asset_unit_file,
+)
 from backend.app.storage.files import LocalFileStorage
 
 router = APIRouter(prefix="/knowledge-bases/{kb_uid}/files", tags=["knowledge-files"])
@@ -386,21 +390,28 @@ def delete_file(
 ):
     from backend.app.utils.time import local_now
     file_row = _require_file(db, actor, kb_uid, file_uid, manage=True)
-    job = KnowledgeJobService(db).create(
-        JobCommand("delete", actor.tenant_id, kb_uid, file_uid, {}),
-        f"{kb_uid}:{file_uid}:delete",
-        commit=False,
-    )
-    file_row.deleted_at = local_now()
-    file_row.last_job_id = job.id
-    from engine.app.knowledge.enrichment import mark_enrichment_stale
-    mark_enrichment_stale(
-        db,
-        kb_uid,
-        reason="file_deleted",
-        deleted_file_uids=[file_uid],
-        commit=False,
-    )
+    if is_personal_inbox_asset_unit_file(file_row):
+        job = delete_personal_inbox_file_cascade(
+            db,
+            file_row,
+            tenant_id=actor.tenant_id,
+        )
+    else:
+        job = KnowledgeJobService(db).create(
+            JobCommand("delete", actor.tenant_id, kb_uid, file_uid, {}),
+            f"{kb_uid}:{file_uid}:delete",
+            commit=False,
+        )
+        file_row.deleted_at = local_now()
+        file_row.last_job_id = job.id
+        from engine.app.knowledge.enrichment import mark_enrichment_stale
+        mark_enrichment_stale(
+            db,
+            kb_uid,
+            reason="file_deleted",
+            deleted_file_uids=[file_uid],
+            commit=False,
+        )
     db.commit()
     _publish_job(db, job)
     db.refresh(job)

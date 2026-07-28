@@ -369,3 +369,102 @@ def test_backfill_personal_inbox_skips_unchanged_existing_units(db_session, tmp_
     assert file_row.parsed_content_version == first_version
     assert first_job_count == 1
     assert second_job_count == 1
+
+
+def test_delete_personal_inbox_file_deletes_unit_and_orphan_item(db_session, tmp_path, monkeypatch):
+    from backend.app.models import KnowledgeJob, PersonalAssetItem, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+
+    item = PersonalAssetItem(
+        id="orphan-item",
+        user_id="default-user",
+        raw_text="raw",
+        title="Orphan Item",
+        status="confirmed",
+    )
+    unit = PersonalAssetUnit(
+        id="unit-with-orphan",
+        user_id="default-user",
+        title="Unit With Orphan",
+        content="content",
+        source_asset_ids=["orphan-item"],
+        status="confirmed",
+    )
+    db_session.add_all([item, unit])
+    db_session.commit()
+    file_row = personal_inbox.sync_personal_asset_unit_to_kb(
+        db_session,
+        unit,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        publish=False,
+    )
+
+    job = personal_inbox.delete_personal_inbox_file_cascade(
+        db_session,
+        file_row,
+        tenant_id="default-user",
+    )
+    db_session.commit()
+
+    assert db_session.get(PersonalAssetUnit, "unit-with-orphan") is None
+    assert db_session.get(PersonalAssetItem, "orphan-item") is None
+    db_session.refresh(file_row)
+    assert file_row.deleted_at is not None
+    assert file_row.last_job_id == job.id
+    assert db_session.query(KnowledgeJob).filter_by(id=job.id, job_type="delete").count() == 1
+
+
+def test_delete_personal_inbox_file_preserves_shared_item(db_session, tmp_path, monkeypatch):
+    from backend.app.models import PersonalAssetItem, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+
+    item = PersonalAssetItem(
+        id="shared-item",
+        user_id="default-user",
+        raw_text="raw",
+        title="Shared Item",
+        status="confirmed",
+    )
+    deleted_unit = PersonalAssetUnit(
+        id="unit-deleted",
+        user_id="default-user",
+        title="Deleted Unit",
+        content="content",
+        source_asset_ids=["shared-item"],
+        status="confirmed",
+    )
+    remaining_unit = PersonalAssetUnit(
+        id="unit-remaining",
+        user_id="default-user",
+        title="Remaining Unit",
+        content="content",
+        source_asset_ids=["shared-item"],
+        status="confirmed",
+    )
+    db_session.add_all([item, deleted_unit, remaining_unit])
+    db_session.commit()
+    file_row = personal_inbox.sync_personal_asset_unit_to_kb(
+        db_session,
+        deleted_unit,
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        publish=False,
+    )
+
+    personal_inbox.delete_personal_inbox_file_cascade(
+        db_session,
+        file_row,
+        tenant_id="default-user",
+    )
+    db_session.commit()
+
+    assert db_session.get(PersonalAssetUnit, "unit-deleted") is None
+    assert db_session.get(PersonalAssetUnit, "unit-remaining") is not None
+    assert db_session.get(PersonalAssetItem, "shared-item") is not None

@@ -15,6 +15,7 @@ from backend.app.models.knowledge_types import StageStatus
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.services.knowledge_uploads import RedisJobPublisher
 from backend.app.storage.files import LocalFileStorage
+from backend.app.utils.time import local_now
 
 
 logger = logging.getLogger(__name__)
@@ -246,6 +247,67 @@ def backfill_personal_inbox(
     return synced
 
 
+def is_personal_inbox_asset_unit_file(file_row: KnowledgeFile) -> bool:
+    return (
+        file_row.system_type == PERSONAL_INBOX_SYSTEM_TYPE
+        and file_row.source_kind == PERSONAL_ASSET_UNIT_SOURCE_KIND
+        and bool(file_row.source_id)
+    )
+
+
+def delete_personal_inbox_file_cascade(
+    db: Session,
+    file_row: KnowledgeFile,
+    *,
+    tenant_id: str,
+):
+    if not is_personal_inbox_asset_unit_file(file_row):
+        raise ValueError("Only derived personal inbox asset unit files can be cascade-deleted")
+
+    unit = (
+        db.query(PersonalAssetUnit)
+        .filter_by(id=file_row.source_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    source_asset_ids = list(unit.source_asset_ids or []) if unit is not None else []
+    if unit is not None:
+        db.delete(unit)
+        db.flush()
+
+    referenced_item_ids = _referenced_personal_asset_ids(db, source_asset_ids)
+    for item_id in source_asset_ids:
+        if item_id in referenced_item_ids:
+            continue
+        item = (
+            db.query(PersonalAssetItem)
+            .filter_by(id=item_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if item is not None:
+            db.delete(item)
+
+    job = KnowledgeJobService(db).create(
+        JobCommand("delete", tenant_id, file_row.kb_uid, file_row.file_uid, {}),
+        f"{file_row.kb_uid}:{file_row.file_uid}:delete",
+        commit=False,
+    )
+    file_row.deleted_at = local_now()
+    file_row.last_job_id = job.id
+
+    from engine.app.knowledge.enrichment import mark_enrichment_stale
+
+    mark_enrichment_stale(
+        db,
+        file_row.kb_uid,
+        reason="file_deleted",
+        deleted_file_uids=[file_row.file_uid],
+        commit=False,
+    )
+    return job
+
+
 def _personal_inbox_file_is_current(
     db: Session,
     unit: PersonalAssetUnit,
@@ -281,6 +343,17 @@ def _personal_inbox_file_is_current(
         and file_row.system_type == PERSONAL_INBOX_SYSTEM_TYPE
         and file_row.deleted_at is None
     )
+
+
+def _referenced_personal_asset_ids(db: Session, item_ids: list[str]) -> set[str]:
+    candidate_ids = set(item_ids)
+    if not candidate_ids:
+        return set()
+    units = db.query(PersonalAssetUnit.id, PersonalAssetUnit.source_asset_ids).all()
+    referenced_ids: set[str] = set()
+    for _, source_asset_ids in units:
+        referenced_ids.update(candidate_ids.intersection(source_asset_ids or []))
+    return referenced_ids
 
 
 def _reset_processing_state(file_row: KnowledgeFile) -> None:

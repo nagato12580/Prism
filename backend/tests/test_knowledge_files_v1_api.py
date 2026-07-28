@@ -488,3 +488,53 @@ def test_delete_tombstone_and_job_are_committed_atomically(client, db_session, m
     assert response.status_code == 202
     assert commits[0][0] is not None
     assert commits[0][1] == 1
+
+
+def test_delete_personal_inbox_file_cascades_asset_unit(client, db_session, monkeypatch, tmp_path):
+    from backend.app.api import knowledge_files
+    from backend.app.models import PersonalAssetItem, PersonalAssetUnit
+    from backend.app.services import personal_inbox
+    from backend.app.storage.files import LocalFileStorage
+
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    monkeypatch.setattr(personal_inbox, "_storage", lambda: LocalFileStorage(tmp_path))
+    monkeypatch.setattr(
+        knowledge_files,
+        "_get_publisher",
+        lambda: type("P", (), {"publish": lambda self, job_id: None})(),
+    )
+
+    item = PersonalAssetItem(
+        id="api-orphan-item",
+        user_id="alice",
+        raw_text="raw",
+        title="API Orphan Item",
+        status="confirmed",
+    )
+    unit = PersonalAssetUnit(
+        id="api-unit",
+        user_id="alice",
+        title="API Unit",
+        content="content",
+        source_asset_ids=["api-orphan-item"],
+        status="confirmed",
+    )
+    db_session.add_all([item, unit])
+    db_session.commit()
+    file_row = personal_inbox.sync_personal_asset_unit_to_kb(
+        db_session,
+        unit,
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        publish=False,
+    )
+
+    response = client.delete(
+        f"/api/v1/knowledge-bases/{file_row.kb_uid}/files/{file_row.file_uid}",
+        headers=headers,
+    )
+
+    assert response.status_code == 202
+    assert response.json()["job_type"] == "delete"
+    assert db_session.get(PersonalAssetUnit, "api-unit") is None
+    assert db_session.get(PersonalAssetItem, "api-orphan-item") is None
