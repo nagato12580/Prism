@@ -46,6 +46,7 @@ import { chatApi, traceApi } from '@/app/api'
 import { knowledgeBasesApi, type KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { evidenceTypeLabel as formatEvidenceTypeLabel, graphPathLabels } from '@/app/graphrag'
 import { cn, genId } from '@/lib/utils'
+import { buildChatRequestPayload } from './chatRequestPayload'
 
 const starterPrompts = [
   '总结我上传资料里的核心观点',
@@ -207,6 +208,7 @@ function buildAssistantProcess(message: Message) {
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [includePersonalInbox, setIncludePersonalInbox] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingSessionTitle, setEditingSessionTitle] = useState('')
@@ -573,14 +575,16 @@ export function ChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: streamAbortController.signal,
-        body: JSON.stringify({
+        body: JSON.stringify(buildChatRequestPayload({
           query,
-          kb_uids: [effectiveTopicId],
+          effectiveTopicId,
           history,
-          session_id: sessionId,
-          user_message_id: engineUserMessageId,
-          mode: deepSearchEnabled || deepSearchDepth === 'deep' ? 'deep' : 'standard',
-        }),
+          sessionId,
+          engineUserMessageId,
+          deepSearchEnabled,
+          deepSearchDepth,
+          includePersonalInbox,
+        })),
       })
 
       if (!resp.ok) {
@@ -1164,6 +1168,24 @@ export function ChatPage() {
                   </div>
                 )}
               </div>
+
+              <label
+                title="开启后，本次问答会额外搜索你的个人随手记。默认关闭。"
+                className={cn(
+                  'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition',
+                  includePersonalInbox
+                    ? 'border-cyan-200 bg-cyan-50 text-cyan-700'
+                    : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-cyan-700',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                  checked={includePersonalInbox}
+                  onChange={(e) => setIncludePersonalInbox(e.target.checked)}
+                />
+                包含个人随手记
+              </label>
 
               <div className="flex-1" />
               {(selectedTopicId || selectedSourceTypes.length > 0) && (

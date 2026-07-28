@@ -45,10 +45,17 @@ export function KnowledgeSettingsPage() {
   }
 
   const remove = () => {
+    if (!kb || kb.is_system || kb.delete_disabled) {
+      setError(new Error('系统知识库不能删除'))
+      setConfirmDelete(false)
+      return
+    }
     knowledgeBasesApi.delete(kbUid).then(() => {
       window.location.href = '/knowledge'
     })
   }
+
+  const deleteDisabled = !!kb && (kb.is_system || kb.delete_disabled)
 
   return (
     <div data-testid="knowledge-settings-page" className="flex h-full min-h-0 flex-col gap-4">
@@ -96,8 +103,16 @@ export function KnowledgeSettingsPage() {
 
       <section className="rounded-xl border border-red-200 bg-red-50/40 p-4">
         <h3 className="mb-2 text-sm font-semibold text-red-700">危险操作</h3>
-        <p className="mb-2 text-[11px] text-red-500">删除知识库将移除其所有文件、索引与图谱引用，不可恢复。</p>
-        <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
+        <p className="mb-2 text-[11px] text-red-500">
+          {deleteDisabled ? '系统知识库受保护，不能删除。' : '删除知识库将移除其所有文件、索引与图谱引用，不可恢复。'}
+        </p>
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => setConfirmDelete(true)}
+          disabled={deleteDisabled}
+          title={deleteDisabled ? '系统知识库不能删除' : '删除知识库'}
+        >
           <Trash2 size={14} /> 删除知识库
         </Button>
       </section>
@@ -107,7 +122,7 @@ export function KnowledgeSettingsPage() {
           <p className="text-sm text-slate-600">确认删除「{kb?.name}」？此操作不可恢复。</p>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setConfirmDelete(false)}>取消</Button>
-            <Button variant="danger" onClick={remove}><Trash2 size={14} /> 确认删除</Button>
+            <Button variant="danger" onClick={remove} disabled={deleteDisabled}><Trash2 size={14} /> 确认删除</Button>
           </div>
         </div>
       </Dialog>

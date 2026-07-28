@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const api = readFileSync(resolve(root, 'src/app/api.ts'), 'utf8')
 const chatPage = readFileSync(resolve(root, 'src/pages/ChatPage.tsx'), 'utf8')
+const chatRequestPayload = readFileSync(resolve(root, 'src/pages/chatRequestPayload.ts'), 'utf8')
 const chatStore = readFileSync(resolve(root, 'src/app/chatStore.ts'), 'utf8')
 const graphRagHelper = readFileSync(resolve(root, 'src/app/graphrag.ts'), 'utf8')
 
@@ -60,7 +61,8 @@ assert.match(chatPage, /evidenceItems:\s*normalizeEvidenceItems\(msg\.data\?\.ev
 assert.match(chatPage, /session_id:\s*sessionId/, 'Engine answer requests should include session_id.')
 assert.match(chatPage, /let engineUserMessageId = userMessageId/, 'Engine user id should start with the optimistic id as fallback.')
 assert.match(chatPage, /const persistedUserMessage = await userPersistPromise[\s\S]*replaceMessageId\(sessionId,\s*userMessageId,\s*persistedUserMessage\.id\)[\s\S]*engineUserMessageId = persistedUserMessage\.id/, 'User persistence should update local state and engine id before answering.')
-assert.match(chatPage, /user_message_id:\s*engineUserMessageId/, 'Engine answer requests should include the persisted user_message_id when available.')
+assert.match(chatPage, /body:\s*JSON\.stringify\(buildChatRequestPayload\(\{[\s\S]*engineUserMessageId[\s\S]*\}\)\)/, 'Engine answer requests should be built through the production payload helper with the current engine user id.')
+assert.match(chatRequestPayload, /user_message_id:\s*engineUserMessageId/, 'The production payload helper should serialize the persisted user_message_id when available.')
 assert.match(chatPage, /await flushAssistantProcessSnapshot\(sessionId,\s*assistantPersistedId\)/, 'Final assistant persistence should wait for queued process snapshots before returning.')
 assert.match(chatPage, /await traceApi\.bindMessage\(traceId,\s*{[\s\S]*session_id:\s*sessionId[\s\S]*assistant_message_id:\s*assistantPersistedId[\s\S]*}\)/, 'Completed assistant messages should be bound to their trace after final persistence.')
 

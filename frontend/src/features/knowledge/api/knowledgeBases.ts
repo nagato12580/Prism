@@ -9,6 +9,9 @@ export interface KnowledgeBase {
   name: string
   description: string | null
   status: string // "active" | "deleting"
+  system_type: string | null
+  is_system: boolean
+  delete_disabled: boolean
   version: number
   active_index_generation: string | null
   active_graph_generation: string | null

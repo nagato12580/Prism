@@ -28,6 +28,9 @@ export interface KnowledgeFile {
   size_bytes: number
   preview_url: string
   download_url: string
+  source_kind?: string | null
+  source_id?: string | null
+  system_type?: string | null
 }
 
 export interface KnowledgeFileListResponse {

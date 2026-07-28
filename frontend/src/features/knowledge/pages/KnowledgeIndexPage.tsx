@@ -9,6 +9,15 @@ import { Badge } from '@/components/ui/Badge'
 import { Dialog } from '@/components/ui/Dialog'
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateView'
 
+function isDeleteDisabled(kb: KnowledgeBase) {
+  return kb.is_system || kb.delete_disabled
+}
+
+function systemKbLabel(kb: KnowledgeBase) {
+  if (kb.system_type === 'personal_inbox') return '个人随手记'
+  return '系统知识库'
+}
+
 export function KnowledgeIndexPage() {
   const navigate = useNavigate()
   const [items, setItems] = useState<KnowledgeBase[]>([])
@@ -51,6 +60,10 @@ export function KnowledgeIndexPage() {
 
   const confirmDelete = () => {
     if (!deleting) return
+    if (isDeleteDisabled(deleting)) {
+      setCreateError(new Error('系统知识库不能删除'))
+      return
+    }
     knowledgeBasesApi
       .delete(deleting.kb_uid)
       .then(() => {
@@ -100,25 +113,38 @@ export function KnowledgeIndexPage() {
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)]/10 text-[var(--prism-blue)]">
                   <BookOpen size={18} />
                 </div>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label="删除知识库"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setDeleting(kb)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
+                {isDeleteDisabled(kb) ? (
+                  <span
+                    aria-label="系统知识库不能删除"
+                    title="系统知识库不能删除"
+                    className="rounded-md px-2 py-1 text-[10px] font-medium text-slate-400 opacity-0 transition group-hover:opacity-100"
+                  >
+                    系统保护
+                  </span>
+                ) : (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label="删除知识库"
+                    title="删除知识库"
+                    onClick={(e) => {
                       e.stopPropagation()
+                      setCreateError(null)
                       setDeleting(kb)
-                    }
-                  }}
-                  className="rounded-md p-1.5 text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                >
-                  <Trash2 size={14} />
-                </span>
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setCreateError(null)
+                        setDeleting(kb)
+                      }
+                    }}
+                    className="rounded-md p-1.5 text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+                  >
+                    <Trash2 size={14} />
+                  </span>
+                )}
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-slate-900">{kb.name}</div>
@@ -126,8 +152,11 @@ export function KnowledgeIndexPage() {
                   {kb.description || '暂无描述'}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Badge tone={kb.status === 'active' ? 'green' : 'amber'}>{kb.status}</Badge>
+                {kb.is_system || kb.system_type ? (
+                  <Badge tone="violet">{systemKbLabel(kb)}</Badge>
+                ) : null}
                 {kb.active_index_generation ? (
                   <Badge tone="blue">已索引</Badge>
                 ) : (
@@ -179,7 +208,7 @@ export function KnowledgeIndexPage() {
             <Button variant="ghost" onClick={() => setDeleting(null)}>
               取消
             </Button>
-            <Button variant="danger" onClick={confirmDelete}>
+            <Button variant="danger" onClick={confirmDelete} disabled={!!deleting && isDeleteDisabled(deleting)}>
               <Trash2 size={14} /> 确认删除
             </Button>
           </div>

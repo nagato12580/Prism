@@ -294,6 +294,10 @@ const watchJob = useCallback(
   )
 }
 
+function isPersonalInboxDerivedFile(file: KnowledgeFile) {
+  return file.system_type === 'personal_inbox' && file.source_kind === 'personal_asset_unit'
+}
+
 // Map a file to a tracked job id is not possible from the file row alone (the
 // backend file row carries no job id). Standalone job snapshots are only
 // tracked for UI-triggered operations to trigger a list refresh; they are not
@@ -408,6 +412,7 @@ function DeleteConfirm({
   onConfirm: () => void
 }) {
   const [busy, setBusy] = useState(false)
+  const cascadesToPersonalAssetUnit = isPersonalInboxDerivedFile(file)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
       <div className="w-full max-w-md rounded-2xl border border-[var(--prism-line)] bg-white p-5 shadow-2xl">
@@ -415,6 +420,11 @@ function DeleteConfirm({
         <p className="mt-2 text-sm text-slate-600">
           确认删除「{file.original_filename}」？该操作会移除其分块、索引和图谱引用，不可恢复。
         </p>
+        {cascadesToPersonalAssetUnit ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            这是个人随手记派生文件。删除该文件也会删除对应的个人知识单元，并清理不再被引用的来源碎片。
+          </div>
+        ) : null}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>取消</Button>
           <Button
