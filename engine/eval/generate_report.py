@@ -158,6 +158,12 @@ def render_report(data: dict[str, Any]) -> str:
     # Low score analysis
     low_scores = data.get("low_scores_count", 0)
 
+    # Paper list fallback
+    paper_table = paper_list if paper_list else "_无论文数据_"
+
+    # Question type distribution
+    question_type_dist = str(ds.get("question_type_distribution", {}))
+
     # Pre-compute metric values to avoid f-string brace escaping issues
     mrr_mean = _fmt_val(ret_agg.get("mrr", {}).get("mean"))
     faithfulness_mean = _fmt_val(ans_agg.get("faithfulness", {}).get("mean"))
@@ -228,29 +234,43 @@ def render_report(data: dict[str, Any]) -> str:
 
 ---
 
-## 1. 检索层详细结果
+## 1. 数据概览
 
-### 1.1 整体指标
+### 1.1 论文清单
+
+| ID | 标题 | Parent | Child |
+|----|------|--------|-------|
+{paper_table}
+
+### 1.2 问题类型分布
+
+{question_type_dist}
+
+---
+
+## 2. 检索层详细结果
+
+### 2.1 整体指标
 
 | 指标 | 均值 | 中位数 | 标准差 |
 |------|------|--------|--------|
 {ret_table}
 
-### 1.2 检索延迟
+### 2.2 检索延迟
 
 | P50 | P95 |
 |-----|-----|
 | {ret_p50}ms | {ret_p95}ms |
 
-### 1.3 按论文分组
+### 2.3 按论文分组
 
 {ret_by_paper}
 
-### 1.4 按问题类型分组
+### 2.4 按问题类型分组
 
 {ret_by_type}
 
-### 1.5 零召回分析
+### 2.5 零召回分析
 
 零召回问题 ID：{zero_str}
 
@@ -258,47 +278,47 @@ def render_report(data: dict[str, Any]) -> str:
 
 ---
 
-## 2. 端到端问答详细结果
+## 3. 端到端问答详细结果
 
-### 2.1 Judge 评分
+### 3.1 Judge 评分
 
 | 维度 | 均值 | 中位数 | 标准差 |
 |------|------|--------|--------|
 {ans_table}
 
-### 2.2 端到端延迟
+### 3.2 端到端延迟
 
 | 指标 | P50 | P95 |
 |------|-----|-----|
 | TTFB | {ans_ttfb_p50}ms | {ans_ttfb_p95}ms |
 | 总延迟 | {ans_total_p50}ms | {ans_total_p95}ms |
 
-### 2.3 按问题类型分组
+### 3.3 按问题类型分组
 
 {ans_by_type}
 
-### 2.4 按论文分组
+### 3.4 按论文分组
 
 {ans_by_paper}
 
 ---
 
-## 3. 交叉分析
+## 4. 交叉分析
 
-### 3.1 检索 vs 答案质量
+### 4.1 检索 vs 答案质量
 
 - 检索 Recall@10 均值：{recall_10_fmt}
 - 答案综合分均值：{overall_fmt}
 
 {gap_msg}
 
-### 3.2 论文难度排名
+### 4.2 论文难度排名
 
 （综合检索 Recall@10 + 答案综合分，降序排列。分数越低越难。）
 
 {ret_by_paper}
 
-### 3.3 Agent 行为分析
+### 4.3 Agent 行为分析
 
 （基于 answer_detailed.csv 统计）
 - 平均工具调用次数：待分析
@@ -306,15 +326,15 @@ def render_report(data: dict[str, Any]) -> str:
 
 ---
 
-## 4. 改进建议
+## 5. 改进建议
 
-### 4.1 最差 5 个 Case
+### 5.1 最差 5 个 Case
 
 | ID | 问题 | 忠实度 | 相关性 | 完整性 |
 |----|------|--------|--------|--------|
 {worst_table if worst_table else "| - | 无低分 case | - | - | - |"}
 
-### 4.2 可操作改进项
+### 5.2 可操作改进项
 
 1. **检索层面**：
    - 零召回问题需检查 embedding 模型对该领域论文的覆盖（当前模型：{embedding_model}）

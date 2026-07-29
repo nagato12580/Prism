@@ -89,6 +89,9 @@ def test_render_report_includes_all_sections():
 
     assert "# Prism" in report
     assert "执行摘要" in report
+    assert "数据概览" in report
+    assert "论文清单" in report
+    assert "问题类型分布" in report
     assert "检索层" in report
     assert "端到端问答" in report
     assert "交叉分析" in report
