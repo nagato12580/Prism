@@ -1,5 +1,4 @@
 # prism/engine/tests/test_run_retrieval_v2.py
-import json
 from pathlib import Path
 import sys
 

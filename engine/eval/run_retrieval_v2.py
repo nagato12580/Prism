@@ -20,10 +20,8 @@ if str(_project_root) not in sys.path:
 
 from engine.app.retrieval.unified import scoped_text_hybrid_search
 from engine.app.retrieval.contracts import SearchScope
-from engine.app.config import settings
 
 K_VALUES = (5, 10, 20)
-RESULTS_DIR = Path(__file__).resolve().parent / "results"
 AGGREGATE_METRICS = [
     "recall@5", "recall@10", "recall@20",
     "precision@5", "precision@10", "precision@20",
@@ -97,7 +95,7 @@ def aggregate_by_dimension(
             n = len(values)
             mean = sum(values) / n
             sorted_vals = sorted(values)
-            median = sorted_vals[n // 2]
+            median = (sorted_vals[n // 2] + sorted_vals[(n - 1) // 2]) / 2
             variance = sum((v - mean) ** 2 for v in values) / n
             agg[metric] = {
                 "mean": round(mean, 4),
@@ -131,7 +129,7 @@ def _compute_aggregates(results: list[dict]) -> dict[str, Any]:
         n = len(values)
         mean = sum(values) / n
         sorted_vals = sorted(values)
-        median = sorted_vals[n // 2]
+        median = (sorted_vals[n // 2] + sorted_vals[(n - 1) // 2]) / 2
         variance = sum((v - mean) ** 2 for v in values) / n
         agg[metric] = {
             "mean": round(mean, 4),
@@ -220,11 +218,6 @@ def main(argv: list[str] | None = None) -> None:
             continue
 
         retrieved_ids = [h["chunk_id"] for h in hits]
-        retrieved_items = [
-            {"rank": j + 1, "chunk_id": h["chunk_id"], "score": h["score"],
-             "relevant": h["chunk_id"] in relevant_ids}
-            for j, h in enumerate(hits)
-        ]
 
         metrics = compute_retrieval_metrics(retrieved_ids, relevant_ids)
         channels = _estimate_channel_hits(hits)
@@ -235,7 +228,7 @@ def main(argv: list[str] | None = None) -> None:
             "query_id": qid,
             "question": question,
             "question_type": q.get("question_type", "?"),
-            "paper_title": q.get("paper_titles", [q.get("item_title", "?")])[0],
+            "paper_title": (q.get("paper_titles") or [q.get("item_title", "?")])[0],
             "relevant_count": len(relevant_ids),
             **metrics,
             "retrieved_detail": _format_retrieved_list(hits, relevant_ids),
