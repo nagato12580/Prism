@@ -143,6 +143,61 @@ def test_scoped_text_hybrid_search_maps_single_fusion_without_graph(monkeypatch)
     ]
 
 
+def test_scoped_text_hybrid_search_degrades_to_bm25_when_embedding_fails(monkeypatch):
+    from engine.app.retrieval import unified
+
+    scope = _scope()
+
+    def embed(*args, **kwargs):
+        raise RuntimeError("embedding provider unavailable")
+
+    def dense(*args, **kwargs):
+        return ChannelResult.failed("dense", "VECTOR_INDEX_UNAVAILABLE", retryable=True)
+
+    def bm25(query, actual_scope, top_k):
+        assert query == "query"
+        assert actual_scope is scope
+        assert top_k == 1
+        return ChannelResult.ok(
+            "bm25",
+            [
+                Candidate(
+                    chunk_uid="bm25-only",
+                    item_id="item-bm25",
+                    file_uid="file-bm25",
+                    channel="bm25",
+                    raw_score=0.7,
+                    raw_rank=1,
+                    metadata={"text": "lexical fallback"},
+                )
+            ],
+        )
+
+    monkeypatch.setattr(unified, "embed_query", embed)
+    monkeypatch.setattr(unified, "vector_search", dense)
+    monkeypatch.setattr(unified, "es_fulltext_search", bm25)
+    monkeypatch.setattr(
+        unified,
+        "graph_search",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("graph should stay disabled")),
+    )
+
+    hits = unified.scoped_text_hybrid_search("query", scope, top_k=1)
+
+    assert hits == [
+        {
+            "text": "lexical fallback",
+            "chunk_id": "bm25-only",
+            "item_id": "item-bm25",
+            "file_uid": "file-bm25",
+            "score": pytest.approx(1 / 61),
+            "channels": {
+                "bm25": {"raw_rank": 1, "raw_score": 0.7},
+            },
+        }
+    ]
+
+
 def test_weighted_rrf_normalizes_weights_across_surviving_channels():
     from engine.app.retrieval.unified import weighted_rrf
 

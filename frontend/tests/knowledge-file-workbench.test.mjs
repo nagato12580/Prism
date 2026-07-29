@@ -106,3 +106,12 @@ test('KnowledgeFilesPage renders persisted file stage failure details', () => {
   assert.match(page, /file\.index_error\?\.message/)
   assert.match(page, /title=\{file\.index_error\.message\}/)
 })
+
+test('KnowledgeShell includes a subdued back action near the knowledge title', () => {
+  const shell = read('src/features/knowledge/components/KnowledgeShell.tsx')
+  const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+
+  assert.match(shell, /navigate\('\/knowledge'\)/)
+  assert.match(shell, /text-\[11px\]/)
+  assert.doesNotMatch(page, /navigate\('\/knowledge'\)/)
+})

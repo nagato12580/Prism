@@ -9,6 +9,13 @@ def vector_search(
     query_embedding: list[float], scope: SearchScope, top_k: int,
     control: RetrievalExecutionControl | None = None,
 ) -> ChannelResult:
+    if not query_embedding:
+        return ChannelResult.failed(
+            "dense",
+            "EMBEDDING_UNAVAILABLE",
+            retryable=True,
+            message="Embedding service temporarily unavailable; fell back to keyword retrieval.",
+        )
     try:
         if control: control.checkpoint()
         kwargs = dict(query_embedding=query_embedding, scope=scope, top_k=top_k)

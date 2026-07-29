@@ -51,6 +51,8 @@ class Settings:
     EMBEDDING_API_KEY: str = _env("EMBEDDING_API_KEY", "", "SILICONFLOW_API_KEY")
     EMBEDDING_MODEL: str = _env("EMBEDDING_MODEL", "BAAI/bge-m3")
     EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024"))
+    RERANK_API_BASE: str = _env("RERANK_API_BASE", "https://api.siliconflow.cn/v1/rerank")
+    RERANK_MODEL: str = _env("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 
     ASR_PROVIDER: str = os.getenv("ASR_PROVIDER", "dashscope")
     ASR_API_KEY: str = os.getenv("ASR_API_KEY", "")

@@ -48,9 +48,9 @@ class ChannelResult(BaseModel):
         return cls(channel=channel, health="ok", candidates=candidates)
 
     @classmethod
-    def failed(cls, channel: str, code: str, retryable: bool) -> Self:
+    def failed(cls, channel: str, code: str, retryable: bool, message: str = "") -> Self:
         return cls(
             channel=channel,
             health="failed",
-            problem=ChannelProblem(code=code, retryable=retryable),
+            problem=ChannelProblem(code=code, message=message, retryable=retryable),
         )

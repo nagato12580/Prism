@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import {
   FileText,
@@ -12,11 +12,9 @@ import {
 } from 'lucide-react'
 import type { KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { filesApi, type KnowledgeFile, type FileListParams } from '@/features/knowledge/api/files'
-import { jobsApi, type KnowledgeJobSnapshot, isTerminalJobStatus } from '@/features/knowledge/api/jobs'
-import { ApiProblem } from '@/features/knowledge/api/client'
+import { jobsApi, isTerminalJobStatus } from '@/features/knowledge/api/jobs'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Progress } from '@/components/ui/Progress'
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateView'
 import { FileUploadPanel } from '@/features/knowledge/components/FileUploadPanel'
 import { DocumentDrawer } from '@/features/knowledge/components/DocumentDrawer'
@@ -75,14 +73,14 @@ export function KnowledgeFilesPage() {
     load()
   }, [load])
 
-// Watch a job by polling the snapshot (the backend has no SSE). Capped
-// exponential backoff, stops at terminal status. Used to refresh the file list
-// after a UI-triggered parse/index/delete completes. NOTE: the current
-// /files/jobs/{job_id} snapshot returns only {id,job_type,status,stage,attempt,
-// error_code} — no progress_current/progress_total — so we do not render a
-// progress bar from it (would be fabricated data). The file's own parse/index
-// status columns reflect the authoritative state.
-const watchJob = useCallback(
+  // Watch a job by polling the snapshot (the backend has no SSE). Capped
+  // exponential backoff, stops at terminal status. Used to refresh the file list
+  // after a UI-triggered parse/index/delete completes. NOTE: the current
+  // /files/jobs/{job_id} snapshot returns only {id,job_type,status,stage,attempt,
+  // error_code} — no progress_current/progress_total — so we do not render a
+  // progress bar from it (would be fabricated data). The file's own parse/index
+  // status columns reflect the authoritative state.
+  const watchJob = useCallback(
     (jobId: string) => {
       if (!kbUid || !jobId) return
       const clear = () => {
@@ -143,6 +141,7 @@ const watchJob = useCallback(
         setError(e)
       })
   }
+
   const triggerIndex = (file: KnowledgeFile) => {
     if (!kbUid) return
     setItems((current) => updateFileStage(current, file.file_uid, 'index_status', 'running'))
@@ -276,11 +275,7 @@ const watchJob = useCallback(
       )}
 
       {drawerFile ? (
-        <DocumentDrawer
-          kbUid={kbUid}
-          file={drawerFile}
-          onClose={() => setDrawerFile(null)}
-        />
+        <DocumentDrawer kbUid={kbUid} file={drawerFile} onClose={() => setDrawerFile(null)} />
       ) : null}
 
       {confirmDelete ? (
@@ -338,7 +333,9 @@ function FileRow({
         <Badge tone="neutral">{file.media_type}</Badge>
       </td>
       <td className="px-3 py-2.5 text-xs text-slate-500">{sizeKb} KB</td>
-      <td className="px-3 py-2.5"><StageBadge status={file.parse_status} /></td>
+      <td className="px-3 py-2.5">
+        <StageBadge status={file.parse_status} />
+      </td>
       <td className="px-3 py-2.5">
         <StageBadge status={file.index_status} />
         {file.index_error?.message ? (
@@ -352,15 +349,25 @@ function FileRow({
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1">
-          <IconBtn label="预览" onClick={onPreview}><Eye size={14} /></IconBtn>
-          <IconBtn label="下载" onClick={onDownload}><Download size={14} /></IconBtn>
+          <IconBtn label="预览" onClick={onPreview}>
+            <Eye size={14} />
+          </IconBtn>
+          <IconBtn label="下载" onClick={onDownload}>
+            <Download size={14} />
+          </IconBtn>
           {file.index_status !== 'succeeded' ? (
-            <IconBtn label="索引" onClick={onIndex}><Zap size={14} /></IconBtn>
+            <IconBtn label="索引" onClick={onIndex}>
+              <Zap size={14} />
+            </IconBtn>
           ) : null}
           {file.parse_status !== 'succeeded' ? (
-            <IconBtn label="解析" onClick={onParse}><Loader2 size={14} /></IconBtn>
+            <IconBtn label="解析" onClick={onParse}>
+              <Loader2 size={14} />
+            </IconBtn>
           ) : null}
-          <IconBtn label="删除" danger onClick={onDelete}><Trash2 size={14} /></IconBtn>
+          <IconBtn label="删除" danger onClick={onDelete}>
+            <Trash2 size={14} />
+          </IconBtn>
         </div>
       </td>
     </tr>
@@ -369,9 +376,21 @@ function FileRow({
 
 function StageBadge({ status }: { status: string }) {
   const tone =
-    status === 'succeeded' ? 'green' : status === 'failed' ? 'red' : status === 'pending' ? 'neutral' : 'amber'
+    status === 'succeeded'
+      ? 'green'
+      : status === 'failed'
+        ? 'red'
+        : status === 'pending'
+          ? 'neutral'
+          : 'amber'
   const label =
-    status === 'succeeded' ? '完成' : status === 'failed' ? '失败' : status === 'pending' ? '待处理' : status || '—'
+    status === 'succeeded'
+      ? '完成'
+      : status === 'failed'
+        ? '失败'
+        : status === 'pending'
+          ? '待处理'
+          : status || '—'
   return <Badge tone={tone}>{label}</Badge>
 }
 
@@ -426,7 +445,9 @@ function DeleteConfirm({
           </div>
         ) : null}
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onCancel}>取消</Button>
+          <Button variant="ghost" onClick={onCancel}>
+            取消
+          </Button>
           <Button
             variant="danger"
             loading={busy}

@@ -215,6 +215,52 @@ def test_execute_retrieval_uses_unified_graph_and_rerank_path(monkeypatch):
     assert result.warnings[0].message == "fallback used"
 
 
+def test_execute_retrieval_surfaces_embedding_degrade_warning(monkeypatch):
+    from engine.app.api import retrieval
+
+    scope = retrieval.AuthorizedKnowledgeScope(
+        tenant_id="tenant-a",
+        kb_uid="kb-a",
+        index_generation="index-a",
+    )
+    request = retrieval.RetrievalRequest(query="architecture")
+
+    class Resources:
+        def __enter__(self):
+            return object(), object()
+
+        def __exit__(self, *args):
+            return None
+
+    monkeypatch.setattr(retrieval, "open_retrieval_resources", lambda: Resources())
+
+    def degraded(*args, **kwargs):
+        kwargs["diagnostics"].update({
+            "status": "degraded",
+            "warnings": [{
+                "code": "EMBEDDING_UNAVAILABLE",
+                "message": "Embedding service temporarily unavailable; fell back to keyword retrieval.",
+                "retryable": True,
+            }],
+        })
+        return [{
+            "chunk_id": "chunk-a",
+            "item_id": "item-a",
+            "file_uid": "file-a",
+            "display_title": "Architecture",
+            "text": "fallback body",
+            "score": 0.031,
+            "channels": {"bm25": {"raw_score": 7.0, "raw_rank": 1}},
+        }]
+
+    monkeypatch.setattr(retrieval, "unified_search", degraded)
+    result = retrieval.execute_retrieval(request, scope)
+
+    assert result.status == "degraded"
+    assert result.warnings[0].code == "EMBEDDING_UNAVAILABLE"
+    assert "fell back to keyword retrieval" in result.warnings[0].message
+
+
 def test_execute_retrieval_skips_hits_without_traceable_ids(monkeypatch):
     from engine.app.api import retrieval
 

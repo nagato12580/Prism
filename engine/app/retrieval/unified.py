@@ -100,9 +100,15 @@ def scoped_text_hybrid_search(
     if not isinstance(scope, SearchScope):
         raise ValueError("SearchScope is required for scoped text hybrid retrieval")
 
+    try:
+        query_embedding = embed_query(query)
+    except Exception as exc:
+        logger.warning("[unified] scoped_embedding_failed err=%s", exc)
+        query_embedding = []
+
     recalled = recall(
         query,
-        embed_query(query),
+        query_embedding,
         scope,
         graph_client=None,
         top_k=top_k,

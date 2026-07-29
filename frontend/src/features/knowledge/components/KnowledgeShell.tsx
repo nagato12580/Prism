@@ -76,6 +76,13 @@ export function KnowledgeShell() {
           <BookOpen size={18} />
         </div>
         <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => navigate('/knowledge')}
+            className="mb-1 inline-flex items-center gap-1 text-[11px] text-slate-400 transition hover:text-slate-600"
+          >
+            <ArrowLeft size={12} /> 返回知识库
+          </button>
           <div className="truncate text-base font-semibold text-slate-900">{kb?.name}</div>
           <div className="truncate text-xs text-slate-500">
             {kb?.description || '暂无描述'} · 状态：{kb?.status}

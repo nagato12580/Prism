@@ -57,6 +57,17 @@ def test_dense_failure_is_typed(monkeypatch):
     assert result.problem.retryable is True
 
 
+def test_dense_empty_embedding_is_typed_as_embedding_unavailable():
+    from engine.app.retrieval import vector_search as module
+
+    result = module.vector_search([], _scope(), top_k=10)
+
+    assert result.health == "failed"
+    assert result.problem.code == "EMBEDDING_UNAVAILABLE"
+    assert result.problem.retryable is True
+    assert "keyword retrieval" in result.problem.message
+
+
 def test_dense_malformed_response_is_typed(monkeypatch):
     from engine.app.retrieval import vector_search as module
     monkeypatch.setattr(module, "search_index", lambda **kwargs: [{"score": "bad"}])
