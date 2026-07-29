@@ -67,9 +67,9 @@ def test_label_gold_chunks_identifies_direct_chunks():
     labels = label_gold_chunks(question, parent_text, children)
     assert len(labels) == 3
 
-    # c1 should be "direct" (directly answers the question)
+    # c1 content ("该方法通过学习每个视图的自我表示矩阵...") directly answers the question
     c1 = next(l for l in labels if l["chunk_id"] == "c1")
-    assert c1["relevance"] in ("direct", "partial", "context")
+    assert c1["relevance"] == "direct", f"Expected c1 to be 'direct', got {c1['relevance']}"
 
     # All labels should have valid relevance values
     for label in labels:

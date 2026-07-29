@@ -178,6 +178,9 @@ def label_gold_chunks(
 
 只输出 JSON，不要解释。"""
 
+    # Build lookup for chunk_text from input children
+    text_lookup = {c["chunk_id"]: c["chunk_text"] for c in children}
+
     try:
         response = chat([{"role": "user", "content": prompt}])
         # Extract JSON from response
@@ -186,12 +189,18 @@ def label_gold_chunks(
         if json_start >= 0 and json_end > json_start:
             labels = json.loads(response[json_start:json_end])
             valid = [l for l in labels if isinstance(l, dict) and "chunk_id" in l]
-            return [{"chunk_id": l["chunk_id"], "relevance": l.get("relevance", "context")}
+            return [{"chunk_id": l["chunk_id"],
+                     "chunk_text": text_lookup.get(l["chunk_id"], ""),
+                     "relevance": l.get("relevance", "context")}
                     for l in valid]
-        return [{"chunk_id": c["chunk_id"], "relevance": "context"} for c in children]
+        return [{"chunk_id": c["chunk_id"],
+                 "chunk_text": c["chunk_text"],
+                 "relevance": "context"} for c in children]
     except Exception as exc:
         print(f"  [!] Labeling failed: {exc}", flush=True)
-        return [{"chunk_id": c["chunk_id"], "relevance": "context"} for c in children]
+        return [{"chunk_id": c["chunk_id"],
+                 "chunk_text": c["chunk_text"],
+                 "relevance": "context"} for c in children]
 
 
 def _assign_types(parents: list[dict], paper_ids: list[str]) -> list[dict]:
@@ -226,15 +235,23 @@ def _assign_types(parents: list[dict], paper_ids: list[str]) -> list[dict]:
                 decorated.append({**p, "assigned_type": single_types[type_idx]})
                 type_idx += 1
 
+    if type_idx < len(single_types):
+        print(f"  [!] Warning: only allocated {type_idx}/{len(single_types)} single-paper types "
+              f"— {len(single_types) - type_idx} question types were not assigned. "
+              f"Consider increasing SAMPLE_SIZE_PER_PAPER or reducing question counts.", flush=True)
+
     # Create cross-paper entries
+    used_ids = {d["parent_id"] for d in decorated}
     for ct in cross_types:
         # Pick 2-3 different papers
         cross_papers = random.sample(paper_ids, min(3, len(paper_ids)))
         cross_parents = []
         for pid in cross_papers:
-            available = [p for p in paper_parents[pid] if p not in decorated]
+            available = [p for p in paper_parents[pid] if p["parent_id"] not in used_ids]
             if available:
-                cross_parents.append(random.choice(available))
+                chosen = random.choice(available)
+                cross_parents.append(chosen)
+                used_ids.add(chosen["parent_id"])
             else:
                 cross_parents.append(random.choice(paper_parents[pid]))
 
@@ -262,8 +279,13 @@ def build_dataset(
     parents: list[dict],
     paper_ids: list[str],
     output_path: Path,
+    checkpoint_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Generate questions and gold labels for all parents."""
+    """Generate questions and gold labels for all parents.
+
+    If checkpoint_path is provided, appends each completed query as a JSON line
+    to that file for incremental recovery on failure.
+    """
     decorated = _assign_types(parents, paper_ids)
     queries: list[dict] = []
     type_counts: dict[str, int] = {}
@@ -291,7 +313,7 @@ def build_dataset(
         ]
         labels = label_gold_chunks(question, parent["chunk_text"], children)
 
-        queries.append({
+        entry = {
             "id": f"q{len(queries) + 1:03d}",
             "question": question,
             "language": lang,
@@ -306,9 +328,18 @@ def build_dataset(
                 for l in labels
             ],
             "item_title": parent["item_title"],
-        })
+        }
+        queries.append(entry)
         type_counts[qtype] = type_counts.get(qtype, 0) + 1
         print(f"  [{index + 1}/{len(decorated)}] {qtype} | {question[:80]}...", flush=True)
+
+        # Incremental checkpoint
+        if checkpoint_path is not None:
+            try:
+                with open(checkpoint_path, "a", encoding="utf-8") as cp:
+                    cp.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except Exception as exc:
+                print(f"  [!] Checkpoint write failed: {exc}", flush=True)
 
     return {
         "meta": {
@@ -359,8 +390,10 @@ def main(argv: list[str] | None = None) -> None:
         parents = load_paper_parents(db)
         print(f"  Loaded {len(parents)} parent chunks across {len(set(p['item_id'] for p in parents))} papers", flush=True)
 
+        checkpoint_path = run_dir / "golden_dataset_v2.partial.jsonl"
+
         print(f"\n[2/3] Generating questions with {settings.LLM_MODEL}...", flush=True)
-        dataset = build_dataset(parents, PAPER_IDS, output_path)
+        dataset = build_dataset(parents, PAPER_IDS, output_path, checkpoint_path=checkpoint_path)
 
         print(f"\n[3/3] Writing dataset...", flush=True)
         output_path.write_text(json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8")
