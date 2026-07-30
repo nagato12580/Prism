@@ -140,22 +140,25 @@ def parse_ndjson_events(lines: list[str]) -> dict[str, Any]:
 
         if etype == "token":
             result["token_count"] += 1
-            token_text = data.get("token", "")
-            if isinstance(token_text, str):
-                result["answer"] += token_text
+            # data can be a string (the token text) or a dict with "token" key
+            if isinstance(data, str):
+                result["answer"] += data
+            elif isinstance(data, dict):
+                result["answer"] += data.get("token", "")
         elif etype == "sources":
-            sources = data.get("sources", [])
-            if isinstance(sources, list):
-                result["sources"] = sources
+            if isinstance(data, dict):
+                sources = data.get("sources", [])
+                if isinstance(sources, list):
+                    result["sources"] = sources
         elif etype == "tool_call":
             result["tool_calls"] += 1
         elif etype == "done":
             result["status"] = "done"
-            if data.get("answer"):
+            if isinstance(data, dict) and data.get("answer"):
                 result["answer"] = data["answer"]
         elif etype == "error":
             result["status"] = "error"
-            result["error"] = data.get("message", "unknown error")
+            result["error"] = data.get("message", "unknown error") if isinstance(data, dict) else str(data)
 
     return result
 
@@ -270,7 +273,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\n[1/3] Running answer evaluation ({len(queries)} queries)...")
     results: list[dict] = []
     failures: list[dict] = []
-    client = httpx.Client(timeout=120.0)
+    client = httpx.Client(timeout=300.0)
 
     for i, q in enumerate(queries):
         qid = q["id"]
@@ -279,9 +282,9 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             t0 = time.perf_counter()
-            response = client.stream(
+            with client.stream(
                 "POST",
-                f"{args.engine_url}/chat/answer",
+                f"{args.engine_url}/api/v1/chat/answer",
                 json={
                     "query": question,
                     "history": [],
@@ -290,19 +293,19 @@ def main(argv: list[str] | None = None) -> None:
                     "rag_max_iterations": 5,
                 },
                 headers={"x-prism-knowledge-scope": scope_token},
-            )
-            ttfb_ms = round((time.perf_counter() - t0) * 1000)
+            ) as response:
+                ttfb_ms = round((time.perf_counter() - t0) * 1000)
 
-            lines = []
-            first_line = True
-            for line in response.iter_lines():
-                if first_line:
-                    ttfb_ms = round((time.perf_counter() - t0) * 1000)
-                    first_line = False
-                lines.append(line + "\n")
+                lines = []
+                first_line = True
+                for line in response.iter_lines():
+                    if first_line:
+                        ttfb_ms = round((time.perf_counter() - t0) * 1000)
+                        first_line = False
+                    lines.append(line + "\n")
 
-            total_latency_ms = round((time.perf_counter() - t0) * 1000)
-            events = parse_ndjson_events(lines)
+                total_latency_ms = round((time.perf_counter() - t0) * 1000)
+                events = parse_ndjson_events(lines)
 
         except Exception as e:
             print(f"    [!] HTTP error: {e}", flush=True)
