@@ -267,8 +267,14 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[!] KB not found: {args.kb_uid}")
         sys.exit(1)
 
-    # Sign scope
-    scope_token = _sign_scope(args.tenant_id, args.kb_uid)
+    # Sign scope (refreshed every 30 queries to avoid 600s TTL expiry)
+    _scope_token = {"token": None, "last": 0}
+
+    def _get_scope_token():
+        if _scope_token["token"] is None or (time.time() - _scope_token["last"]) > 500:
+            _scope_token["token"] = _sign_scope(args.tenant_id, args.kb_uid)
+            _scope_token["last"] = time.time()
+        return _scope_token["token"]
 
     print(f"\n[1/3] Running answer evaluation ({len(queries)} queries)...")
     results: list[dict] = []
@@ -278,6 +284,8 @@ def main(argv: list[str] | None = None) -> None:
     for i, q in enumerate(queries):
         qid = q["id"]
         question = q["question"]
+        # Refresh token if needed
+        scope_token = _get_scope_token()
         print(f"  [{i + 1}/{len(queries)}] {qid} | {question[:60]}...", flush=True)
 
         try:

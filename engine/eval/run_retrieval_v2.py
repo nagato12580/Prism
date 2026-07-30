@@ -20,6 +20,7 @@ if str(_project_root) not in sys.path:
 
 from engine.app.retrieval.unified import scoped_text_hybrid_search
 from engine.app.retrieval.contracts import SearchScope
+from engine.app.config import settings
 
 K_VALUES = (5, 10, 20)
 AGGREGATE_METRICS = [
@@ -165,6 +166,39 @@ def _estimate_channel_hits(hits: list[dict]) -> dict[str, int]:
     return channels
 
 
+def _load_parent_children_map() -> dict[str, set[str]]:
+    """Load a mapping from parent_chunk_id to the set of all its child chunk IDs."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from backend.app.models.knowledge_item import KnowledgeChunk
+
+    engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
+    db = sessionmaker(bind=engine)()
+    try:
+        children = db.query(KnowledgeChunk).filter(
+            KnowledgeChunk.chunk_type == "child",
+        ).all()
+        mapping: dict[str, set[str]] = {}
+        for c in children:
+            if c.parent_id:
+                mapping.setdefault(c.parent_id, set()).add(c.id)
+        return mapping
+    finally:
+        db.close()
+
+
+def _gold_parent_ids(q: dict) -> set[str]:
+    """Get the gold parent chunk IDs for a query.
+
+    For single-paper: uses parent_chunk_id.
+    For cross-paper: adds cross_parent_ids.
+    """
+    ids = {q["parent_chunk_id"]}
+    for pid in q.get("cross_parent_ids", []):
+        ids.add(pid)
+    return ids
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Prism Retrieval Evaluation v2")
     parser.add_argument("--dataset", required=True, help="Path to golden_dataset_v2.json")
@@ -198,15 +232,27 @@ def main(argv: list[str] | None = None) -> None:
     queries = dataset["queries"]
     print(f"  Questions: {len(queries)}")
 
+    # Load parent->children mapping for parent-level evaluation
+    print(f"\n[2/4] Loading chunk hierarchy...")
+    parent_children = _load_parent_children_map()
+    print(f"  Mapped {sum(len(v) for v in parent_children.values())} children under {len(parent_children)} parents")
+
     # Run retrieval
-    print(f"\n[2/3] Running retrieval evaluation...")
+    print(f"\n[3/4] Running retrieval evaluation (parent-level gold standard)...")
     results: list[dict] = []
     failures: list[dict] = []
 
     for i, q in enumerate(queries):
         qid = q["id"]
         question = q["question"]
-        relevant_ids = {c["chunk_id"] for c in q["relevant_children"]}
+        # Expand gold to ALL children of the gold parent(s)
+        gold_parents = _gold_parent_ids(q)
+        relevant_ids: set[str] = set()
+        for pid in gold_parents:
+            relevant_ids |= parent_children.get(pid, set())
+        # Fallback to original labeled children for v1 compatibility
+        if not relevant_ids:
+            relevant_ids = {c["chunk_id"] for c in q.get("relevant_children", [])}
 
         try:
             t0 = time.perf_counter()
@@ -241,7 +287,7 @@ def main(argv: list[str] | None = None) -> None:
               f"lat={latency_ms}ms | {question[:40]}...")
 
     # Output
-    print(f"\n[3/3] Writing results...")
+    print(f"\n[4/4] Writing results...")
 
     # detailed.csv
     csv_path = run_dir / "retrieval_detailed.csv"
