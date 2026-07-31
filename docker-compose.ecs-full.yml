@@ -153,7 +153,13 @@ services:
     volumes:
       - uploads_data:/app/backend/uploads
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:5180/health >/dev/null || exit 1"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5180/health', timeout=3).read()",
+        ]
       interval: 20s
       timeout: 10s
       retries: 20
@@ -194,7 +200,13 @@ services:
     volumes:
       - uploads_data:/app/backend/uploads
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:5175/health >/dev/null || exit 1"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5175/health', timeout=3).read()",
+        ]
       interval: 20s
       timeout: 10s
       retries: 20
