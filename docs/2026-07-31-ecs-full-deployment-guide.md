@@ -85,28 +85,36 @@ cp .env.ecs-full.example .env.ecs-full
 vim .env.ecs-full
 ```
 
-至少修改以下内容：
+优先确认以下内容：
 
 ```env
-MYSQL_ROOT_PASSWORD=你自己的密码
-NEO4J_PASSWORD=你自己的密码
-MINIO_ROOT_USER=你自己的账号
-MINIO_ROOT_PASSWORD=你自己的密码
+MYSQL_ROOT_PASSWORD=CHANGE-ME
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=password
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
 
 JWT_SECRET=一串随机长字符串
 KNOWLEDGE_SCOPE_SECRET=一串随机长字符串
 
-LLM_API_BASE=你的大模型兼容接口地址
+LLM_API_BASE=https://api.deepseek.com
 LLM_API_KEY=你的大模型密钥
-LLM_MODEL=qwen-plus
+LLM_MODEL=deepseek-v4-flash
 
+EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
 EMBEDDING_API_KEY=你的 embedding 密钥
-# 如果你用的是同一个供应商，也可以只填 SILICONFLOW_API_KEY
+SILICONFLOW_API_KEY=你的 embedding 密钥
 
-RERANK_API_BASE=你的 rerank 接口地址
+RERANK_API_BASE=https://api.siliconflow.cn/v1/rerank
 RERANK_API_KEY=你的 rerank 密钥
-RERANK_MODEL=你的 rerank 模型名
+RERANK_MODEL=BAAI/bge-reranker-v2-m3
 ```
+
+说明：
+
+- 上面 `MYSQL_ROOT_PASSWORD`、`NEO4J_USERNAME`、`NEO4J_PASSWORD`、`MINIO_ROOT_USER`、`MINIO_ROOT_PASSWORD` 已经按当前仓库里的现有默认配置写好。
+- `LLM_API_KEY`、`EMBEDDING_API_KEY`、`SILICONFLOW_API_KEY`、`RERANK_API_KEY` 这些密钥项，按你当前项目现有 `.env` 已经可以直接沿用。
+- 如果你不打算调整密钥来源，可以直接使用仓库里的 `.env.ecs-full`，不必手工重填这一段。
 
 如果你暂时没有 `rerank` 服务，可以先这样改：
 
@@ -126,6 +134,16 @@ DEEP_SEARCH_JUDGE_MODEL=
 ```
 
 这些值留空时，通常会回退到 `LLM_MODEL` 或直接关闭对应增强能力，能减少启动和运行时风险。
+
+按当前仓库现状，下面这些值已经是可直接使用的：
+
+```env
+ENTITY_EXTRACT_MODEL=
+COMMUNITY_LABEL_MODEL=
+DEEP_SEARCH_JUDGE_MODEL=gpt-5.4-mini
+DEEP_SEARCH_JUDGE_API_BASE=https://chat.ekti.cc/v1
+DEEP_SEARCH_JUDGE_MIN_OVERALL_SCORE=0.8
+```
 
 ## 6. 启动服务
 
@@ -331,4 +349,3 @@ ss -lntp | grep 8080
 - `.env.ecs-full`
 - `.env.ecs-full.example`
 - `docs/2026-07-31-ecs-full-deployment-guide.md`
-
