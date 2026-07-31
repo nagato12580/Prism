@@ -1,31 +1,22 @@
 import { requestJSON } from './client'
 import { buildKnowledgeBaseGraphPath } from './graphPath'
+import type {
+  UnifiedGraphEdge,
+  UnifiedGraphNode,
+  UnifiedGraphPayload,
+  UnifiedGraphView,
+} from '@/app/api'
 
-export interface KnowledgeBaseGraphNode {
-  id: string
-  type: string
-  label: string
-  ref_id?: string
+export type KnowledgeBaseGraphNode = UnifiedGraphNode & {
   file_uid?: string
   chunk_uid?: string
-  source_kind?: string
-  source_id?: string
   item_id?: string
-  confidence?: number
-  status?: string
 }
 
-export interface KnowledgeBaseGraphEdge {
-  id: string
-  source: string
-  target: string
-  type: string
-  label: string
-  confidence?: number
-}
+export type KnowledgeBaseGraphEdge = UnifiedGraphEdge
 
-export interface KnowledgeBaseGraphPayload {
-  view: 'entity' | 'source'
+export interface KnowledgeBaseGraphPayload extends UnifiedGraphPayload {
+  view: UnifiedGraphView
   nodes: KnowledgeBaseGraphNode[]
   edges: KnowledgeBaseGraphEdge[]
   stats: {
@@ -44,7 +35,7 @@ export interface KnowledgeBaseGraphPayload {
 }
 
 export interface KnowledgeBaseGraphParams {
-  view?: 'entity' | 'source'
+  view?: UnifiedGraphView
   file_uids?: string[]
   limit?: number
 }

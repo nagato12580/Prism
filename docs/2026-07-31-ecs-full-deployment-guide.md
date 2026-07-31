@@ -13,6 +13,8 @@
 - 这是单机全量部署，已经尽量压低了内存和并发参数，但 `2核8G` 仍然比较紧。
 - 第一次启动会比较慢，尤其是 `Elasticsearch`、`Milvus`、`Neo4j`。
 - 如果后续出现 OOM、容器频繁重启、入库很慢，优先考虑升级实例规格。
+- 当前部署文件里的 Neo4j 镜像固定为 `neo4j:5.26.28`，不要手动改回 `5.28.1`。
+- 前端 Docker 构建已切换到 `pnpm@9.15.9`，用来兼容仓库里的 `frontend/pnpm-lock.yaml`。
 
 ## 1. 前提
 
@@ -165,6 +167,18 @@ docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml up -d --b
 
 首次启动时间可能比较长，尤其是在网络较慢时。
 
+如果你想先单独验证前端镜像是否能构建通过，可以先执行：
+
+```bash
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml build frontend
+```
+
+如果前端单独构建通过，再执行全量启动：
+
+```bash
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml up -d --build
+```
+
 ## 7. 查看启动状态
 
 ```bash
@@ -190,6 +204,7 @@ docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml ps
 
 - 当前部署文件里的 Neo4j 镜像已经固定为 `neo4j:5.26.28`。
 - 之前的 `neo4j:5.28.1` 在当前 Docker Hub 官方标签列表中不可用，拉取时会报 `denied` 或 `not found`。
+- 当前前端 Dockerfile 已固定使用 `pnpm@9.15.9`。如果你看到 `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`，说明服务器上的代码还没更新到最新版本，需要先 `git pull`。
 
 ## 8. 查看日志
 
@@ -306,7 +321,25 @@ docker stats
 
 如果出现明显 OOM，说明 `2核8G` 已经压不住当前负载。
 
-### 12.3 页面能打开，但上传或知识检索异常
+### 12.3 frontend 构建失败
+
+如果你看到类似下面的错误：
+
+```text
+ERR_PNPM_LOCKFILE_BREAKING_CHANGE
+```
+
+说明服务器上的前端 Dockerfile 还是旧版本，还在使用 `pnpm 8`。先执行：
+
+```bash
+cd /srv/prism
+git pull
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml build frontend
+```
+
+如果你看到的是普通的 TypeScript 编译错误，也先执行 `git pull`，因为部署文件已经同步了本次修复。
+
+### 12.4 页面能打开，但上传或知识检索异常
 
 重点检查：
 
@@ -321,7 +354,7 @@ docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml logs --ta
 - `EMBEDDING_API_KEY` 或 `SILICONFLOW_API_KEY` 正确
 - 如果启用了 rerank，`RERANK_*` 配置正确
 
-### 12.4 外网打不开 8080
+### 12.5 外网打不开 8080
 
 检查：
 
