@@ -21,15 +21,15 @@
 假设：
 
 - 服务器系统为 Linux
-- 项目目录为 `/srv/prism`
+- 项目目录为 `/mnt/work_space/AIOne`
 - 你已经有可用的 LLM/Embedding 接口和密钥
 
-如果项目目录不是 `/srv/prism`，把下面命令里的路径替换成你的实际路径。
+如果项目目录不是 `/mnt/work_space/AIOne`，把下面命令里的路径替换成你的实际路径。
 
 ## 2. 进入项目目录
 
 ```bash
-cd /srv/prism
+cd /mnt/work_space/AIOne
 ```
 
 ## 3. 安装 Docker
@@ -368,7 +368,7 @@ ss -lntp | grep 8080
 
 如果你希望最稳妥，按这个顺序执行：
 
-1. `cd /srv/prism`
+1. `cd /mnt/work_space/AIOne`
 2. 安装 Docker
 3. 配置 `vm.max_map_count`
 4. `cp .env.ecs-full.example .env.ecs-full`
