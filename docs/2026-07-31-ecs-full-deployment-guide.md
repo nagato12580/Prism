@@ -332,7 +332,7 @@ ERR_PNPM_LOCKFILE_BREAKING_CHANGE
 说明服务器上的前端 Dockerfile 还是旧版本，还在使用 `pnpm 8`。先执行：
 
 ```bash
-cd /srv/prism
+cd /mnt/work_space/AIOne
 git pull
 docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml build frontend
 ```
@@ -354,7 +354,39 @@ docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml logs --ta
 - `EMBEDDING_API_KEY` 或 `SILICONFLOW_API_KEY` 正确
 - 如果启用了 rerank，`RERANK_*` 配置正确
 
-### 12.5 外网打不开 8080
+### 12.5 backend 一直重启，frontend 起不来
+
+如果你看到 `backend` 容器反复 `Restarting`，或者 `frontend` 一直卡在等待 `backend healthy`，先执行：
+
+```bash
+cd /mnt/work_space/AIOne
+git pull
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml up -d --build backend frontend
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml logs --tail=200 backend
+```
+
+如果日志里出现类似下面的错误：
+
+```text
+TypeError: unsupported operand type(s) for |: 'type' and 'str'
+```
+
+说明服务器上的代码还没同步到这次修复，继续 `git pull` 后重新构建 `backend` 即可。
+
+如果 `backend` 已经启动，但 `engine` 日志里还有下面这种错误：
+
+```text
+Table 'prism_db.knowledge_job' doesn't exist
+```
+
+再执行一次数据库迁移：
+
+```bash
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml exec backend alembic upgrade head
+docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml restart backend engine frontend
+```
+
+### 12.6 外网打不开 8080
 
 检查：
 
