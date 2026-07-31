@@ -1,5 +1,6 @@
 # prism/backend/app/api/knowledge.py
 import hashlib
+import json
 import threading
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,7 @@ from ..config import settings
 from ..database import SessionLocal, get_db
 from ..models.knowledge_item import KnowledgeItem, KnowledgeTopic, KnowledgeFile
 from ..models.knowledge_evaluation import EvaluationRun
+from ..models.knowledge_job import KnowledgeJob
 from ..schemas.knowledge import (
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemOut, KnowledgeItemListOut,
     KnowledgeTopicCreate, KnowledgeTopicUpdate, KnowledgeTopicOut, KnowledgeResourceOut,
@@ -23,6 +25,8 @@ from ..schemas.knowledge import (
 )
 from ..services.derived_cleanup import purge_item_derived_artifacts
 from ..services.knowledge_job_queue import enqueue_governance_job, enqueue_ingest_job, enqueue_topic_ingest_jobs
+from ..services.knowledge_jobs import JobCommand, KnowledgeJobService
+from ..storage.files import LocalFileStorage
 from ..services.document_text_quality import assess_document_text
 from ..utils.file_parser import count_pages, extract_text
 from ..utils.media_type import infer_media_type
@@ -34,10 +38,15 @@ LEGACY_DEFAULT_KB_UID = "legacy-default-kb"
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESOURCE_INGEST_TIMEOUT_SECONDS = 1800
+JOB_ACTIVE_STATUSES = {"queued", "claimed", "running"}
 
 
 def _redis_client():
     return redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+def _knowledge_storage() -> LocalFileStorage:
+    return LocalFileStorage(Path(settings.KNOWLEDGE_STORAGE_ROOT))
 
 
 def _topic_out(topic: KnowledgeTopic, resource_count: int = 0) -> KnowledgeTopicOut:
@@ -196,6 +205,86 @@ def _engine_error_message(resp: httpx.Response) -> str:
     if detail:
         return f"Engine returned {resp.status_code}: {detail[:500]}"
     return f"Engine returned {resp.status_code}"
+
+
+def _publish_knowledge_job(db: Session, job: KnowledgeJob) -> KnowledgeJob:
+    if job.stage != "enqueued":
+        _redis_client().lpush(settings.KNOWLEDGE_INGEST_QUEUE, json.dumps({"job_id": job.id}))
+        job.stage = "enqueued"
+        db.commit()
+        db.refresh(job)
+    return job
+
+
+def _prepare_legacy_resource_for_parse(db: Session, resource: KnowledgeFile) -> None:
+    topic = resource.topic or db.get(KnowledgeTopic, resource.topic_id) if resource.topic_id else None
+    resource.original_filename = resource.original_filename or resource.title or "resource.txt"
+    resource.relative_path = resource.relative_path or resource.original_filename
+    resource.parser_config_snapshot = resource.parser_config_snapshot or (topic.parser_config if topic else None)
+    resource.chunk_config_snapshot = resource.chunk_config_snapshot or (topic.chunk_config if topic else None)
+
+    if resource.storage_uri:
+        return
+
+    legacy_path = Path(resource.storage_path or "")
+    if not legacy_path.exists():
+        raise ValueError("resource_storage_missing")
+
+    content = legacy_path.read_bytes()
+    staged = _knowledge_storage().stage(
+        resource.tenant_id,
+        resource.kb_uid,
+        resource.file_uid,
+        resource.original_filename,
+        content,
+    )
+    resource.storage_uri = _knowledge_storage().commit(staged)
+    resource.content_sha256 = resource.content_sha256 or staged.sha256
+    resource.size_bytes = resource.size_bytes or staged.size_bytes
+    resource.file_size = resource.file_size or staged.size_bytes
+
+
+def _enqueue_legacy_parse_job(db: Session, resource: KnowledgeFile) -> KnowledgeJob:
+    _prepare_legacy_resource_for_parse(db, resource)
+    version = resource.parsed_content_version or 0
+    base_key = f"{resource.kb_uid}:{resource.file_uid}:parse:v{version}"
+    existing = (
+        db.query(KnowledgeJob)
+        .filter(
+            KnowledgeJob.kb_uid == resource.kb_uid,
+            KnowledgeJob.file_uid == resource.file_uid,
+            KnowledgeJob.job_type == "parse",
+            KnowledgeJob.idempotency_key.like(f"{base_key}%"),
+        )
+        .order_by(KnowledgeJob.created_at.desc(), KnowledgeJob.id.desc())
+        .all()
+    )
+    active = next((job for job in existing if job.status in JOB_ACTIVE_STATUSES), None)
+    if active is not None:
+        resource.last_job_id = active.id
+        resource.parse_status = "queued"
+        resource.error_message = None
+        db.commit()
+        return _publish_knowledge_job(db, active)
+
+    job = KnowledgeJobService(db).create(
+        JobCommand(
+            "parse",
+            resource.tenant_id,
+            resource.kb_uid,
+            resource.file_uid,
+            {"auto_index": True},
+        ),
+        base_key,
+        commit=False,
+    )
+    job.resource_id = resource.id
+    job.topic_id = resource.topic_id
+    resource.last_job_id = job.id
+    resource.parse_status = "queued"
+    resource.error_message = None
+    db.commit()
+    return _publish_knowledge_job(db, job)
 
 
 @router.post("", response_model=KnowledgeItemOut)
@@ -531,12 +620,7 @@ def ingest_resource(resource_id: str, db: Session = Depends(get_db)):
             },
         )
     try:
-        enqueue_ingest_job(
-            db,
-            _redis_client(),
-            resource.id,
-            queue_name=settings.KNOWLEDGE_INGEST_QUEUE,
-        )
+        _enqueue_legacy_parse_job(db, resource)
     except ValueError as exc:
         raise HTTPException(
             status_code=409,

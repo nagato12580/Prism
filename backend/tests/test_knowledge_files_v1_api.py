@@ -370,6 +370,53 @@ def test_index_command_records_reused_active_job_on_file(client, db_session, fil
     assert file_row.index_status == "running"
 
 
+def test_index_command_reuses_active_kb_index_job_across_files(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile, KnowledgeJob
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "KB-wide Index Reuse"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    first = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("first.md", b"# First", "text/markdown")},
+    ).json()["file"]["file_uid"]
+    second = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("second.md", b"# Second", "text/markdown")},
+    ).json()["file"]["file_uid"]
+    file_a = db_session.query(KnowledgeFile).filter_by(file_uid=first).one()
+    file_b = db_session.query(KnowledgeFile).filter_by(file_uid=second).one()
+    file_a.parsed_content_version = 1
+    file_b.parsed_content_version = 1
+    active = KnowledgeJob(
+        job_type="index",
+        tenant_id=file_a.tenant_id,
+        kb_uid=kb_uid,
+        file_uid=file_a.file_uid,
+        idempotency_key=f"{kb_uid}:{file_a.file_uid}:index:v1",
+        status="queued",
+        stage="enqueued",
+    )
+    db_session.add(active)
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_b.file_uid}/index",
+        headers=file_headers,
+    )
+
+    db_session.refresh(file_b)
+    assert response.status_code == 202
+    assert response.json()["id"] == active.id
+    assert response.json()["status"] == "queued"
+    assert file_b.last_job_id == active.id
+    assert file_b.index_status == "running"
+    assert db_session.query(KnowledgeJob).filter_by(kb_uid=kb_uid, job_type="index").count() == 1
+
+
 def test_list_files_supports_filters_and_limit(client, file_headers):
     created = client.post(
         "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Filter KB"}

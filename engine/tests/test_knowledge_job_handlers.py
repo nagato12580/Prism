@@ -270,6 +270,88 @@ def test_handle_index_publishes_generation_and_marks_file(handler_db, monkeypatc
     assert handler_db.get(type(job), job.id).status == "succeeded"
 
 
+def test_handle_index_builds_scoped_graph_generation_and_outbox(handler_db, monkeypatch):
+    from backend.app.models import GraphOutboxEvent, GraphProjectionReceipt, KnowledgeEntity
+    from backend.app.models.knowledge_types import StageStatus
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(
+        tenant_id="t1",
+        owner_user_id="u1",
+        name="Graph KB",
+        active_index_generation=None,
+        active_graph_generation=None,
+    )
+    handler_db.add(topic)
+    handler_db.flush()
+    item = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="Doc", content="body")
+    handler_db.add(item)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-graph",
+        original_filename="graph.md",
+        item_id=item.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        graph_status=StageStatus.PENDING.value,
+        parsed_content_version=3,
+    )
+    handler_db.add(file_row)
+    handler_db.add(
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_row.file_uid,
+            item_id=item.id,
+            generation="3",
+            chunk_uid="child-graph",
+            chunk_text="Paper: Graph Systems\nAlice Smith\nExample University",
+            chunk_type="child",
+        )
+    )
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
+        "handle-index-graph",
+    )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "index-generation")
+
+    class FakePublisher:
+        def build(self, kb_uid, generation, *, expected_old):
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 1, "error": None})()
+
+    result = handlers.handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: FakePublisher(),
+    )
+
+    handler_db.refresh(file_row)
+    handler_db.refresh(topic)
+    assert result["status"] == "completed"
+    assert topic.active_graph_generation == "index-generation"
+    assert file_row.graph_status == StageStatus.SUCCEEDED.value
+    assert handler_db.query(KnowledgeEntity).filter_by(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation="index-generation",
+    ).count() > 0
+    event_count = handler_db.query(GraphOutboxEvent).filter_by(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation="index-generation",
+    ).count()
+    assert event_count > 0
+    assert handler_db.query(GraphProjectionReceipt).count() == event_count * 2
+
+
 def test_handle_index_uses_kb_index_generation_not_file_content_version(handler_db, monkeypatch):
     from backend.app.models.knowledge_types import StageStatus
     import engine.app.jobs.knowledge_handlers as handlers
@@ -513,6 +595,114 @@ def test_handle_index_records_file_error_when_publish_fails(handler_db, caplog):
     assert file_row.file_uid in caplog.text
     assert topic.kb_uid in caplog.text
     assert "Milvus flush deadline exceeded" in caplog.text
+
+
+def test_handle_index_marks_graph_stage_failed_when_graph_activation_fails(handler_db, monkeypatch):
+    from backend.app.models.knowledge_types import StageStatus
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(
+        tenant_id="t1",
+        owner_user_id="u1",
+        name="Graph Activation Failure KB",
+        active_index_generation=None,
+        active_graph_generation=None,
+    )
+    handler_db.add(topic)
+    handler_db.flush()
+    item_a = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="A", content="a")
+    item_b = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="B", content="b")
+    handler_db.add_all([item_a, item_b])
+    handler_db.flush()
+    file_a = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-graph-a",
+        original_filename="a.md",
+        item_id=item_a.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        graph_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    file_b = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-graph-b",
+        original_filename="b.md",
+        item_id=item_b.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        graph_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    handler_db.add_all([file_a, file_b])
+    handler_db.add_all([
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_a.file_uid,
+            item_id=item_a.id,
+            generation="1",
+            chunk_uid="child-graph-a",
+            chunk_text="Alpha Graph",
+            chunk_type="child",
+        ),
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_b.file_uid,
+            item_id=item_b.id,
+            generation="1",
+            chunk_uid="child-graph-b",
+            chunk_text="Beta Graph",
+            chunk_type="child",
+        ),
+    ])
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_a.file_uid, {}),
+        "handle-index-graph-activation-fails",
+    )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "graph-failure-generation")
+
+    class FakePublisher:
+        def build(self, kb_uid, generation, *, expected_old):
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 2, "error": None})()
+
+    monkeypatch.setattr(
+        handlers,
+        "activate_graph_generation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("graph activation blocked")),
+    )
+
+    result = handlers.handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: FakePublisher(),
+    )
+
+    handler_db.refresh(file_a)
+    handler_db.refresh(file_b)
+    handler_db.refresh(topic)
+    assert result["status"] == "failed"
+    assert topic.active_graph_generation is None
+    assert file_a.index_status == StageStatus.FAILED.value
+    assert file_a.graph_status == StageStatus.FAILED.value
+    assert file_b.graph_status == StageStatus.FAILED.value
+    assert file_a.graph_error == {
+        "code": "GRAPH_ERROR",
+        "message": "graph activation blocked",
+    }
+    assert file_b.graph_error == {
+        "code": "GRAPH_ERROR",
+        "message": "graph activation blocked",
+    }
 
 
 def test_parse_auto_index_creates_and_publishes_index_job(handler_db, tmp_path, monkeypatch):

@@ -1,4 +1,5 @@
 from typing import Any
+from collections import Counter
 
 from neo4j import GraphDatabase
 
@@ -326,6 +327,152 @@ class GraphClient:
             or row.get("extraction_method")
             or "MENTIONED_IN edge exists",
             "evidence_type": "EXTRACTED",
+        }
+
+    def scoped_subgraph(
+        self,
+        *,
+        tenant_id: str,
+        kb_uid: str,
+        graph_generation: str,
+        view: str = "entity",
+        file_uids: tuple[str, ...] = (),
+        limit: int = 120,
+    ) -> dict[str, list[dict[str, Any]]]:
+        scope = {
+            "tenant_id": tenant_id,
+            "kb_uid": kb_uid,
+            "graph_generation": graph_generation,
+            "has_filter": bool(file_uids),
+            "file_uids": list(file_uids),
+            "limit": limit,
+        }
+        source_rows = self._execute_read(
+            """
+            MATCH (s:ScopedSource {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+            WHERE $has_filter = false OR coalesce(s.file_uid, '') IN $file_uids
+            RETURN properties(s) AS source
+            ORDER BY coalesce(s.file_uid, ''), coalesce(s.chunk_uid, ''), s.id
+            LIMIT $limit
+            """,
+            scope,
+        )
+        if not source_rows:
+            return {"nodes": [], "edges": []}
+
+        sources = [row["source"] for row in source_rows if row.get("source")]
+        source_ids = [row["id"] for row in sources if row.get("id")]
+        mention_rows = self._execute_read(
+            """
+            MATCH (e:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+                  -[r:MENTIONED_IN]->
+                  (s:ScopedSource {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+            WHERE s.id IN $source_ids
+            RETURN properties(e) AS entity, properties(s) AS source, properties(r) AS rel
+            ORDER BY e.id, s.id
+            LIMIT $edge_limit
+            """,
+            {**scope, "source_ids": source_ids, "edge_limit": max(limit * 6, 200)},
+        )
+        entity_ids = sorted({row["entity"]["id"] for row in mention_rows if row.get("entity", {}).get("id")})
+        relation_rows = self._execute_read(
+            """
+            MATCH (a:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+                  -[r:RELATED_TO]->
+                  (b:ScopedEntity {tenant_id: $tenant_id, kb_uid: $kb_uid, graph_generation: $graph_generation})
+            WHERE a.id IN $entity_ids AND b.id IN $entity_ids
+            RETURN properties(a) AS source_entity, properties(b) AS target_entity, properties(r) AS rel
+            ORDER BY a.id, b.id
+            LIMIT $edge_limit
+            """,
+            {**scope, "entity_ids": entity_ids, "edge_limit": max(limit * 6, 200)},
+        ) if entity_ids else []
+
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: dict[str, dict[str, Any]] = {}
+
+        def source_node(source: dict[str, Any]) -> dict[str, Any]:
+            source_kind = str(source.get("source_kind") or source.get("source_type") or "")
+            if source_kind == "personal_asset_unit":
+                node_type = "personal_asset_unit"
+                node_id = f"asset_unit:{source.get('id')}"
+            else:
+                node_type = "document_chunk"
+                node_id = f"chunk:{source.get('id')}"
+            label = str(source.get("title") or source.get("chunk_uid") or source.get("file_uid") or source.get("id") or node_id)
+            return {
+                "id": node_id,
+                "type": node_type,
+                "label": label,
+                "ref_id": source.get("id"),
+                "file_uid": source.get("file_uid"),
+                "chunk_uid": source.get("chunk_uid"),
+                "source_kind": source_kind or "document_chunk",
+                "source_id": source.get("source_id"),
+                "item_id": source.get("item_id"),
+            }
+
+        def entity_node(entity: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "id": f"entity:{entity.get('id')}",
+                "type": "entity",
+                "label": str(entity.get("canonical_name") or entity.get("normalized_key") or entity.get("id") or "entity"),
+                "ref_id": entity.get("id"),
+                "entity_type": entity.get("entity_type"),
+                "normalized_key": entity.get("normalized_key"),
+                "confidence": entity.get("confidence"),
+                "status": entity.get("status"),
+            }
+
+        for row in mention_rows:
+            source = row.get("source") or {}
+            entity = row.get("entity") or {}
+            rel = row.get("rel") or {}
+            source_view = source_node(source)
+            entity_view = entity_node(entity)
+            nodes[source_view["id"]] = source_view
+            nodes[entity_view["id"]] = entity_view
+            edge_id = rel.get("mention_id") or f"edge:mention:{entity.get('id')}:{source.get('id')}"
+            if view == "source":
+                edges[edge_id] = {
+                    "id": edge_id,
+                    "source": source_view["id"],
+                    "target": entity_view["id"],
+                    "type": "mentions_entity",
+                    "label": "mentions_entity",
+                    "confidence": rel.get("confidence"),
+                }
+            else:
+                edges[edge_id] = {
+                    "id": edge_id,
+                    "source": entity_view["id"],
+                    "target": source_view["id"],
+                    "type": "mentioned_in",
+                    "label": "mentioned_in",
+                    "confidence": rel.get("confidence"),
+                }
+
+        for row in relation_rows:
+            source_entity = row.get("source_entity") or {}
+            target_entity = row.get("target_entity") or {}
+            rel = row.get("rel") or {}
+            source_view = entity_node(source_entity)
+            target_view = entity_node(target_entity)
+            nodes[source_view["id"]] = source_view
+            nodes[target_view["id"]] = target_view
+            relation_id = rel.get("relation_id") or f"edge:related:{source_entity.get('id')}:{target_entity.get('id')}:{rel.get('predicate', 'related_to')}"
+            edges[relation_id] = {
+                "id": relation_id,
+                "source": source_view["id"],
+                "target": target_view["id"],
+                "type": "related_to",
+                "label": str(rel.get("predicate") or "related_to"),
+                "confidence": rel.get("confidence"),
+            }
+
+        return {
+            "nodes": sorted(nodes.values(), key=lambda node: (node["type"], node["label"], node["id"])),
+            "edges": sorted(edges.values(), key=lambda edge: (edge["type"], edge["source"], edge["target"], edge["id"])),
         }
 
     def set_entity_analysis(self, entity_id: str, community_id: int, is_god: bool, cohesion: float) -> None:

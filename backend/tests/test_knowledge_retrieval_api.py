@@ -189,3 +189,74 @@ def test_transport_error_does_not_leak_internal_url(client, db_session, monkeypa
     message = response.json()["error"]["message"]
     assert message == "Retrieval service is unavailable"
     assert "engine.internal" not in response.text
+
+
+def test_call_engine_retrieval_signs_scope_into_trusted_header(monkeypatch):
+    import backend.app.api.knowledge_retrieval as retrieval_api
+
+    monkeypatch.setattr(retrieval_api.settings, "KNOWLEDGE_SCOPE_SECRET", "scope-secret")
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return _engine_payload("no_hits")
+
+    def fake_post(url, *, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(retrieval_api.httpx, "post", fake_post)
+
+    payload = {
+        "scope": {
+            "tenant_id": "legacy-personal",
+            "kb_uid": "kb-legacy",
+            "index_generation": "index-active",
+            "graph_generation": "graph-active",
+        },
+        "query": "architecture",
+        "mode": "deep",
+        "filters": {"file_uids": ["file-a"]},
+        "config": {"top_k": 5},
+    }
+    retrieval_api.call_engine_retrieval(payload)
+
+    assert captured["json"] == {
+        "query": "architecture",
+        "mode": "deep",
+        "filters": {"file_uids": ["file-a"]},
+        "config": {"top_k": 5},
+    }
+    assert "X-Prism-Knowledge-Scope" in captured["headers"]
+    assert captured["headers"]["X-Prism-Knowledge-Scope"]
+
+
+def test_retrieval_requires_scope_secret_before_contacting_engine(client, db_session, monkeypatch):
+    import backend.app.api.knowledge_retrieval as retrieval_api
+
+    kb_uid, headers = _create_kb(client, db_session)
+    monkeypatch.setattr(retrieval_api.settings, "KNOWLEDGE_SCOPE_SECRET", "")
+
+    called = False
+
+    def fail_if_called(request):
+        nonlocal called
+        called = True
+        raise AssertionError("engine must not be called without scope secret")
+
+    monkeypatch.setattr(retrieval_api, "call_engine_retrieval", fail_if_called)
+    response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/retrieval/query",
+        headers=headers,
+        json={"query": "safe"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "RETRIEVAL_UNAVAILABLE"
+    assert called is False

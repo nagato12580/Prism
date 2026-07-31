@@ -50,6 +50,9 @@ const scatterAttractStrength = 0.04
 const scatterRelaxationPasses = 20
 const dragThreshold = 3
 const maxExplorerDepth = 3
+const defaultVisibleSeedLimit = 4
+const defaultVisibleSeedNeighborDepth = 1
+const defaultVisibleSeedMinNodeCount = 12
 const floatingSurfaceMotionClass = 'transition-[transform,opacity,box-shadow] duration-200 ease-out'
 const graphControlFocusClass =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] focus-visible:ring-offset-2 focus-visible:ring-offset-white/80'
@@ -167,6 +170,82 @@ function buildFocusDistanceMap(nodes: UnifiedGraphNode[], edges: UnifiedGraphEdg
   }
 
   return distances
+}
+
+function buildSeedDistanceMap(nodes: UnifiedGraphNode[], edges: UnifiedGraphEdge[], rootIds: string[]) {
+  const distances = new Map<string, number>()
+  if (!rootIds.length) return distances
+
+  const adjacency = buildAdjacency(nodes, edges)
+  const queue: string[] = []
+
+  rootIds.forEach((rootId) => {
+    if (!adjacency.has(rootId) || distances.has(rootId)) return
+    distances.set(rootId, 0)
+    queue.push(rootId)
+  })
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const currentId = queue[index]
+    const currentDistance = distances.get(currentId)
+    if (typeof currentDistance !== 'number') continue
+
+    ;(adjacency.get(currentId) ?? []).forEach((neighborId) => {
+      const nextDistance = currentDistance + 1
+      const seenDistance = distances.get(neighborId)
+      if (typeof seenDistance === 'number' && seenDistance <= nextDistance) return
+      distances.set(neighborId, nextDistance)
+      queue.push(neighborId)
+    })
+  }
+
+  return distances
+}
+
+function selectDefaultVisibleNodeIds(
+  nodes: UnifiedGraphNode[],
+  edges: UnifiedGraphEdge[],
+  {
+    seedLimit = defaultVisibleSeedLimit,
+    neighborDepth = defaultVisibleSeedNeighborDepth,
+    minNodeCount = defaultVisibleSeedMinNodeCount,
+  }: {
+    seedLimit?: number
+    neighborDepth?: number
+    minNodeCount?: number
+  } = {},
+) {
+  const allIds = new Set(nodes.map((node) => node.id))
+  if (nodes.length <= minNodeCount) return allIds
+
+  const adjacency = buildAdjacency(nodes, edges)
+  const rankedSeeds = nodes
+    .slice()
+    .sort((a, b) => {
+      const degreeOrder = (adjacency.get(b.id)?.length ?? 0) - (adjacency.get(a.id)?.length ?? 0)
+      if (degreeOrder !== 0) return degreeOrder
+      if (a.type === 'entity' && b.type !== 'entity') return -1
+      if (a.type !== 'entity' && b.type === 'entity') return 1
+      return compareNodeIdentity(a, b)
+    })
+    .slice(0, seedLimit)
+
+  const visible = new Set<string>(rankedSeeds.map((node) => node.id))
+  const queue = rankedSeeds.map((node) => ({ id: node.id, depth: 0 }))
+  const seen = new Set<string>(visible)
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index]
+    if (current.depth >= neighborDepth) continue
+    ;(adjacency.get(current.id) ?? []).forEach((neighborId) => {
+      if (seen.has(neighborId)) return
+      seen.add(neighborId)
+      visible.add(neighborId)
+      queue.push({ id: neighborId, depth: current.depth + 1 })
+    })
+  }
+
+  return visible.size ? visible : allIds
 }
 
 function distanceTier(distance: number | undefined, focusDepth: number): DistanceTier {
@@ -569,6 +648,7 @@ function graphNodeAriaLabel(node: UnifiedGraphNode, metaLabel: string, active: b
 type KnowledgeGraphPageProps = {
   initialPayload?: UnifiedGraphPayload | null
   initialSelectedId?: string | null
+  loader?: (params: { view: UnifiedGraphView; q?: string; limit?: number }) => Promise<UnifiedGraphPayload>
 }
 
 function initialGraphView(initialPayload: UnifiedGraphPayload | null | undefined): UnifiedGraphView {
@@ -578,6 +658,7 @@ function initialGraphView(initialPayload: UnifiedGraphPayload | null | undefined
 export function KnowledgeGraphPage({
   initialPayload = null,
   initialSelectedId = null,
+  loader = unifiedGraphApi.get,
 }: KnowledgeGraphPageProps) {
   const initialView = initialGraphView(initialPayload)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -617,7 +698,7 @@ export function KnowledgeGraphPage({
   const loadGraph = async (nextView: UnifiedGraphView = view, nextQuery: string = query) => {
     await loadRunnerRef.current.run(
       () =>
-        unifiedGraphApi.get({
+        loader({
           view: nextView,
           q: nextQuery.trim() || undefined,
           limit: 60,
@@ -721,6 +802,19 @@ export function KnowledgeGraphPage({
     () => buildFocusDistanceMap(payload?.nodes ?? [], payload?.edges ?? [], focusRoot?.id ?? null),
     [focusRoot?.id, payload?.edges, payload?.nodes],
   )
+  const defaultVisibleNodeIds = useMemo(
+    () => selectDefaultVisibleNodeIds(payload?.nodes ?? [], payload?.edges ?? []),
+    [payload?.edges, payload?.nodes],
+  )
+  const defaultSeedDistances = useMemo(
+    () => buildSeedDistanceMap(payload?.nodes ?? [], payload?.edges ?? [], Array.from(defaultVisibleNodeIds)),
+    [defaultVisibleNodeIds, payload?.edges, payload?.nodes],
+  )
+  const visibleNodeIds = useMemo(() => {
+    if (focusRoot?.id || selected?.id) return null
+    return defaultVisibleNodeIds
+  }, [defaultVisibleNodeIds, focusRoot?.id, selected?.id])
+  const activeDistances = focusRoot?.id ? focusDistances : defaultSeedDistances
   const maxFocusDistance = useMemo(
     () => Array.from(focusDistances.values()).reduce((max, distance) => Math.max(max, distance), 1),
     [focusDistances],
@@ -744,12 +838,13 @@ export function KnowledgeGraphPage({
     [focusDepth, focusDistances, nodes],
   )
   const nodeTiers = useMemo(
-    () => new Map(nodes.map((node) => [node.id, distanceTier(focusDistances.get(node.id), focusDepth)] as const)),
-    [focusDepth, focusDistances, nodes],
+    () => new Map(nodes.map((node) => [node.id, distanceTier(activeDistances.get(node.id), focusDepth)] as const)),
+    [activeDistances, focusDepth, nodes],
   )
   const renderedNodes = useMemo(
     () =>
       nodes
+        .filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id))
         .slice()
         .sort((a, b) => {
           const tierOrder = tierWeight(nodeTiers.get(a.id) ?? 'dim') - tierWeight(nodeTiers.get(b.id) ?? 'dim')
@@ -760,20 +855,21 @@ export function KnowledgeGraphPage({
           if (focusRoot?.id === b.id) return -1
           return compareNodeIdentity(a, b)
         }),
-    [focusRoot?.id, nodeTiers, nodes, selected?.id],
+    [focusRoot?.id, nodeTiers, nodes, selected?.id, visibleNodeIds],
   )
   const renderedEdges = useMemo(
     () =>
       (payload?.edges ?? [])
+        .filter((edge) => !visibleNodeIds || (visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)))
         .map((edge) => {
-          let tier = edgeDistanceTier(focusDistances.get(edge.source), focusDistances.get(edge.target), focusDepth)
+          let tier = edgeDistanceTier(activeDistances.get(edge.source), activeDistances.get(edge.target), focusDepth)
           if (tier === 'dim' && selected?.id && (selected.id === edge.source || selected.id === edge.target)) {
             tier = 'far'
           }
           return { edge, tier }
         })
         .sort((a, b) => tierWeight(a.tier) - tierWeight(b.tier)),
-    [focusDepth, focusDistances, payload?.edges, selected?.id],
+    [activeDistances, focusDepth, payload?.edges, selected?.id, visibleNodeIds],
   )
   const selectedEdges = useMemo(
     () => (payload?.edges ?? []).filter((edge) => edge.source === selected?.id || edge.target === selected?.id),

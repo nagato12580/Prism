@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from backend.app.models.graph_outbox import GraphExtractionRevision
 from backend.app.models import (
@@ -27,6 +28,24 @@ from backend.app.models import (
 )
 from backend.app.services.entity_extraction import EntityCandidate
 from backend.app.services.graph_outbox import GraphOutboxService
+
+_ENTITY_TEXT_MAX = 512
+
+
+def _bounded_text(value: str, *, limit: int = _ENTITY_TEXT_MAX) -> str:
+    return (value or "")[:limit]
+
+
+def _bounded_aliases(values: list[str], *, limit: int = _ENTITY_TEXT_MAX) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        bounded = _bounded_text(value, limit=limit)
+        if not bounded or bounded in seen:
+            continue
+        seen.add(bounded)
+        deduped.append(bounded)
+    return deduped
 
 
 @dataclass(frozen=True)
@@ -59,6 +78,17 @@ class GraphFactWriter:
             (scope.tenant_id, scope.kb_uid, scope.chunk_uid, content_hash, extractor_config_hash)
         )
         return sha256(raw.encode("utf-8")).hexdigest()
+
+    def _entity_user_id(self, scope: GraphFactScope) -> str:
+        raw = "|".join(
+            (
+                scope.tenant_id,
+                scope.kb_uid,
+                scope.graph_generation,
+                "scoped-entity",
+            )
+        )
+        return str(uuid5(NAMESPACE_URL, raw))
 
     def _get_or_create_revision(
         self,
@@ -195,6 +225,9 @@ class GraphFactWriter:
         return changes
 
     def _upsert_entity(self, scope: GraphFactScope, candidate: EntityCandidate) -> KnowledgeEntity:
+        canonical_name = _bounded_text(candidate.surface_text)
+        normalized_key = _bounded_text(candidate.normalized_key)
+        aliases = _bounded_aliases(list(candidate.aliases))
         entity = (
             self.db.query(KnowledgeEntity)
             .filter(
@@ -202,7 +235,7 @@ class GraphFactWriter:
                 KnowledgeEntity.kb_uid == scope.kb_uid,
                 KnowledgeEntity.graph_generation == scope.graph_generation,
                 KnowledgeEntity.entity_type == candidate.entity_type,
-                KnowledgeEntity.normalized_key == candidate.normalized_key,
+                KnowledgeEntity.normalized_key == normalized_key,
             )
             .one_or_none()
         )
@@ -211,23 +244,24 @@ class GraphFactWriter:
                 tenant_id=scope.tenant_id,
                 kb_uid=scope.kb_uid,
                 graph_generation=scope.graph_generation,
-                user_id="default-user",
+                user_id=self._entity_user_id(scope),
                 entity_type=candidate.entity_type,
-                canonical_name=candidate.surface_text,
-                normalized_key=candidate.normalized_key,
-                aliases=list(candidate.aliases),
+                canonical_name=canonical_name,
+                normalized_key=normalized_key,
+                aliases=aliases,
                 confidence=candidate.confidence,
                 status="active",
             )
             self.db.add(entity)
             self.db.flush()
         else:
-            entity.canonical_name = candidate.surface_text
+            entity.canonical_name = canonical_name
+            entity.aliases = _bounded_aliases(list(entity.aliases or []) + aliases)
             entity.confidence = max(entity.confidence or 0.0, candidate.confidence)
         return entity
 
     def _upsert_aliases(self, scope: GraphFactScope, entity: KnowledgeEntity, candidate: EntityCandidate) -> None:
-        for alias_key in candidate.aliases:
+        for alias_key in _bounded_aliases(list(candidate.aliases)):
             existing = (
                 self.db.query(EntityAlias)
                 .filter(
@@ -267,6 +301,8 @@ class GraphFactWriter:
             .one_or_none()
         )
         if mention is None:
+            surface_text = _bounded_text(candidate.surface_text)
+            normalized_key = _bounded_text(candidate.normalized_key)
             mention = EntityMention(
                 entity_id=entity.id,
                 tenant_id=scope.tenant_id,
@@ -280,8 +316,8 @@ class GraphFactWriter:
                 source_id=scope.chunk_uid,
                 item_id=scope.item_id,
                 chunk_id=scope.chunk_uid,
-                surface_text=candidate.surface_text,
-                normalized_key=candidate.normalized_key,
+                surface_text=surface_text,
+                normalized_key=normalized_key,
                 evidence_span=candidate.evidence_span,
                 confidence=candidate.confidence,
                 extraction_method=candidate.extraction_method,

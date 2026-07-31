@@ -3,6 +3,7 @@
 import logging
 import sys
 from datetime import timedelta
+from hashlib import sha256
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
@@ -11,6 +12,8 @@ from engine.app.config import settings as _engine_settings
 
 from backend.app.models import KnowledgeFile, KnowledgeItem, KnowledgeChunk, KnowledgeTopic
 from backend.app.models.knowledge_types import StageStatus, uuid4_str
+from backend.app.services.entity_extraction import extract_entity_candidates_from_text
+from backend.app.services.graph_facts import GraphFactScope, GraphFactWriter
 from backend.app.config import settings
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.storage.files import LocalFileStorage
@@ -18,12 +21,75 @@ from engine.app.indexing.publisher import GenerationPublisher, mark_kb_index_com
 from engine.app.indexing.profiles import DEFAULT_PROFILE
 from engine.app.ingestion.parsers import build_default_registry
 from engine.app.ingestion.presets import chunk_with_preset
+from engine.app.knowledge.enrichment import activate_graph_generation
 
 logger = logging.getLogger(__name__)
 
 
 def _new_index_generation() -> str:
     return uuid4_str()
+
+
+def _graph_content_hash(text: str) -> str:
+    return sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _build_scoped_graph_generation(db_session, tenant_id: str, kb_uid: str, generation: str) -> int:
+    files = (
+        db_session.query(KnowledgeFile)
+        .filter(
+            KnowledgeFile.tenant_id == tenant_id,
+            KnowledgeFile.kb_uid == kb_uid,
+            KnowledgeFile.deleted_at.is_(None),
+            KnowledgeFile.parse_status == StageStatus.SUCCEEDED.value,
+            KnowledgeFile.parsed_content_version.isnot(None),
+        )
+        .all()
+    )
+    file_generations = {
+        file_row.file_uid: str(file_row.parsed_content_version)
+        for file_row in files
+        if file_row.parsed_content_version
+    }
+    chunks = (
+        db_session.query(KnowledgeChunk)
+        .filter(
+            KnowledgeChunk.tenant_id == tenant_id,
+            KnowledgeChunk.kb_uid == kb_uid,
+            KnowledgeChunk.file_uid.in_(list(file_generations)),
+            KnowledgeChunk.chunk_type == "child",
+        )
+        .order_by(KnowledgeChunk.file_uid, KnowledgeChunk.chunk_uid)
+        .all()
+    )
+    writer = GraphFactWriter(db_session)
+    settled_chunks = 0
+    for chunk in chunks:
+        if chunk.generation != file_generations.get(chunk.file_uid):
+            continue
+        candidates = extract_entity_candidates_from_text(
+            chunk.chunk_text or "",
+            source_kind="document_chunk",
+        )
+        if not candidates:
+            continue
+        writer.settle(
+            GraphFactScope(
+                tenant_id=tenant_id,
+                kb_uid=kb_uid,
+                file_uid=chunk.file_uid,
+                item_id=chunk.item_id or "",
+                chunk_uid=chunk.chunk_uid,
+                graph_generation=generation,
+            ),
+            candidates,
+            content_hash=_graph_content_hash(chunk.chunk_text or ""),
+            extractor_config_hash="rule-graph-builder-v1",
+            model_version="rule-based",
+            prompt_version="rule-graph-builder-v1",
+        )
+        settled_chunks += 1
+    return settled_chunks
 
 
 def handle_delete(job_id, worker_id, db_session, job_svc, cleanup):
@@ -292,6 +358,7 @@ def handle_index(
         return {"status": "skipped"}
 
     try:
+        kb_files = []
         file_row = (
             db_session.query(KnowledgeFile)
             .filter_by(file_uid=job.file_uid, deleted_at=None)
@@ -319,6 +386,7 @@ def handle_index(
             .one_or_none()
         )
         expected_old = topic.active_index_generation if topic is not None else None
+        expected_old_graph = topic.active_graph_generation if topic is not None else None
         result = publisher_factory(db_session).build(
             file_row.kb_uid,
             generation,
@@ -328,6 +396,33 @@ def handle_index(
             raise RuntimeError(result.error or "index build failed")
 
         mark_kb_index_complete(db_session, file_row.tenant_id, file_row.kb_uid, generation)
+        kb_files = (
+            db_session.query(KnowledgeFile)
+            .filter(
+                KnowledgeFile.tenant_id == file_row.tenant_id,
+                KnowledgeFile.kb_uid == file_row.kb_uid,
+                KnowledgeFile.deleted_at.is_(None),
+                KnowledgeFile.parse_status == StageStatus.SUCCEEDED.value,
+                KnowledgeFile.parsed_content_version.isnot(None),
+            )
+            .all()
+        )
+        for kb_file in kb_files:
+            kb_file.graph_status = StageStatus.RUNNING.value
+            kb_file.graph_error = None
+        db_session.commit()
+
+        _build_scoped_graph_generation(db_session, file_row.tenant_id, file_row.kb_uid, generation)
+        activate_graph_generation(
+            db_session,
+            file_row.kb_uid,
+            generation,
+            expected_old=expected_old_graph,
+        )
+        for kb_file in kb_files:
+            kb_file.graph_status = StageStatus.SUCCEEDED.value
+            kb_file.graph_error = None
+        db_session.commit()
         job_svc.succeed(
             job_id,
             worker_id,
@@ -353,6 +448,23 @@ def handle_index(
                 .filter_by(file_uid=job.file_uid, deleted_at=None)
                 .one_or_none()
             )
+            if kb_files:
+                scoped_files = {
+                    scoped.file_uid: scoped
+                    for scoped in db_session.query(KnowledgeFile)
+                    .filter(
+                        KnowledgeFile.file_uid.in_([row.file_uid for row in kb_files]),
+                        KnowledgeFile.deleted_at.is_(None),
+                    )
+                    .all()
+                }
+                for scoped in scoped_files.values():
+                    if scoped.graph_status == StageStatus.RUNNING.value:
+                        scoped.graph_status = StageStatus.FAILED.value
+                    scoped.graph_error = {
+                        "code": "GRAPH_ERROR",
+                        "message": str(exc),
+                    }
             if file_row:
                 file_row.index_status = StageStatus.FAILED.value
                 file_row.index_error = {

@@ -3,7 +3,7 @@ same extraction key is idempotent."""
 
 import pytest
 
-from backend.app.models import EntityMention, GraphOutboxEvent
+from backend.app.models import EntityMention, GraphOutboxEvent, KnowledgeEntity
 from backend.app.services.graph_facts import GraphFactScope, GraphFactWriter
 
 
@@ -59,3 +59,53 @@ def test_settle_writes_scoped_facts_and_outbox_events(db_session):
     mentions = db_session.query(EntityMention).all()
     assert all(m.tenant_id == "t1" and m.kb_uid == "k1" and m.graph_generation == "g1" for m in mentions)
     assert all(m.active == "true" for m in mentions)
+
+
+def test_settle_derives_scoped_entity_user_ids_for_legacy_unique_key_compatibility(db_session):
+    writer = GraphFactWriter(db_session)
+
+    writer.settle(GraphFactScope("t1", "k1", "f1", "i1", "c1", "g1"), [_candidate("Prism")], "a" * 64, "b" * 64)
+    writer.settle(GraphFactScope("t1", "k1", "f1", "i1", "c2", "g2"), [_candidate("Prism")], "c" * 64, "b" * 64)
+
+    entities = db_session.query(KnowledgeEntity).order_by(KnowledgeEntity.graph_generation.asc()).all()
+
+    assert len(entities) == 2
+    assert all(entity.user_id != "default-user" for entity in entities)
+    assert len({entity.user_id for entity in entities}) == 2
+
+
+def test_settle_truncates_oversized_entity_fields_to_model_limits(db_session):
+    writer = GraphFactWriter(db_session)
+    scope = GraphFactScope("t1", "k1", "f1", "i1", "c1", "g1")
+    long_name = "X" * 800
+    long_key = "k" * 900
+    long_alias = "a" * 850
+    from backend.app.services.entity_extraction import EntityCandidate
+
+    result = writer.settle(
+        scope,
+        candidates=[
+            EntityCandidate(
+                kind="entity",
+                entity_type="paper",
+                surface_text=long_name,
+                normalized_key=long_key,
+                aliases=[long_alias, long_alias],
+                confidence=0.9,
+                evidence_span=long_name,
+                extraction_method="rule",
+            )
+        ],
+        content_hash="e" * 64,
+        extractor_config_hash="f" * 64,
+    )
+
+    entity = db_session.query(KnowledgeEntity).one()
+    mention = db_session.query(EntityMention).one()
+
+    assert result.event_count >= 1
+    assert len(entity.canonical_name) == 512
+    assert len(entity.normalized_key) == 512
+    assert entity.aliases == ["a" * 512]
+    assert len(mention.surface_text) == 512
+    assert len(mention.normalized_key) == 512

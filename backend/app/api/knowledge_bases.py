@@ -1,4 +1,6 @@
 # backend/app/api/knowledge_bases.py
+from collections import Counter
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
@@ -8,6 +10,7 @@ from backend.app.database import get_db
 from backend.app.models import EvaluationRun, KnowledgeJob, KnowledgeTopic
 from backend.app.models.knowledge_types import ResourceStatus
 from backend.app.security.actor import ActorContext, get_actor_context
+from backend.app.services.graph_client import GraphClient
 from backend.app.services.knowledge_access import (
     KnowledgeAccessDenied,
     KnowledgeAccessPolicy,
@@ -52,6 +55,48 @@ class KnowledgeBaseListResponse(BaseModel):
     items: list[KnowledgeBaseResponse]
     total: int
     cursor: str | None = None
+
+
+class KnowledgeBaseGraphResponse(BaseModel):
+    view: str
+    nodes: list[dict]
+    edges: list[dict]
+    stats: dict
+    focus: dict
+
+
+def _empty_graph_payload(*, kb_uid: str, view: str, file_uids: tuple[str, ...]) -> dict:
+    return {
+        "view": view,
+        "nodes": [],
+        "edges": [],
+        "stats": {
+            "node_count": 0,
+            "edge_count": 0,
+            "entity_count": 0,
+            "source_count": 0,
+            "node_counts": {},
+            "edge_counts": {},
+        },
+        "focus": {
+            "view": view,
+            "kb_uid": kb_uid,
+            "file_uids": list(file_uids),
+        },
+    }
+
+
+def _build_graph_stats(nodes: list[dict], edges: list[dict]) -> dict:
+    node_counts = Counter(node.get("type", "") for node in nodes)
+    edge_counts = Counter(edge.get("type", "") for edge in edges)
+    return {
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "entity_count": node_counts.get("entity", 0),
+        "source_count": sum(count for node_type, count in node_counts.items() if node_type != "entity"),
+        "node_counts": dict(node_counts),
+        "edge_counts": dict(edge_counts),
+    }
 
 
 @router.post("", status_code=201, response_model=KnowledgeBaseResponse)
@@ -137,6 +182,53 @@ def get_knowledge_base(
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
         raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+
+
+@router.get("/{kb_uid}/graph", response_model=KnowledgeBaseGraphResponse)
+def get_knowledge_base_graph(
+    kb_uid: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+    view: str = Query("entity"),
+    file_uid: str | None = Query(None),
+    file_uids: list[str] = Query(default_factory=list),
+    limit: int = Query(120, ge=1, le=500),
+):
+    try:
+        topic = KnowledgeAccessPolicy(db).require_read(actor, kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+
+    scoped_file_uids = tuple(dict.fromkeys(uid for uid in ([file_uid] if file_uid else []) + file_uids if uid))
+    if not topic.active_graph_generation:
+        return _empty_graph_payload(kb_uid=kb_uid, view=view, file_uids=scoped_file_uids)
+
+    graph = GraphClient()
+    try:
+        payload = graph.scoped_subgraph(
+            tenant_id=topic.tenant_id,
+            kb_uid=topic.kb_uid,
+            graph_generation=topic.active_graph_generation,
+            view=view,
+            file_uids=scoped_file_uids,
+            limit=limit,
+        )
+    finally:
+        graph.close()
+
+    return {
+        "view": view,
+        "nodes": payload["nodes"],
+        "edges": payload["edges"],
+        "stats": _build_graph_stats(payload["nodes"], payload["edges"]),
+        "focus": {
+            "view": view,
+            "kb_uid": kb_uid,
+            "file_uids": list(scoped_file_uids),
+        },
+    }
 
 @router.patch("/{kb_uid}", response_model=KnowledgeBaseResponse)
 def update_knowledge_base(

@@ -1,0 +1,121 @@
+{
+  "meta": {
+    "dataset": "engine\\eval\\results\\2026-07-30_0616\\golden_dataset_v2.json",
+    "run_at": "2026-07-30T06:53:24.014101+00:00",
+    "total_queries": 75,
+    "evaluated": 75,
+    "failed": 0,
+    "judge_model": "deepseek-v4-flash"
+  },
+  "judge_aggregates": {
+    "evaluated": 75,
+    "total": 75,
+    "faithfulness": {
+      "mean": 1.27,
+      "median": 1,
+      "min": 1,
+      "max": 5,
+      "dist": {
+        "1": 66,
+        "2": 4,
+        "3": 2,
+        "4": 0,
+        "5": 3
+      }
+    },
+    "relevance": {
+      "mean": 1.84,
+      "median": 1,
+      "min": 1,
+      "max": 5,
+      "dist": {
+        "1": 52,
+        "2": 6,
+        "3": 4,
+        "4": 3,
+        "5": 10
+      }
+    },
+    "completeness": {
+      "mean": 1.4,
+      "median": 1,
+      "min": 1,
+      "max": 5,
+      "dist": {
+        "1": 65,
+        "2": 2,
+        "3": 1,
+        "4": 2,
+        "5": 5
+      }
+    },
+    "overall": {
+      "mean": 1.48,
+      "median": 1.0,
+      "min": 1.0,
+      "max": 5.0,
+      "dist": {
+        "1": 51,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 2
+      }
+    }
+  },
+  "by_type": {
+    "method_compare": {
+      "mean": 1.32,
+      "count": 12
+    },
+    "concept": {
+      "mean": 2.04,
+      "count": 16
+    },
+    "fact": {
+      "mean": 1.41,
+      "count": 27
+    },
+    "data_detail": {
+      "mean": 1.04,
+      "count": 7
+    },
+    "cross_paper": {
+      "mean": 1.31,
+      "count": 13
+    }
+  },
+  "by_paper": {
+    "Deep_Contrastive_Multi-View_Subspace_Clustering_With_Representation_and_Cluster_Interactive_Learning.pdf": {
+      "mean": 1.49,
+      "count": 12
+    },
+    "3746027.3754701.pdf": {
+      "mean": 1.77,
+      "count": 17
+    },
+    "s10044-025-01455-4.pdf": {
+      "mean": 1.32,
+      "count": 11
+    },
+    "11521_AF_UMC_An_Alignment_Free.pdf": {
+      "mean": 1.56,
+      "count": 12
+    },
+    "33725-Article Text-37793-1-2-20250410.pdf": {
+      "mean": 1.55,
+      "count": 10
+    },
+    "The_Name_of_the_Title_Is_Hope.pdf": {
+      "mean": 1.09,
+      "count": 13
+    }
+  },
+  "latency": {
+    "ttfb_p50": 31,
+    "ttfb_p95": 54,
+    "total_p50": 9240,
+    "total_p95": 16373
+  },
+  "failures": []
+}

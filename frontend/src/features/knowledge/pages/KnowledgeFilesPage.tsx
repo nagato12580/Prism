@@ -314,6 +314,7 @@ function FileRow({
   onDelete: () => void
 }) {
   const sizeKb = Math.max(1, Math.round(file.size_bytes / 1024))
+  const canIndex = file.parse_status === 'succeeded' && file.index_status !== 'succeeded'
   return (
     <tr className="border-b border-[var(--prism-line)] last:border-0 hover:bg-slate-50/40">
       <td className="px-4 py-2.5">
@@ -355,8 +356,8 @@ function FileRow({
           <IconBtn label="下载" onClick={onDownload}>
             <Download size={14} />
           </IconBtn>
-          {file.index_status !== 'succeeded' ? (
-            <IconBtn label="索引" onClick={onIndex}>
+          {canIndex ? (
+            <IconBtn label="索引" onClick={() => canIndex && onIndex()}>
               <Zap size={14} />
             </IconBtn>
           ) : null}

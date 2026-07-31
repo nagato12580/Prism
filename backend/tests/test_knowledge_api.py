@@ -362,7 +362,7 @@ def test_upload_image_audio_video_as_metadata_only(client):
         assert resource["item_id"] is None
 
 
-def test_ingest_resource_enqueues_job_instead_of_calling_engine(client, db_session, monkeypatch):
+def test_ingest_resource_enqueues_parse_job_for_legacy_resource(client, db_session, monkeypatch):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
@@ -383,14 +383,16 @@ def test_ingest_resource_enqueues_job_instead_of_calling_engine(client, db_sessi
     ingested = response.json()
     assert ingested["processing_status"] == "queued"
     assert ingested["error_message"] is None
-    job = db_session.query(KnowledgeJob).filter_by(resource_id=resource["id"], job_type="ingest").one()
+    job = db_session.query(KnowledgeJob).filter_by(resource_id=resource["id"], job_type="parse").one()
     assert job.status == "queued"
     assert job.stage == "enqueued"
-    assert job.item_id == resource["item_id"]
+    assert job.file_uid
+    assert job.item_id is None
+    assert job.payload == {"auto_index": True}
     assert fake_redis.messages == [("prism:queue:ingest", json.dumps({"job_id": job.id}))]
 
 
-def test_ingest_resource_reuses_active_job_without_duplicate_redis_message(client, db_session, monkeypatch):
+def test_ingest_resource_reuses_active_parse_job_without_duplicate_redis_message(client, db_session, monkeypatch):
     topic = _create_topic(client)
     upload = client.post(
         f"/api/v1/knowledge/topics/{topic['id']}/resources",
@@ -407,7 +409,7 @@ def test_ingest_resource_reuses_active_job_without_duplicate_redis_message(clien
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["processing_status"] == "queued"
-    assert db_session.query(KnowledgeJob).filter_by(resource_id=resource["id"], job_type="ingest").count() == 1
+    assert db_session.query(KnowledgeJob).filter_by(resource_id=resource["id"], job_type="parse").count() == 1
     assert len(fake_redis.messages) == 1
 
 
@@ -424,7 +426,7 @@ def test_ingest_resource_maps_enqueue_value_error_to_conflict(client, monkeypatc
         raise ValueError("resource_not_ingestable")
 
     monkeypatch.setattr("backend.app.api.knowledge._redis_client", lambda: fake_redis)
-    monkeypatch.setattr("backend.app.api.knowledge.enqueue_ingest_job", raise_not_ingestable)
+    monkeypatch.setattr("backend.app.api.knowledge._enqueue_legacy_parse_job", raise_not_ingestable)
 
     response = client.post(f"/api/v1/knowledge/resources/{resource['id']}/ingest")
 

@@ -314,6 +314,30 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
     version = file_row.parsed_content_version or 0
     base_key = f"{kb_uid}:{file_uid}:{job_type}:v{version}"
     from backend.app.models import KnowledgeJob
+    if job_type == "index":
+        kb_active = (
+            db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.tenant_id == actor.tenant_id,
+                KnowledgeJob.kb_uid == kb_uid,
+                KnowledgeJob.job_type == "index",
+                KnowledgeJob.status.in_({"queued", "claimed", "running"}),
+            )
+            .order_by(KnowledgeJob.created_at.desc(), KnowledgeJob.id.desc())
+            .first()
+        )
+        if kb_active is not None:
+            file_row.last_job_id = kb_active.id
+            file_row.index_status = "running"
+            if kb_active.status == "queued":
+                kb_active.error_code = None
+                kb_active.error_message = None
+                kb_active.retryable = False
+            db.commit()
+            if kb_active.status == "queued":
+                _publish_job(db, kb_active)
+                db.refresh(kb_active)
+            return _job_snapshot(kb_active)
     existing = (
         db.query(KnowledgeJob)
         .filter(

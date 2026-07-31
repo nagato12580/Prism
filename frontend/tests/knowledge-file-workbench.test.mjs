@@ -107,6 +107,12 @@ test('KnowledgeFilesPage renders persisted file stage failure details', () => {
   assert.match(page, /title=\{file\.index_error\.message\}/)
 })
 
+test('KnowledgeFilesPage only offers indexing after parse succeeds', () => {
+  const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+
+  assert.match(page, /file\.parse_status\s*===\s*'succeeded'\s*&&\s*file\.index_status\s*!==\s*'succeeded'/)
+})
+
 test('KnowledgeShell includes a subdued back action near the knowledge title', () => {
   const shell = read('src/features/knowledge/components/KnowledgeShell.tsx')
   const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')

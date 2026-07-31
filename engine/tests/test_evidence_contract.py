@@ -1,4 +1,5 @@
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 
@@ -150,6 +151,41 @@ def test_private_retrieval_fails_closed_without_scope_verifier():
     app.include_router(retrieval.router)
     response = TestClient(app).post("/internal/retrieval/query", json={"query": "safe"})
     assert response.status_code == 503
+
+
+def test_private_retrieval_verifies_backend_scope_header(monkeypatch):
+    from backend.app.api.knowledge_retrieval import sign_retrieval_scope
+    from engine.app.api import retrieval
+    from engine.run import create_app
+    from engine.app.config import settings
+
+    monkeypatch.setattr(settings, "KNOWLEDGE_SCOPE_SECRET", "scope-secret")
+    captured = {}
+
+    def fake_execute(request, scope):
+        captured["scope"] = scope
+        return retrieval.RetrievalResponse(status="no_hits")
+
+    monkeypatch.setattr(retrieval, "execute_retrieval", fake_execute)
+    token = sign_retrieval_scope(
+        retrieval.AuthorizedKnowledgeScope(
+            tenant_id="legacy-personal",
+            kb_uid="kb-a",
+            index_generation="index-a",
+            graph_generation="graph-a",
+        ),
+        secret="scope-secret",
+    )
+
+    response = TestClient(create_app()).post(
+        "/api/v1/internal/retrieval/query",
+        json={"query": "hello"},
+        headers={"X-Prism-Knowledge-Scope": token},
+    )
+
+    assert response.status_code == 200
+    assert captured["scope"].kb_uid == "kb-a"
+    assert captured["scope"].graph_generation == "graph-a"
 
 
 def test_retrieval_overrides_reject_zero_graph_hops():

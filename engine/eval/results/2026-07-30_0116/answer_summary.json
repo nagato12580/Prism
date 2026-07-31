@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "dataset": "engine\\eval\\results\\2026-07-30_0116\\golden_dataset_v2.json",
+    "run_at": "2026-07-30T02:37:45.266254+00:00",
+    "total_queries": 85,
+    "evaluated": 85,
+    "failed": 0,
+    "judge_model": "deepseek-v4-flash"
+  },
+  "judge_aggregates": {
+    "evaluated": 43,
+    "total": 85,
+    "faithfulness": {
+      "mean": 1.37,
+      "median": 1,
+      "min": 1,
+      "max": 5,
+      "dist": {
+        "1": 37,
+        "2": 2,
+        "3": 1,
+        "4": 0,
+        "5": 3
+      }
+    },
+    "relevance": {
+      "mean": 2.02,
+      "median": 1,
+      "min": 1,
+      "max": 5,
+      "dist": {
+        "1": 27,
+        "2": 4,
+        "3": 3,
+        "4": 2,
+        "5": 7
+      }
+    },
+    "completeness": {
+      "mean": 1.6,
+      "median": 1,
+      "min": 1,
+      "max": 5,
+      "dist": {
+        "1": 35,
+        "2": 2,
+        "3": 0,
+        "4": 0,
+        "5": 6
+      }
+    },
+    "overall": {
+      "mean": 1.64,
+      "median": 1.0,
+      "min": 1.0,
+      "max": 5.0,
+      "dist": {
+        "1": 26,
+        "2": 1,
+        "3": 0,
+        "4": 0,
+        "5": 1
+      }
+    }
+  },
+  "by_type": {
+    "method_compare": {
+      "mean": 2.2,
+      "count": 6
+    },
+    "concept": {
+      "mean": 1.72,
+      "count": 12
+    },
+    "fact": {
+      "mean": 1.56,
+      "count": 20
+    },
+    "data_detail": {
+      "mean": 1.06,
+      "count": 5
+    }
+  },
+  "by_paper": {
+    "Deep_Contrastive_Multi-View_Subspace_Clustering_With_Representation_and_Cluster_Interactive_Learning.pdf": {
+      "mean": 1.87,
+      "count": 13
+    },
+    "3746027.3754701.pdf": {
+      "mean": 1.72,
+      "count": 13
+    },
+    "s10044-025-01455-4.pdf": {
+      "mean": 1.53,
+      "count": 12
+    },
+    "11521_AF_UMC_An_Alignment_Free.pdf": {
+      "mean": 1.06,
+      "count": 5
+    }
+  },
+  "latency": {
+    "ttfb_p50": 24,
+    "ttfb_p95": 44,
+    "total_p50": 5591,
+    "total_p95": 14303
+  },
+  "failures": []
+}

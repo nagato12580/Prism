@@ -265,3 +265,127 @@ def test_capability_route_is_not_swallowed_by_kb_uid(client):
         json={"name": "VB2", "version": 1},
     )
     assert updated.json()["version"] == 2
+
+
+def test_v1_kb_graph_returns_empty_payload_when_no_active_graph_generation(client):
+    headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "Graph KB"})
+    kb_uid = created.json()["kb_uid"]
+
+    response = client.get(f"/api/v1/knowledge-bases/{kb_uid}/graph", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "view": "entity",
+        "nodes": [],
+        "edges": [],
+        "stats": {
+            "node_count": 0,
+            "edge_count": 0,
+            "entity_count": 0,
+            "source_count": 0,
+            "node_counts": {},
+            "edge_counts": {},
+        },
+        "focus": {
+            "view": "entity",
+            "kb_uid": kb_uid,
+            "file_uids": [],
+        },
+    }
+
+
+def test_v1_kb_graph_requires_read_access_before_graph_lookup(client, monkeypatch):
+    from backend.app.api import knowledge_bases as kb_api
+
+    alice_headers = {"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"}
+    bob_headers = {"X-Prism-Actor": "bob", "X-Prism-Tenant": "tenant-a"}
+    created = client.post("/api/v1/knowledge-bases", headers=alice_headers, json={"name": "Private Graph KB"})
+    kb_uid = created.json()["kb_uid"]
+    called = False
+
+    class ForbiddenGraphClient:
+        def scoped_subgraph(self, **kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("graph lookup must not happen before access check")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(kb_api, "GraphClient", ForbiddenGraphClient)
+    response = client.get(f"/api/v1/knowledge-bases/{kb_uid}/graph", headers=bob_headers)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "KNOWLEDGE_ACCESS_DENIED"
+    assert called is False
+
+
+def test_v1_kb_graph_returns_scoped_subgraph_and_forwards_file_filters(client, db_session, monkeypatch):
+    from backend.app.api import knowledge_bases as kb_api
+    from backend.app.models import KnowledgeTopic
+
+    headers = {"X-Prism-Actor": "default-user", "X-Prism-Tenant": "legacy-personal"}
+    created = client.post("/api/v1/knowledge-bases", headers=headers, json={"name": "Scoped Graph KB"})
+    kb_uid = created.json()["kb_uid"]
+    topic = db_session.query(KnowledgeTopic).filter_by(kb_uid=kb_uid).one()
+    topic.active_graph_generation = "graph-live"
+    db_session.commit()
+    captured = {}
+
+    class FakeGraphClient:
+        def scoped_subgraph(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "nodes": [
+                    {"id": "entity:e1", "type": "entity", "label": "Alice"},
+                    {
+                        "id": "chunk:c1",
+                        "type": "document_chunk",
+                        "label": "paper.md",
+                        "source_kind": "document_chunk",
+                        "source_id": "chunk-row-1",
+                        "file_uid": "file-a",
+                    },
+                ],
+                "edges": [
+                    {
+                        "id": "edge:mention:1",
+                        "source": "entity:e1",
+                        "target": "chunk:c1",
+                        "type": "mentioned_in",
+                        "label": "mentioned_in",
+                    }
+                ],
+            }
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(kb_api, "GraphClient", FakeGraphClient)
+    response = client.get(
+        f"/api/v1/knowledge-bases/{kb_uid}/graph",
+        headers=headers,
+        params=[("file_uid", "file-a"), ("file_uids", "file-b"), ("view", "source")],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured == {
+        "tenant_id": "legacy-personal",
+        "kb_uid": kb_uid,
+        "graph_generation": "graph-live",
+        "view": "source",
+        "file_uids": ("file-a", "file-b"),
+        "limit": 120,
+    }
+    assert payload["view"] == "source"
+    assert payload["focus"] == {
+        "view": "source",
+        "kb_uid": kb_uid,
+        "file_uids": ["file-a", "file-b"],
+    }
+    assert payload["stats"]["node_count"] == 2
+    assert payload["stats"]["entity_count"] == 1
+    assert payload["stats"]["source_count"] == 1
+    assert payload["stats"]["edge_counts"] == {"mentioned_in": 1}

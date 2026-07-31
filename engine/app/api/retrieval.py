@@ -1,8 +1,13 @@
 from contextlib import contextmanager
+import base64
+import binascii
+import hashlib
+import hmac
+import json
 import logging
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -92,9 +97,39 @@ def _normalize(row: dict, scope: AuthorizedKnowledgeScope, warnings: list[Channe
     )
 
 
-def verify_authorized_scope() -> AuthorizedKnowledgeScope:
-    """Fail closed until a trusted transport verifier is wired by security infrastructure."""
-    raise HTTPException(status_code=503, detail="authorized scope verifier is not configured")
+def _decode_scope_token(value: str) -> bytes:
+    return base64.b64decode(
+        value + "=" * (-len(value) % 4),
+        altchars=b"-_",
+        validate=True,
+    )
+
+
+def verify_authorized_scope(
+    x_prism_knowledge_scope: str | None = Header(default=None),
+) -> AuthorizedKnowledgeScope:
+    if not x_prism_knowledge_scope:
+        raise HTTPException(status_code=503, detail="authorized scope verifier is not configured")
+    if not settings.KNOWLEDGE_SCOPE_SECRET:
+        raise HTTPException(status_code=503, detail="authorized scope verifier is not configured")
+    try:
+        payload_part, signature_part = x_prism_knowledge_scope.split(".")
+        payload = _decode_scope_token(payload_part)
+        signature = _decode_scope_token(signature_part)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=403, detail="malformed knowledge scope token") from exc
+
+    expected = hmac.new(
+        settings.KNOWLEDGE_SCOPE_SECRET.encode("utf-8"),
+        payload,
+        hashlib.sha256,
+    ).digest()
+    if not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=403, detail="invalid knowledge scope signature")
+    try:
+        return AuthorizedKnowledgeScope.model_validate(json.loads(payload))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        raise HTTPException(status_code=403, detail="invalid knowledge scope payload") from exc
 
 
 @contextmanager

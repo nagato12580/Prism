@@ -1,4 +1,8 @@
 import logging
+import base64
+import hashlib
+import hmac
+import json
 
 import httpx
 from pydantic import ValidationError
@@ -21,13 +25,26 @@ class EnginePayloadDecodeError(ValueError):
     pass
 
 
+def _encode_scope_token(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def sign_retrieval_scope(scope: dict | "AuthorizedKnowledgeScope", secret: str) -> str:
+    if not secret:
+        raise ValueError("knowledge scope signing secret is required")
+    payload = scope.model_dump(mode="json") if hasattr(scope, "model_dump") else dict(scope)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    signature = hmac.new(secret.encode("utf-8"), encoded, hashlib.sha256).digest()
+    return f"{_encode_scope_token(encoded)}.{_encode_scope_token(signature)}"
+
+
 def call_engine_retrieval(request: dict) -> dict:
-    # Scope is intentionally not serialized into request JSON. A later trusted
-    # transport adapter must bind it to Engine's verifier dependency.
+    signed_scope = sign_retrieval_scope(request["scope"], settings.KNOWLEDGE_SCOPE_SECRET)
     public_request = {key: value for key, value in request.items() if key != "scope"}
     response = httpx.post(
         f"{settings.ENGINE_BASE_URL.rstrip('/')}/api/v1/internal/retrieval/query",
         json=public_request,
+        headers={"X-Prism-Knowledge-Scope": signed_scope},
         timeout=30.0,
     )
     response.raise_for_status()
@@ -67,6 +84,13 @@ def query_knowledge_base(
         "filters": body.filters.model_dump(mode="json"),
         "config": body.config.model_dump(mode="json"),
     }
+    if not settings.KNOWLEDGE_SCOPE_SECRET:
+        raise ApiProblem(
+            503,
+            "RETRIEVAL_UNAVAILABLE",
+            "Retrieval service is unavailable",
+            retryable=True,
+        )
     try:
         raw_result = call_engine_retrieval(request)
         result = EngineRetrievalEnvelope.model_validate(raw_result)
