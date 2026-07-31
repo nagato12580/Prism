@@ -186,6 +186,11 @@ docker compose --env-file .env.ecs-full -f docker-compose.ecs-full.yml ps
 - `backend`
 - `frontend`
 
+说明：
+
+- 当前部署文件里的 Neo4j 镜像已经固定为 `neo4j:5.26.28`。
+- 之前的 `neo4j:5.28.1` 在当前 Docker Hub 官方标签列表中不可用，拉取时会报 `denied` 或 `not found`。
+
 ## 8. 查看日志
 
 如果某个容器没有起来，查看完整日志：

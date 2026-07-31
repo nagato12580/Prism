@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
 
   neo4j:
-    image: neo4j:5.28.1
+    image: neo4j:5.26.28
     environment:
       NEO4J_AUTH: "${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-change-me}"
       NEO4J_initial_dbms_default__database: "${NEO4J_DATABASE:-neo4j}"
