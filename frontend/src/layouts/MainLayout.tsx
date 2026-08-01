@@ -19,7 +19,7 @@ import { memoryApi } from '@/app/api'
 
 const navItems = [
   { to: '/chat', label: '对话', icon: MessageSquare },
-  { to: '/inbox', label: '审核台', icon: Inbox },
+  { to: '/review', label: '审核台', icon: Inbox },
   { to: '/assets', label: '资产', icon: BookOpen },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
   { to: '/graph', label: '图谱', icon: Network },
@@ -71,10 +71,10 @@ function NavList({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: 
       <div className="px-2 text-[11px] font-medium text-slate-500">工作台</div>
       <div className="space-y-1">
         <NavItem
-          to="/inbox"
+          to="/review"
           label="审核台"
           icon={Inbox}
-          active={location.pathname === '/inbox' || location.pathname.startsWith('/inbox/')}
+          active={location.pathname === '/review' || location.pathname.startsWith('/review/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />

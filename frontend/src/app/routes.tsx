@@ -31,7 +31,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <ChatPage /> },
       { path: 'chat', element: <ChatPage /> },
-      { path: 'inbox', element: <InboxPage /> },
+      { path: 'review', element: <InboxPage /> },
       { path: 'assets', element: <AssetsPage /> },
       { path: 'graph', element: <KnowledgeGraphPage /> },
       {

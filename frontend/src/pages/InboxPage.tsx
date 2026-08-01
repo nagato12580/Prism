@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Inbox, Loader2, RefreshCw, Save, Search, Tags, X } from 'lucide-react'
+import { Check, Inbox, Loader2, RefreshCw, Save, Search, Sparkles, Tags, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { assetApi, type AssetDraft } from '@/app/api'
@@ -32,6 +32,8 @@ export function InboxPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [regenerationKey, setRegenerationKey] = useState(0)
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -109,8 +111,8 @@ export function InboxPage() {
       removeItemFromList(active.id)
       setNotice(
         opts.create_memory
-          ? '已确认入库，碎片已进入资产层、知识治理层并沉淀为长期记忆。'
-          : '已确认入库，碎片已进入资产层和知识治理层。',
+          ? '已确认入库，记录已进入资产层、知识治理层并沉淀为长期记忆。'
+          : '已确认入库，记录已进入资产层和知识治理层。',
       )
     } catch (err) {
       setError(`确认失败：${getErrorMessage(err)}`)
@@ -126,11 +128,26 @@ export function InboxPage() {
     try {
       await assetApi.deleteItem(active.id)
       removeItemFromList(active.id)
-      setNotice('已拒绝该碎片。')
+      setNotice('已拒绝该记录。')
     } catch (err) {
       setError(`拒绝失败：${getErrorMessage(err)}`)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const regenerateItem = async (itemId: string, rawText?: string, title?: string) => {
+    setRegeneratingId(itemId)
+    setError(null)
+    try {
+      const next = await assetApi.regenerateItem(itemId, { raw_text: rawText, title })
+      setItems((current) => current.map((item) => (item.id === next.id ? next : item)))
+      setRegenerationKey((k) => k + 1)
+      setNotice('已重新生成 AI 改写内容和摘要。')
+    } catch (err) {
+      setError(`重新生成失败：${getErrorMessage(err)}`)
+    } finally {
+      setRegeneratingId(null)
     }
   }
 
@@ -143,7 +160,7 @@ export function InboxPage() {
               <Inbox size={15} />
               <span>审核台</span>
             </div>
-            <h1 className="mt-1 text-base font-semibold text-slate-950">待确认碎片</h1>
+            <h1 className="mt-1 text-base font-semibold text-slate-950">待确认记录</h1>
           </div>
           <button
             type="button"
@@ -178,24 +195,44 @@ export function InboxPage() {
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
           {loading ? (
-            <StateBlock text="正在加载待确认碎片" />
+            <StateBlock text="正在加载待确认记录" />
           ) : filtered.length === 0 ? (
-            <StateBlock text="暂无待确认碎片。在对话页说「帮我记一下…」即可采集想法，稍后来这里确认入库。" />
+            <StateBlock text="暂无待确认记录。在对话页说「帮我记一下…」即可采集想法，稍后来这里确认入库。" />
           ) : (
             <div className="space-y-2">
               {filtered.map((item) => (
-                <button
+                <div
                   key={item.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setActiveId(item.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setActiveId(item.id) }}
                   className={cn(
-                    'w-full rounded-lg border bg-white p-2.5 text-left transition',
+                    'group relative w-full cursor-pointer rounded-lg border bg-white p-2.5 text-left transition',
                     activeId === item.id
                       ? 'border-[var(--prism-blue)] ring-2 ring-blue-100'
                       : 'border-[var(--prism-line)] hover:border-blue-200',
                   )}
                 >
-                  <div className="truncate text-[13px] font-semibold text-slate-950">{item.title}</div>
+                  <button
+                    type="button"
+                    disabled={regeneratingId === item.id}
+                    onClick={(e) => { e.stopPropagation(); regenerateItem(item.id) }}
+                    title="重新生成 AI 改写内容和摘要"
+                    className={cn(
+                      'absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md transition',
+                      regeneratingId === item.id
+                        ? 'bg-blue-50 text-[var(--prism-blue)]'
+                        : 'text-slate-300 opacity-0 group-hover:opacity-100 hover:bg-blue-50 hover:text-[var(--prism-blue)]',
+                    )}
+                  >
+                    {regeneratingId === item.id ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={13} />
+                    )}
+                  </button>
+                  <div className="truncate pr-8 text-[13px] font-semibold text-slate-950">{item.title}</div>
                   <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500">
                     {item.summary || item.raw_text}
                   </p>
@@ -210,7 +247,7 @@ export function InboxPage() {
                       </span>
                     ))}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -221,7 +258,10 @@ export function InboxPage() {
         <EditorPanel
           item={active}
           saving={saving}
+          regenerating={regeneratingId === active?.id}
+          regenerationKey={regenerationKey}
           onSave={updateActive}
+          onRegenerate={(rawText, title) => active && regenerateItem(active.id, rawText, title)}
           onConfirm={confirmActive}
           onReject={rejectActive}
         />
@@ -233,13 +273,19 @@ export function InboxPage() {
 function EditorPanel({
   item,
   saving,
+  regenerating,
+  regenerationKey,
   onSave,
+  onRegenerate,
   onConfirm,
   onReject,
 }: {
   item: AssetDraft | null
   saving: boolean
+  regenerating: boolean
+  regenerationKey: number
   onSave: (patch: Partial<AssetDraft>) => void
+  onRegenerate: (rawText: string, title: string) => void
   onConfirm: (opts: { create_memory: boolean }) => void
   onReject: () => void
 }) {
@@ -263,13 +309,13 @@ function EditorPanel({
     setAssetKind(item?.asset_kind ?? '')
     setTags(joinTags(item?.tags))
     setCreateMemory((item?.asset_kind ?? '').trim().toLowerCase() === 'memory')
-  }, [item?.id])
+  }, [item?.id, regenerationKey])
 
   if (!item) {
     return (
       <section className="prism-panel flex h-full min-h-0 flex-col items-center justify-center rounded-lg p-5 text-center">
         <Inbox size={34} className="mb-3 text-slate-300" />
-        <h2 className="text-sm font-semibold text-slate-950">选择或添加一个碎片</h2>
+        <h2 className="text-sm font-semibold text-slate-950">选择或添加一个记录</h2>
         <p className="mt-2 max-w-md text-xs leading-5 text-slate-500">
           想法从对话页采集，在这里确认后进入资产层。
         </p>
@@ -278,13 +324,23 @@ function EditorPanel({
   }
 
   return (
-    <section className="prism-panel flex min-h-0 flex-col overflow-hidden rounded-lg p-3">
-      <div className="mb-4 flex flex-col gap-3 border-b border-[var(--prism-line)] pb-4 lg:flex-row lg:items-center lg:justify-between">
+    <section className="prism-panel flex h-full min-h-0 flex-col overflow-hidden rounded-lg p-3">
+      <div className="flex flex-col gap-3 border-b border-[var(--prism-line)] pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="text-xs font-medium text-slate-500">编辑待确认碎片</div>
+          <div className="text-xs font-medium text-slate-500">编辑待确认记录</div>
           <h2 className="mt-1 truncate text-base font-semibold text-slate-950">{item.title}</h2>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={saving || regenerating}
+            onClick={() => onRegenerate(rawText, title)}
+            title="基于当前原始内容重新生成 AI 改写内容和摘要"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-purple-200 bg-white px-2.5 text-xs font-medium text-purple-600 transition hover:bg-purple-50 disabled:opacity-50"
+          >
+            {regenerating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            重新生成
+          </button>
           <button
             type="button"
             disabled={saving}
@@ -376,7 +432,7 @@ function EditorPanel({
               </div>
             </div>
             {rewrittenMode === 'preview' ? (
-              <div className="markdown-body min-h-24 rounded-lg border border-[var(--prism-line)] bg-slate-50 px-2.5 py-2 text-xs leading-5">
+              <div className="markdown-body max-h-80 overflow-y-auto rounded-lg border border-[var(--prism-line)] bg-slate-50 px-2.5 py-2 text-xs leading-5">
                 {rewrittenContent.trim() ? (
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{rewrittenContent}</ReactMarkdown>
                 ) : (

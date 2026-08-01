@@ -42,6 +42,7 @@ from ..schemas.asset import (
     AssetDraftOut,
     AssetDraftUpdate,
     AssetOverviewOut,
+    AssetRegenerateRequest,
     AssetSearchResult,
     PersonalAssetItemCreate,
     PersonalAssetItemOut,
@@ -580,6 +581,81 @@ def delete_asset_item(item_id: str, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return {"detail": "deleted"}
+
+
+@router.post("/items/{item_id}/regenerate", response_model=PersonalAssetItemOut)
+def regenerate_asset_item(item_id: str, payload: AssetRegenerateRequest | None = None, db: Session = Depends(get_db)):
+    """调用 AI 重新规范化记录的 Markdown 改写内容和摘要。
+
+    使用请求体中的 raw_text（未提供则从数据库读取）调用 capture_normalize LLM，
+    覆盖 rewritten_content 和 summary 字段。其他字段仅在 LLM 返回有效新值时才更新。
+    """
+    item = db.query(PersonalAssetItem).filter(
+        PersonalAssetItem.id == item_id,
+        PersonalAssetItem.user_id == DEFAULT_USER_ID,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail={"code": "asset_item_not_found", "message": "Personal asset item not found"})
+    if item.status != "pending_review":
+        raise HTTPException(status_code=409, detail={"code": "asset_item_closed", "message": "Only pending asset items can be regenerated"})
+
+    raw_text = ((payload.raw_text or "").strip() if payload and payload.raw_text else item.raw_text).strip()
+    title_hint = ((payload.title or "").strip() if payload and payload.title else (item.raw_title or "")).strip()
+
+    from ..prompts.asset_parse import build_capture_normalize_messages
+
+    try:
+        system_prompt, user_message = build_capture_normalize_messages(
+            content=raw_text,
+            title=title_hint,
+        )
+        client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
+        resp = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.2,
+        )
+        data = _parse_json_object(resp.choices[0].message.content or "")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "regenerate_failed", "message": f"AI 重新生成失败：{exc}"},
+        ) from exc
+
+    content_md = str(data.get("content_md") or "").strip()
+    summary = str(data.get("summary") or "").strip()
+    if not content_md:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "regenerate_empty", "message": "AI 返回的内容为空，请稍后重试"},
+        )
+
+    item.rewritten_content = content_md
+    if summary:
+        item.summary = summary
+    new_title = str(data.get("title") or "").strip()
+    if new_title:
+        item.title = new_title[:255]
+    new_kind = str(data.get("asset_kind") or "").strip()
+    if new_kind:
+        item.asset_kind = new_kind[:64]
+    new_category = str(data.get("category") or "").strip()
+    if new_category:
+        item.category = new_category[:128]
+    new_tags = data.get("tags")
+    if isinstance(new_tags, list):
+        item.tags = _clean_tags(new_tags)
+    item.edited_at = local_now()
+    item.keyword_index_text = _keyword_index_text(
+        item.raw_title, item.raw_text, item.raw_tags, item.raw_keywords,
+        item.title, item.summary, item.rewritten_content, item.tags, item.category,
+    )
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 @router.post("/items/{item_id}/confirm", response_model=AssetConfirmResponse)

@@ -816,6 +816,11 @@ export const assetApi = {
     }),
   deleteItem: (id: string) =>
     request<{ detail: string }>(`/assets/items/${id}`, { method: 'DELETE' }),
+  regenerateItem: (id: string, data?: { raw_text?: string; title?: string }) =>
+    request<AssetDraft>(`/assets/items/${id}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    }),
   confirmItem: (
     id: string,
     data?: {

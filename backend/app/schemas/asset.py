@@ -190,6 +190,11 @@ class PersonalAssetUnitOut(BaseModel):
         from_attributes = True
 
 
+class AssetRegenerateRequest(BaseModel):
+    raw_text: str | None = None
+    title: str | None = None
+
+
 class PersonalAssetUnitConfirmResponse(BaseModel):
     unit: PersonalAssetUnitOut
     pku_count: int = 0
