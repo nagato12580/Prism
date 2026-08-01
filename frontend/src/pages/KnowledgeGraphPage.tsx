@@ -1,6 +1,8 @@
 import React, { type PointerEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Boxes,
+  ChevronDown,
+  ChevronUp,
   FileText,
   Loader2,
   Maximize2,
@@ -53,6 +55,7 @@ const maxExplorerDepth = 3
 const defaultVisibleSeedLimit = 4
 const defaultVisibleSeedNeighborDepth = 1
 const defaultVisibleSeedMinNodeCount = 12
+const inspectorTitleMaxLength = 72
 const floatingSurfaceMotionClass = 'transition-[transform,opacity,box-shadow] duration-200 ease-out'
 const graphControlFocusClass =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] focus-visible:ring-offset-2 focus-visible:ring-offset-white/80'
@@ -484,6 +487,28 @@ function omitViewEntries<T>(record: Record<string, T>, view: UnifiedGraphView) {
 
 function nodeContent(node: UnifiedGraphNode) {
   return node.text || node.summary || ''
+}
+
+function compactInspectorTitle(value: string | null | undefined) {
+  return truncate(value, inspectorTitleMaxLength)
+}
+
+function searchMatchRanges(text: string, query: string) {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return []
+
+  const normalizedText = text.toLocaleLowerCase()
+  const ranges: Array<{ start: number; end: number }> = []
+  let cursor = 0
+
+  while (cursor < text.length) {
+    const index = normalizedText.indexOf(normalizedQuery, cursor)
+    if (index === -1) break
+    ranges.push({ start: index, end: index + normalizedQuery.length })
+    cursor = index + Math.max(normalizedQuery.length, 1)
+  }
+
+  return ranges
 }
 
 function nodeDetailType(node: UnifiedGraphNode) {
@@ -1563,6 +1588,27 @@ function GraphInspector({
     [edgeExplains],
   )
   const retrievalExplain = useMemo(() => (node ? chooseInspectorExplain(node, edges) : null), [node, edges])
+  const [entitySearch, setEntitySearch] = useState('')
+  const [activeEntityMatch, setActiveEntityMatch] = useState(0)
+  const activeEntityMatchRef = useRef<HTMLElement | null>(null)
+  const entityLabel = node?.label ?? ''
+  const entityMatches = searchMatchRanges(entityLabel, entitySearch)
+  const safeActiveEntityMatch = entityMatches.length ? clamp(activeEntityMatch, 0, entityMatches.length - 1) : 0
+
+  useEffect(() => {
+    setEntitySearch('')
+    setActiveEntityMatch(0)
+  }, [node?.id])
+
+  useEffect(() => {
+    if (activeEntityMatch !== safeActiveEntityMatch) {
+      setActiveEntityMatch(safeActiveEntityMatch)
+    }
+  }, [activeEntityMatch, safeActiveEntityMatch])
+
+  useEffect(() => {
+    activeEntityMatchRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [safeActiveEntityMatch, entitySearch])
 
   if (!node) {
     return null
@@ -1572,10 +1618,12 @@ function GraphInspector({
   const TypeIcon = meta.icon
   const isFocusNode = focusRoot?.id === node.id
   const nodeDistance = focusDistances.get(node.id)
-  const explorerHeading = isFocusNode ? '当前节点是探索中心' : `围绕 ${focusRoot?.label ?? node.label} 继续探索`
+  const nodeTitle = compactInspectorTitle(node.label)
+  const focusRootTitle = compactInspectorTitle(focusRoot?.label ?? node.label)
+  const explorerHeading = isFocusNode ? '当前节点是探索中心' : `围绕 ${focusRootTitle} 继续探索`
   const explorerSummary = isFocusNode
-    ? `${node.label} 是当前探索中心。你正在查看它在 ${focusDepth}-hop 范围内关联到的实体、文档证据和个人资产证据。`
-    : `${node.label} 当前位于 ${focusRoot?.label ?? node.label} 的 ${distanceLabel(nodeDistance ?? 1)} 范围内，可以继续展开或重新聚焦。`
+    ? `${nodeTitle} 是当前探索中心。你正在查看它在 ${focusDepth}-hop 范围内关联到的实体、文档证据和个人资产证据。`
+    : `${nodeTitle} 当前位于 ${focusRootTitle} 的 ${distanceLabel(nodeDistance ?? 1)} 范围内，可以继续展开或重新聚焦。`
   const explorerHint = isFocusNode
     ? '重新聚焦会把当前节点设为新的中心，并重置到 1-hop 视图。'
     : '如果想让当前节点成为新的探索中心，使用[重新聚焦]；如果想保留现有焦点并继续向外看，使用[展开更多关联]。'
@@ -1591,7 +1639,9 @@ function GraphInspector({
         </span>
         <div className="min-w-0">
           <div className="text-xs font-medium text-slate-500">{meta.label}</div>
-          <h2 className="mt-1 break-words text-base font-semibold leading-6 text-slate-950">{node.label}</h2>
+          <h2 className="mt-1 break-words text-base font-semibold leading-6 text-slate-950" title={node.label}>
+            {nodeTitle}
+          </h2>
           <p className="mt-1 text-xs leading-5 text-slate-500">
             {view === 'entity'
               ? '当前位于实体中心视图，右侧以实体与来源证据的连接为主。'
@@ -1615,6 +1665,24 @@ function GraphInspector({
       </div>
 
       <div data-testid="graph-inspector-scroll" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+        <EntityContentSearchBox
+          label={meta.label}
+          value={node.label}
+          search={entitySearch}
+          activeMatch={safeActiveEntityMatch}
+          matchRanges={entityMatches}
+          activeMatchRef={(element) => {
+            activeEntityMatchRef.current = element
+          }}
+          onSearchChange={(value) => {
+            setEntitySearch(value)
+            setActiveEntityMatch(0)
+          }}
+          onStep={(direction) => {
+            if (!entityMatches.length) return
+            setActiveEntityMatch((current) => (current + direction + entityMatches.length) % entityMatches.length)
+          }}
+        />
         <div className="rounded-lg border border-[var(--prism-line)] bg-slate-50 px-3 py-3">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -1660,21 +1728,23 @@ function GraphInspector({
               <span className="text-xs text-slate-500">No more related nodes are available for the current focus depth.</span>
             ) : (
               explorerNodes.map((relatedNode) => (
-                <button
-                  key={`explorer-${relatedNode.id}`}
-                  type="button"
-                  onClick={() => onSelectNode(relatedNode.id)}
-                  className={cn(
-                    'rounded-full border border-[var(--prism-line)] bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50',
-                    graphControlTransitionClass,
-                    graphControlFocusClass,
-                  )}
-                >
-                  {relatedNode.label}
-                  <span className="ml-1 text-[10px] text-slate-400">
-                    {distanceLabel(focusDistances.get(relatedNode.id) ?? 1)}
-                  </span>
-                </button>
+                  <button
+                    key={`explorer-${relatedNode.id}`}
+                    type="button"
+                    onClick={() => onSelectNode(relatedNode.id)}
+                    className={cn(
+                      'inline-flex max-w-full items-center rounded-full border border-[var(--prism-line)] bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50',
+                      graphControlTransitionClass,
+                      graphControlFocusClass,
+                    )}
+                  >
+                    <span className="max-w-full truncate" title={relatedNode.label}>
+                      {compactInspectorTitle(relatedNode.label)}
+                    </span>
+                    <span className="ml-1 text-[10px] text-slate-400">
+                      {distanceLabel(focusDistances.get(relatedNode.id) ?? 1)}
+                    </span>
+                  </button>
               ))
             )}
           </div>
@@ -1733,18 +1803,20 @@ function GraphInspector({
           ) : (
             <div className="flex flex-wrap gap-2">
               {relatedNodes.map((relatedNode) => (
-                <button
-                  key={relatedNode.id}
-                  type="button"
-                  onClick={() => onSelectNode(relatedNode.id)}
-                  className={cn(
-                    'rounded-full border border-[var(--prism-line)] bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50',
-                    graphControlTransitionClass,
-                    graphControlFocusClass,
-                  )}
-                >
-                  {relatedNode.label}
-                </button>
+                  <button
+                    key={relatedNode.id}
+                    type="button"
+                    onClick={() => onSelectNode(relatedNode.id)}
+                    className={cn(
+                      'inline-flex max-w-full items-center rounded-full border border-[var(--prism-line)] bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50',
+                      graphControlTransitionClass,
+                      graphControlFocusClass,
+                    )}
+                  >
+                    <span className="max-w-full truncate" title={relatedNode.label}>
+                      {compactInspectorTitle(relatedNode.label)}
+                    </span>
+                  </button>
               ))}
             </div>
           )}
@@ -1766,7 +1838,9 @@ function GraphInspector({
                       <Network size={13} />
                       {edgeDescription(edge)}
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900">{other?.label ?? otherId}</div>
+                      <div className="mt-1 break-words text-sm font-semibold text-slate-900" title={other?.label ?? otherId}>
+                        {compactInspectorTitle(other?.label ?? otherId)}
+                      </div>
                     {edge.reason ? <div className="mt-1 text-xs leading-5 text-slate-500">{edge.reason}</div> : null}
                     {edgeExplain ? (
                       <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
@@ -1832,6 +1906,122 @@ function GraphCanvasGuidance({ hasGraphData = true }: { hasGraphData?: boolean }
         </button>
       </div>
     </div>
+  )
+}
+
+function EntityContentSearchBox({
+  label,
+  value,
+  search,
+  activeMatch,
+  matchRanges,
+  activeMatchRef,
+  onSearchChange,
+  onStep,
+}: {
+  label: string
+  value: string
+  search: string
+  activeMatch: number
+  matchRanges: Array<{ start: number; end: number }>
+  activeMatchRef: (element: HTMLElement | null) => void
+  onSearchChange: (value: string) => void
+  onStep: (direction: number) => void
+}) {
+  const matchCount = matchRanges.length
+  const hasSearch = Boolean(search.trim())
+  const pieces: React.ReactNode[] = []
+  let cursor = 0
+
+  matchRanges.forEach((range, index) => {
+    if (range.start > cursor) {
+      pieces.push(value.slice(cursor, range.start))
+    }
+    pieces.push(
+      <mark
+        key={`${range.start}-${range.end}-${index}`}
+        ref={index === activeMatch ? activeMatchRef : undefined}
+        className={cn(
+          'rounded px-0.5',
+          index === activeMatch ? 'bg-amber-300 text-slate-950' : 'bg-amber-100 text-slate-900',
+        )}
+      >
+        {value.slice(range.start, range.end)}
+      </mark>,
+    )
+    cursor = range.end
+  })
+
+  if (cursor < value.length) {
+    pieces.push(value.slice(cursor))
+  }
+
+  return (
+    <section
+      data-testid="graph-inspector-entity-search"
+      className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-3"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-medium text-slate-500">{label}内容</div>
+        <div className="text-[11px] text-slate-500">
+          {hasSearch ? (matchCount ? `${activeMatch + 1}/${matchCount}` : '0/0') : `${value.length} 字符`}
+        </div>
+      </div>
+
+      <div className="mt-2 flex items-center gap-1.5">
+        <label className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="搜索实体内容"
+            className={cn(
+              'h-8 w-full rounded-lg border border-[var(--prism-line)] bg-slate-50 pl-7 pr-2 text-xs text-slate-800 placeholder:text-slate-400',
+              graphInputFocusClass,
+            )}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => onStep(-1)}
+          disabled={!matchCount}
+          className={cn(
+            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border',
+            graphControlTransitionClass,
+            graphControlFocusClass,
+            matchCount
+              ? 'border-[var(--prism-line)] bg-white text-slate-600 hover:bg-slate-100'
+              : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400',
+          )}
+          aria-label="上一个匹配"
+          title="上一个匹配"
+        >
+          <ChevronUp size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onStep(1)}
+          disabled={!matchCount}
+          className={cn(
+            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border',
+            graphControlTransitionClass,
+            graphControlFocusClass,
+            matchCount
+              ? 'border-[var(--prism-line)] bg-white text-slate-600 hover:bg-slate-100'
+              : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400',
+          )}
+          aria-label="下一个匹配"
+          title="下一个匹配"
+        >
+          <ChevronDown size={14} />
+        </button>
+      </div>
+
+      <div className="mt-2 max-h-32 min-h-20 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
+        <p className="whitespace-pre-wrap break-words">{matchCount ? pieces : value}</p>
+      </div>
+    </section>
   )
 }
 

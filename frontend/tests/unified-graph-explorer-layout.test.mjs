@@ -177,6 +177,26 @@ assert.match(
   /data-testid="graph-inspector-scroll"[\s\S]*min-h-0 flex-1[\s\S]*overflow-y-auto/,
   'Inspector details should own a vertical scroll region so long node content remains reachable.',
 )
+assert.match(
+  pageSource,
+  /data-testid="graph-inspector-entity-search"/,
+  'Inspector should render the selected entity label in its own searchable scroll box.',
+)
+assert.match(
+  pageSource,
+  /placeholder="搜索实体内容"/,
+  'Inspector entity search box should expose an inline search input.',
+)
+assert.match(
+  pageSource,
+  /aria-label="上一个匹配"[\s\S]*aria-label="下一个匹配"/,
+  'Inspector entity search box should let users move through matches vertically.',
+)
+assert.match(
+  pageSource,
+  /const nodeTitle = compactInspectorTitle\(node\.label\)/,
+  'Inspector header should use a compact title so long extracted entity text does not consume the drawer.',
+)
 assert.match(html, /\u91cd\u65b0\u805a\u7126/, 'Graph page should expose a refocus action at runtime.')
 assert.match(html, /\u5c55\u5f00\u66f4\u591a\u5173\u8054/, 'Graph page should expose an expand-more action at runtime.')
 assert.match(
