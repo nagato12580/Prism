@@ -302,7 +302,7 @@ def _resolve_search_scope(topic_id: str | None, source_types: list[str] | None =
 
     db = _Session()
     try:
-        topic = db.query(KnowledgeTopic).filter(KnowledgeTopic.id == topic_id).one_or_none()
+        topic = db.query(KnowledgeTopic).filter(KnowledgeTopic.kb_uid == topic_id).one_or_none()
         if topic is None or not topic.active_index_generation:
             return None
         return SearchScope(

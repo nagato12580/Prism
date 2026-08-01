@@ -21,7 +21,7 @@ export function buildChatRequestPayload({
 }: BuildChatRequestPayloadArgs) {
   return {
     query,
-    kb_uids: [effectiveTopicId],
+    topic_id: effectiveTopicId,
     history,
     session_id: sessionId,
     user_message_id: engineUserMessageId,
