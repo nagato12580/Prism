@@ -356,7 +356,7 @@ def project_asset_unit_entities(db, graph, asset_unit_id: str, user_id: str = "d
             relation.object_entity_id,
             _relation_props(
                 relation,
-                ["predicate", "confidence", "evidence_span", "extraction_method"],
+                ["predicate", "confidence", "evidence_span", "extraction_method", "source_kind", "source_id"],
             ),
         )
         edges += 1

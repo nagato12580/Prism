@@ -13,7 +13,9 @@ from ..models import (
     EntityRelation,
     KnowledgeChunk,
     KnowledgeEntity,
+    KnowledgeFile,
     KnowledgeItem,
+    KnowledgeTopic,
     PersonalAssetUnit,
 )
 from ..services.graph_client import GraphClient
@@ -22,6 +24,42 @@ from ..services.graph_client import GraphClient
 router = APIRouter(prefix="/unified-graph", tags=["unified-graph"])
 DEFAULT_USER_ID = "default-user"
 UnifiedGraphView = Literal["entity", "source"]
+
+
+def _active_graph_scopes(db: Session) -> list[tuple[str, str, str]]:
+    rows = (
+        db.query(KnowledgeTopic.tenant_id, KnowledgeTopic.kb_uid, KnowledgeTopic.active_graph_generation)
+        .filter(
+            KnowledgeTopic.deleted_at.is_(None),
+            KnowledgeTopic.active_graph_generation.isnot(None),
+        )
+        .all()
+    )
+    return [
+        (tenant_id, kb_uid, generation)
+        for tenant_id, kb_uid, generation in rows
+        if tenant_id and kb_uid and generation
+    ]
+
+
+def _active_scope_filter(model, scopes: list[tuple[str, str, str]]):
+    return or_(
+        *[
+            (
+                (model.tenant_id == tenant_id)
+                & (model.kb_uid == kb_uid)
+                & (model.graph_generation == generation)
+            )
+            for tenant_id, kb_uid, generation in scopes
+        ]
+    )
+
+
+def _entity_scope_filter(scopes: list[tuple[str, str, str]]):
+    clauses = [KnowledgeEntity.user_id == DEFAULT_USER_ID]
+    if scopes:
+        clauses.append(_active_scope_filter(KnowledgeEntity, scopes))
+    return or_(*clauses)
 
 
 def _node(node_id: str, node_type: str, label: str, **extra: Any) -> dict[str, Any]:
@@ -62,37 +100,57 @@ def _entity_node(entity: KnowledgeEntity) -> dict[str, Any]:
         description=entity.description,
         confidence=entity.confidence,
         status=entity.status,
+        tenant_id=entity.tenant_id,
+        kb_uid=entity.kb_uid,
+        graph_generation=entity.graph_generation,
     )
 
 
 def _source_lookup(
     db: Session,
     mentions: list[EntityMention],
-) -> tuple[dict[str, KnowledgeChunk], dict[str, KnowledgeItem], dict[str, PersonalAssetUnit]]:
+) -> tuple[dict[str, KnowledgeChunk], dict[str, KnowledgeItem], dict[str, KnowledgeFile], dict[str, KnowledgeTopic], dict[str, PersonalAssetUnit]]:
     chunk_ids = {mention.source_id for mention in mentions if mention.source_kind == "document_chunk"}
     unit_ids = {mention.source_id for mention in mentions if mention.source_kind == "personal_asset_unit"}
 
     chunks = (
         db.query(KnowledgeChunk)
-        .filter(KnowledgeChunk.id.in_(chunk_ids))
+        .filter(or_(KnowledgeChunk.id.in_(chunk_ids), KnowledgeChunk.chunk_uid.in_(chunk_ids)))
         .all()
         if chunk_ids
         else []
     )
     chunk_by_id = {chunk.id: chunk for chunk in chunks}
+    chunk_by_id.update({chunk.chunk_uid: chunk for chunk in chunks})
 
     item_ids = {chunk.item_id for chunk in chunks if chunk.item_id}
     items = (
         db.query(KnowledgeItem)
-        .filter(
-            KnowledgeItem.id.in_(item_ids),
-            KnowledgeItem.user_id == DEFAULT_USER_ID,
-        )
+        .filter(KnowledgeItem.id.in_(item_ids))
         .all()
         if item_ids
         else []
     )
     item_by_id = {item.id: item for item in items}
+    file_uids = {chunk.file_uid for chunk in chunks if chunk.file_uid}
+    files = (
+        db.query(KnowledgeFile)
+        .filter(KnowledgeFile.file_uid.in_(file_uids))
+        .all()
+        if file_uids
+        else []
+    )
+    file_by_uid = {file_row.file_uid: file_row for file_row in files}
+    topic_uids = {chunk.kb_uid for chunk in chunks if chunk.kb_uid}
+    topic_uids.update(file_row.kb_uid for file_row in files if file_row.kb_uid)
+    topics = (
+        db.query(KnowledgeTopic)
+        .filter(KnowledgeTopic.kb_uid.in_(topic_uids))
+        .all()
+        if topic_uids
+        else []
+    )
+    topic_by_uid = {topic.kb_uid: topic for topic in topics}
 
     units = (
         db.query(PersonalAssetUnit)
@@ -106,7 +164,7 @@ def _source_lookup(
     )
     unit_by_id = {unit.id: unit for unit in units}
 
-    return chunk_by_id, item_by_id, unit_by_id
+    return chunk_by_id, item_by_id, file_by_uid, topic_by_uid, unit_by_id
 
 
 def _source_node(
@@ -116,14 +174,23 @@ def _source_node(
     view: UnifiedGraphView,
     chunk_by_id: dict[str, KnowledgeChunk],
     item_by_id: dict[str, KnowledgeItem],
+    file_by_uid: dict[str, KnowledgeFile],
+    topic_by_uid: dict[str, KnowledgeTopic],
     unit_by_id: dict[str, PersonalAssetUnit],
 ) -> dict[str, Any]:
     chunk = chunk_by_id.get(source_id)
     item = item_by_id.get(chunk.item_id) if chunk else None
+    file_row = file_by_uid.get(chunk.file_uid) if chunk else None
+    topic = topic_by_uid.get(chunk.kb_uid) if chunk else None
     unit = unit_by_id.get(source_id)
 
     if source_kind == "document_chunk":
-        label = item.title if item and item.title else source_id
+        label = (
+            file_row.title
+            or file_row.original_filename
+            if file_row
+            else item.title if item and item.title else source_id
+        )
         node_type = "document_chunk"
         node_id = f"chunk:{source_id}"
         return _node(
@@ -134,6 +201,11 @@ def _source_node(
             source_kind=source_kind,
             source_id=source_id,
             item_id=chunk.item_id if chunk else None,
+            file_uid=chunk.file_uid if chunk else None,
+            kb_uid=chunk.kb_uid if chunk else None,
+            tenant_id=chunk.tenant_id if chunk else None,
+            graph_generation=chunk.generation if chunk else None,
+            knowledge_base=topic.name if topic else None,
             text=chunk.chunk_text if chunk else None,
             chunk_type=chunk.chunk_type if chunk else None,
             category=item.category if item else "",
@@ -190,8 +262,9 @@ def _build_stats(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, An
 
 
 def _focused_entities(db: Session, q: str | None, limit: int) -> list[KnowledgeEntity]:
+    scopes = _active_graph_scopes(db)
     query = db.query(KnowledgeEntity).filter(
-        KnowledgeEntity.user_id == DEFAULT_USER_ID,
+        _entity_scope_filter(scopes),
         KnowledgeEntity.status != "deprecated",
     )
 
@@ -259,7 +332,7 @@ def _empty_payload(view: UnifiedGraphView, q: str | None) -> dict[str, Any]:
 def get_unified_graph(
     view: UnifiedGraphView = Query("entity"),
     q: Optional[str] = Query(None),
-    limit: int = Query(24, ge=1, le=100),
+    limit: int = Query(120, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
     normalized_q = _normalize_query(q)
@@ -281,7 +354,7 @@ def get_unified_graph(
         .all()
     )
 
-    chunk_by_id, item_by_id, unit_by_id = _source_lookup(db, mentions)
+    chunk_by_id, item_by_id, file_by_uid, topic_by_uid, unit_by_id = _source_lookup(db, mentions)
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[str, dict[str, Any]] = {}
 
@@ -295,6 +368,8 @@ def get_unified_graph(
             view=view,
             chunk_by_id=chunk_by_id,
             item_by_id=item_by_id,
+            file_by_uid=file_by_uid,
+            topic_by_uid=topic_by_uid,
             unit_by_id=unit_by_id,
         )
         nodes[source["id"]] = source

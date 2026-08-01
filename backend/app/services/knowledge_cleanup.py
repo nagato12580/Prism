@@ -123,7 +123,16 @@ class KnowledgeCleanupService:
         job.result = prior
         self.db.commit()
 
-    def _delete_graph_rows(self, tenant_id, kb_uid, item_id, chunk_ids):
+    def _delete_graph_rows(self, file_row, tenant_id, kb_uid, item_id, chunk_ids):
+        if file_row.source_kind == "personal_asset_unit" and file_row.source_id:
+            from backend.app.services.personal_inbox import purge_personal_asset_unit_graph_artifacts
+
+            purge_personal_asset_unit_graph_artifacts(
+                self.db,
+                file_row.source_id,
+                user_id=file_row.user_id or "default-user",
+                graph_client=self.graph_client,
+            )
         if not item_id:
             return
         self.db.query(EntityRelation).filter(
@@ -184,7 +193,7 @@ class KnowledgeCleanupService:
                 elif checkpoint == "graph_deleted":
                     # The durable delete Job + checkpoint is the recoverable
                     # intent until the later Graph Plan introduces an Outbox.
-                    self._delete_graph_rows(job.tenant_id, job.kb_uid, item_id, chunk_ids)
+                    self._delete_graph_rows(file_row, job.tenant_id, job.kb_uid, item_id, chunk_ids)
                 elif checkpoint == "storage_deleted":
                     if file_row.storage_uri:
                         self.storage.delete(file_row.storage_uri)

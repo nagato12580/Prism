@@ -4,13 +4,23 @@ from hashlib import sha256
 import logging
 from pathlib import Path
 from re import sub
+from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
-from backend.app.models import KnowledgeFile, KnowledgeTopic, PersonalAssetItem, PersonalAssetUnit
+from backend.app.models import (
+    EntityAlias,
+    EntityMention,
+    EntityRelation,
+    KnowledgeEntity,
+    KnowledgeFile,
+    KnowledgeTopic,
+    PersonalAssetItem,
+    PersonalAssetUnit,
+)
 from backend.app.models.knowledge_types import StageStatus
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
 from backend.app.services.knowledge_uploads import RedisJobPublisher
@@ -19,6 +29,9 @@ from backend.app.utils.time import local_now
 
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from backend.app.services.graph_client import GraphClient
 
 PERSONAL_INBOX_NAME = "个人随手记"
 PERSONAL_INBOX_SYSTEM_TYPE = "personal_inbox"
@@ -306,6 +319,105 @@ def delete_personal_inbox_file_cascade(
         commit=False,
     )
     return job
+
+
+def purge_personal_asset_unit_graph_artifacts(
+    db: Session,
+    unit_id: str,
+    *,
+    user_id: str,
+    graph_client: GraphClient | None = None,
+) -> dict[str, int]:
+    """Remove MySQL and legacy Neo4j graph artifacts derived from one unit.
+
+    Personal asset units still use the legacy unscoped entity extraction path.
+    This cleanup is intentionally source-scoped and only deletes entities when
+    they become orphaned after removing the unit's mentions and relations.
+    """
+    if not unit_id:
+        return {"mentions": 0, "relations": 0, "entities": 0}
+
+    relation_rows = (
+        db.query(EntityRelation)
+        .filter(
+            EntityRelation.source_kind == PERSONAL_ASSET_UNIT_SOURCE_KIND,
+            EntityRelation.source_id == unit_id,
+        )
+        .all()
+    )
+    mention_rows = (
+        db.query(EntityMention)
+        .filter(
+            EntityMention.source_kind == PERSONAL_ASSET_UNIT_SOURCE_KIND,
+            EntityMention.source_id == unit_id,
+        )
+        .all()
+    )
+    candidate_entity_ids = {
+        mention.entity_id
+        for mention in mention_rows
+        if mention.entity_id
+    }
+    for relation in relation_rows:
+        if relation.subject_entity_id:
+            candidate_entity_ids.add(relation.subject_entity_id)
+        if relation.object_entity_id:
+            candidate_entity_ids.add(relation.object_entity_id)
+
+    relation_count = len(relation_rows)
+    mention_count = len(mention_rows)
+    for relation in relation_rows:
+        db.delete(relation)
+    for mention in mention_rows:
+        db.delete(mention)
+    db.flush()
+
+    entity_count = 0
+    for entity_id in sorted(candidate_entity_ids):
+        still_mentioned = db.query(EntityMention.id).filter_by(entity_id=entity_id).first()
+        still_related = (
+            db.query(EntityRelation.id)
+            .filter(
+                (EntityRelation.subject_entity_id == entity_id)
+                | (EntityRelation.object_entity_id == entity_id)
+            )
+            .first()
+        )
+        if still_mentioned or still_related:
+            continue
+        db.query(EntityAlias).filter_by(entity_id=entity_id).delete(synchronize_session=False)
+        entity = db.query(KnowledgeEntity).filter_by(id=entity_id, user_id=user_id).one_or_none()
+        if entity is None:
+            continue
+        db.delete(entity)
+        entity_count += 1
+    db.flush()
+
+    owns_graph = graph_client is None
+    if graph_client is None:
+        from backend.app.services.graph_client import GraphClient
+
+        graph = GraphClient()
+    else:
+        graph = graph_client
+    try:
+        graph.delete_personal_asset_unit_graph(
+            unit_id,
+            user_id=user_id,
+            entity_ids=sorted(candidate_entity_ids),
+        )
+    finally:
+        if owns_graph:
+            graph.close()
+
+    logger.info(
+        "[personal_inbox] purged asset_unit_graph unit_id=%s mentions=%s relations=%s entities=%s",
+        unit_id,
+        mention_count,
+        relation_count,
+        entity_count,
+    )
+    return {"mentions": mention_count, "relations": relation_count, "entities": entity_count}
 
 
 def _personal_inbox_file_is_current(

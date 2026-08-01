@@ -21,7 +21,7 @@ from engine.app.config import settings
 from engine.app.ingestion.pipeline import ingest_item
 
 from . import redis_queue
-from .knowledge_handlers import handle_delete, handle_index, handle_parse
+from .knowledge_handlers import handle_delete, handle_graph, handle_index, handle_parse
 from .evaluation_handlers import handle_evaluation
 from .enrichment_handlers import JOB_TYPES as ENRICHMENT_JOB_TYPES, handle_enrichment
 
@@ -115,6 +115,8 @@ def dispatch_typed_job(db, job_id, worker_id):
         )
     if job.job_type == "index":
         return handle_index(job_id, worker_id, db, KnowledgeJobService(db))
+    if job.job_type == "graph":
+        return handle_graph(job_id, worker_id, db, KnowledgeJobService(db))
     if job.job_type == "evaluation":
         return handle_evaluation(job_id, worker_id, db, KnowledgeJobService(db))
     if job.job_type in ENRICHMENT_JOB_TYPES:
@@ -131,7 +133,7 @@ def run_ingest_queue_job(job_id, *, worker_id):
     db = _Session()
     try:
         job_type = db.query(KnowledgeJob.job_type).filter(KnowledgeJob.id == job_id).scalar()
-        if job_type in {"parse", "delete", "index", "evaluation", *ENRICHMENT_JOB_TYPES}:
+        if job_type in {"parse", "delete", "index", "graph", "evaluation", *ENRICHMENT_JOB_TYPES}:
             return dispatch_typed_job(db, job_id, worker_id)
     finally:
         db.close()

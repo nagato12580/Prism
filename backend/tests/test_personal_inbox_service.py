@@ -162,6 +162,87 @@ def test_sync_unconfirmed_unit_raises_value_error_and_creates_no_file(db_session
     assert rows == []
 
 
+def test_purge_personal_asset_unit_graph_artifacts_deletes_source_scoped_facts_and_orphans(db_session):
+    from backend.app.models import EntityMention, EntityRelation, KnowledgeEntity
+    from backend.app.services.personal_inbox import purge_personal_asset_unit_graph_artifacts
+
+    orphan = KnowledgeEntity(
+        id="entity-orphan",
+        user_id="user-a",
+        entity_type="concept",
+        canonical_name="Orphan",
+        normalized_key="orphan",
+    )
+    shared = KnowledgeEntity(
+        id="entity-shared",
+        user_id="user-a",
+        entity_type="concept",
+        canonical_name="Shared",
+        normalized_key="shared",
+    )
+    db_session.add_all([orphan, shared])
+    db_session.flush()
+    own_mention = EntityMention(
+        id="mention-own",
+        entity_id=orphan.id,
+        source_kind="personal_asset_unit",
+        source_id="unit-a",
+        item_id="unit-a",
+        surface_text="Orphan",
+        normalized_key="orphan",
+    )
+    shared_mention = EntityMention(
+        id="mention-shared",
+        entity_id=shared.id,
+        source_kind="personal_asset_unit",
+        source_id="unit-a",
+        item_id="unit-a",
+        surface_text="Shared",
+        normalized_key="shared",
+    )
+    other_mention = EntityMention(
+        id="mention-other",
+        entity_id=shared.id,
+        source_kind="personal_asset_unit",
+        source_id="unit-b",
+        item_id="unit-b",
+        surface_text="Shared",
+        normalized_key="shared",
+    )
+    own_relation = EntityRelation(
+        id="relation-own",
+        subject_entity_id=orphan.id,
+        predicate="related_to",
+        object_entity_id=shared.id,
+        source_kind="personal_asset_unit",
+        source_id="unit-a",
+    )
+    db_session.add_all([own_mention, shared_mention, other_mention, own_relation])
+    db_session.commit()
+
+    class Graph:
+        calls = []
+
+        def delete_personal_asset_unit_graph(self, unit_id, *, user_id, entity_ids=None):
+            self.calls.append((unit_id, user_id, tuple(entity_ids or ())))
+
+    graph = Graph()
+    result = purge_personal_asset_unit_graph_artifacts(
+        db_session,
+        "unit-a",
+        user_id="user-a",
+        graph_client=graph,
+    )
+
+    assert result == {"mentions": 2, "relations": 1, "entities": 1}
+    assert db_session.get(EntityMention, "mention-own") is None
+    assert db_session.get(EntityMention, "mention-shared") is None
+    assert db_session.get(EntityRelation, "relation-own") is None
+    assert db_session.get(KnowledgeEntity, "entity-orphan") is None
+    assert db_session.get(KnowledgeEntity, "entity-shared") is not None
+    assert graph.calls == [("unit-a", "user-a", ("entity-orphan", "entity-shared"))]
+
+
 def test_sync_rejects_unit_owned_by_another_user(db_session, tmp_path, monkeypatch):
     from backend.app.models import KnowledgeFile, PersonalAssetUnit
     from backend.app.services import personal_inbox

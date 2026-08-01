@@ -23,6 +23,7 @@ export interface KnowledgeFile {
   graph_status: string
   parse_error: StageError | null
   index_error: StageError | null
+  graph_error: StageError | null
   last_job_id: string | null
   content_sha256: string
   size_bytes: number
@@ -132,6 +133,13 @@ export const filesApi = {
   index(kbUid: string, fileUid: string): Promise<KnowledgeJobSnapshot> {
     return requestJSON<KnowledgeJobSnapshot>(
       `/knowledge-bases/${encodeURIComponent(kbUid)}/files/${encodeURIComponent(fileUid)}/index`,
+      { method: 'POST' },
+    )
+  },
+
+  graph(kbUid: string, fileUid: string): Promise<KnowledgeJobSnapshot> {
+    return requestJSON<KnowledgeJobSnapshot>(
+      `/knowledge-bases/${encodeURIComponent(kbUid)}/files/${encodeURIComponent(fileUid)}/graph`,
       { method: 'POST' },
     )
   },

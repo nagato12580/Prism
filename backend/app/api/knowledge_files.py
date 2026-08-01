@@ -68,6 +68,7 @@ def _public_file(file_row: KnowledgeFile) -> dict:
         "graph_status": file_row.graph_status,
         "parse_error": file_row.parse_error,
         "index_error": file_row.index_error,
+        "graph_error": file_row.graph_error,
         "last_job_id": file_row.last_job_id,
         "content_sha256": file_row.content_sha256,
         "size_bytes": file_row.size_bytes,
@@ -359,6 +360,8 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
             file_row.parse_status = "running"
         elif job_type == "index":
             file_row.index_status = "running"
+        elif job_type == "graph":
+            file_row.graph_status = "running"
         if active.status == "queued":
             active.error_code = None
             active.error_message = None
@@ -382,6 +385,8 @@ def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: st
         file_row.parse_status = "running"
     elif job_type == "index":
         file_row.index_status = "running"
+    elif job_type == "graph":
+        file_row.graph_status = "running"
     db.commit()
     _publish_job(db, job)
     db.refresh(job)
@@ -406,6 +411,16 @@ def index_file(
     db: Session = Depends(get_db),
 ):
     return _create_file_job(db, actor, kb_uid, file_uid, "index")
+
+
+@router.post("/{file_uid}/graph", status_code=202)
+def graph_file(
+    kb_uid: str,
+    file_uid: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    return _create_file_job(db, actor, kb_uid, file_uid, "graph")
 
 
 @router.delete("/{file_uid}", status_code=202)

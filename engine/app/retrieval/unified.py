@@ -373,6 +373,14 @@ def _restore_graph_source_marker(hit: dict) -> dict:
     return hit
 
 
+def _public_hit(hit: dict) -> dict:
+    """Trim index-only duplicate fields before exposing retrieval hits."""
+    if "text" in hit and "content" in hit:
+        hit = dict(hit)
+        hit.pop("content", None)
+    return hit
+
+
 def _enrich_graph_hit(db, hit: dict) -> dict:
     if hit.get("source_kind") != "personal_asset_unit" or not hit.get("source_id"):
         return hit
@@ -464,7 +472,7 @@ def _legacy_unscoped_search(
         hit["graph_rag"] = _build_graph_rag_payload(hit)
         candidates.append(hit)
     reranked = rerank(query, candidates, top_n=max(top_k, settings.RERANK_TOP_N))
-    return [_restore_graph_source_marker(hit) for hit in reranked[:top_k]]
+    return [_public_hit(_restore_graph_source_marker(hit)) for hit in reranked[:top_k]]
 
 
 def unified_search(
@@ -561,7 +569,7 @@ def unified_search(
         if rerank_warnings and status in {"ok", "no_hits"}:
             status = "degraded"
         diagnostics.update({"status": status, "warnings": warnings})
-    return [_restore_graph_source_marker(hit) for hit in reranked[:top_k]]
+    return [_public_hit(_restore_graph_source_marker(hit)) for hit in reranked[:top_k]]
 
 
 def make_unified_search(

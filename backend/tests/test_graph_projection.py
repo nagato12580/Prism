@@ -909,6 +909,8 @@ def test_project_asset_unit_entities_projects_source_mentions_and_relations():
                 "confidence": 0.7,
                 "evidence_span": "GraphRAG uses Neo4j",
                 "extraction_method": "test-extractor",
+                "source_kind": "personal_asset_unit",
+                "source_id": "unit-1",
             },
         ) in graph.relations
     finally:

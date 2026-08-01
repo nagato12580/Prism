@@ -701,7 +701,7 @@ export function KnowledgeGraphPage({
         loader({
           view: nextView,
           q: nextQuery.trim() || undefined,
-          limit: 60,
+          limit: 300,
         }),
       {
         onStart: () => {
@@ -1329,14 +1329,14 @@ export function KnowledgeGraphPage({
             data-state={selected ? 'open' : 'closed'}
             aria-hidden={!selected}
             className={cn(
-              'pointer-events-none absolute inset-0 z-30 flex items-start justify-end p-4 pt-28 pb-24',
+              'pointer-events-none absolute inset-0 z-30 flex items-stretch justify-end overflow-hidden p-4 pt-28 pb-24',
               floatingSurfaceMotionClass,
               graphInspectorMotionClass,
             )}
           >
             <div
               className={cn(
-                'w-full max-w-[23rem]',
+                'flex min-h-0 w-full max-w-[23rem]',
                 floatingSurfaceMotionClass,
                 graphInspectorMotionClass,
                 selected
@@ -1581,7 +1581,7 @@ function GraphInspector({
     : '如果想让当前节点成为新的探索中心，使用[重新聚焦]；如果想保留现有焦点并继续向外看，使用[展开更多关联]。'
 
   return (
-    <aside className="prism-panel flex min-h-0 h-full flex-col overflow-hidden rounded-[24px] border border-white/75 bg-white/94 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.18)] backdrop-blur">
+    <aside className="prism-panel flex min-h-0 h-full max-h-full flex-col overflow-hidden rounded-[24px] border border-white/75 bg-white/94 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.18)] backdrop-blur">
       <div className="mb-4 flex items-start gap-3">
         <span
           className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
@@ -1614,7 +1614,7 @@ function GraphInspector({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+      <div data-testid="graph-inspector-scroll" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         <div className="rounded-lg border border-[var(--prism-line)] bg-slate-50 px-3 py-3">
           <div className="flex items-center justify-between gap-3">
             <div>

@@ -352,6 +352,111 @@ def test_handle_index_builds_scoped_graph_generation_and_outbox(handler_db, monk
     assert handler_db.query(GraphProjectionReceipt).count() == event_count * 2
 
 
+def test_handle_graph_updates_only_requested_file_in_active_generation(handler_db, monkeypatch):
+    from backend.app.models import GraphOutboxEvent, KnowledgeEntity
+    from backend.app.models.knowledge_types import StageStatus
+    import backend.app.services.graph_client as graph_client_module
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(
+        tenant_id="t1",
+        owner_user_id="u1",
+        name="Per File Graph KB",
+        active_index_generation="index-generation",
+        active_graph_generation="global-graph",
+    )
+    handler_db.add(topic)
+    handler_db.flush()
+    item_a = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="A", content="a")
+    item_b = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="B", content="b")
+    handler_db.add_all([item_a, item_b])
+    handler_db.flush()
+    file_a = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-a",
+        original_filename="a.md",
+        item_id=item_a.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        graph_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    file_b = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-b",
+        original_filename="b.md",
+        item_id=item_b.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        graph_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    handler_db.add_all([file_a, file_b])
+    handler_db.add_all([
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_a.file_uid,
+            item_id=item_a.id,
+            generation="1",
+            chunk_uid="child-a",
+            chunk_text="Paper: Graph Systems\nAlice Smith\nExample University",
+            chunk_type="child",
+        ),
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_b.file_uid,
+            item_id=item_b.id,
+            generation="1",
+            chunk_uid="child-b",
+            chunk_text="Paper: Other Systems\nBob Smith\nOther University",
+            chunk_type="child",
+        ),
+    ])
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("graph", "t1", topic.kb_uid, file_a.file_uid, {}),
+        "handle-graph-file-a",
+    )
+
+    deleted_sources = []
+
+    class FakeGraphClient:
+        def delete_item_sources_generation(self, tenant_id, kb_uid, graph_generation, item_id):
+            deleted_sources.append((tenant_id, kb_uid, graph_generation, item_id))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(graph_client_module, "GraphClient", FakeGraphClient)
+
+    result = handlers.handle_graph(job.id, "w1", handler_db, jobs)
+
+    handler_db.refresh(file_a)
+    handler_db.refresh(file_b)
+    handler_db.refresh(topic)
+    assert result["status"] == "completed"
+    assert result["generation"] == "global-graph"
+    assert result["file_uid"] == file_a.file_uid
+    assert file_a.graph_status == StageStatus.SUCCEEDED.value
+    assert file_b.graph_status == StageStatus.PENDING.value
+    assert topic.active_graph_generation == "global-graph"
+    assert deleted_sources == [("t1", topic.kb_uid, "global-graph", item_a.id)]
+    assert handler_db.query(KnowledgeEntity).filter_by(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        graph_generation="global-graph",
+    ).count() > 0
+    assert {
+        payload.get("file_uid")
+        for (payload,) in handler_db.query(GraphOutboxEvent.payload)
+        .filter_by(kb_uid=topic.kb_uid, graph_generation="global-graph")
+        .all()
+    } == {"file-a"}
+
+
 def test_handle_index_uses_kb_index_generation_not_file_content_version(handler_db, monkeypatch):
     from backend.app.models.knowledge_types import StageStatus
     import engine.app.jobs.knowledge_handlers as handlers

@@ -12,22 +12,18 @@ import {
   ChevronUp,
   FileText,
   HelpCircle,
-  Image,
-  Layers,
   Library,
   Loader2,
   MessageSquarePlus,
-  Music,
   Pencil,
   Plus,
   Search,
   Send,
-  Video,
+  Square,
   X,
 } from 'lucide-react'
 import {
   useChatStore,
-  SOURCE_TYPE_OPTIONS,
   applyAgentContinuationEvent,
   buildAgentHistory,
   buildAssistantProcess as buildAssistantProcessSnapshot,
@@ -41,7 +37,7 @@ import {
   type ToolRun,
   type ThinkingStep,
 } from '@/app/chatStore'
-import type { GraphRagExplain, GraphRagPathEntry, ResourceMediaType } from '@/app/api'
+import type { GraphRagExplain, GraphRagPathEntry } from '@/app/api'
 import { chatApi, traceApi } from '@/app/api'
 import { knowledgeBasesApi, type KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { evidenceTypeLabel as formatEvidenceTypeLabel, graphPathLabels } from '@/app/graphrag'
@@ -62,16 +58,6 @@ const CHAT_STREAM_TIMEOUT_MS = Number.isFinite(CHAT_STREAM_TIMEOUT_SECONDS)
   ? CHAT_STREAM_TIMEOUT_SECONDS * 1000
   : 300_000
 const CHAT_TYPEWRITER_INTERVAL_MS = 18
-
-const sourceTypeIcon = (type: ResourceMediaType) => {
-  const icons: Record<ResourceMediaType, ReturnType<typeof FileText>> = {
-    document: <FileText size={14} />,
-    image: <Image size={14} />,
-    audio: <Music size={14} />,
-    video: <Video size={14} />,
-  }
-  return icons[type] ?? <FileText size={14} />
-}
 
 function normalizeClarifyOptions(value: unknown): ClarifyOption[] {
   if (!Array.isArray(value)) return []
@@ -215,7 +201,6 @@ export function ChatPage() {
   const messages = useChatStore((s) => s.messages)
   const selectedTopicId = useChatStore((s) => s.selectedTopicId)
   const selectedTopicName = useChatStore((s) => s.selectedTopicName)
-  const selectedSourceTypes = useChatStore((s) => s.selectedSourceTypes)
   const deepSearchEnabled = useChatStore((s) => s.deepSearchEnabled)
   const deepSearchDepth = useChatStore((s) => s.deepSearchDepth)
   const currentSessionId = useChatStore((s) => s.currentSessionId)
@@ -234,7 +219,6 @@ export function ChatPage() {
   const clear = useChatStore((s) => s.clear)
   const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
   const clearSelectedTopic = useChatStore((s) => s.clearSelectedTopic)
-  const toggleSourceType = useChatStore((s) => s.toggleSourceType)
   const clearSelectedSourceTypes = useChatStore((s) => s.clearSelectedSourceTypes)
   const setDeepSearchEnabled = useChatStore((s) => s.setDeepSearchEnabled)
   const setDeepSearchDepth = useChatStore((s) => s.setDeepSearchDepth)
@@ -248,13 +232,15 @@ export function ChatPage() {
   const getSessionMessages = useChatStore((s) => s.getSessionMessages)
   const restoreFromSession = useChatStore((s) => s.restoreFromSession)
   const [showTopicPicker, setShowTopicPicker] = useState(false)
-  const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [topics, setTopics] = useState<KnowledgeBase[]>([])
   const [loadingTopics, setLoadingTopics] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const pendingClarifyRef = useRef<string | null>(null)
+  const activeStreamRef = useRef<{
+    controller: AbortController
+    stop: () => void
+  } | null>(null)
   const topicPickerRef = useRef<HTMLDivElement>(null)
-  const sourcePickerRef = useRef<HTMLDivElement>(null)
   const processPersistenceQueuesRef = useRef<Record<string, {
     running: Promise<void> | null
     latest: { sessionId: string; messageId: string } | null
@@ -263,6 +249,12 @@ export function ChatPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
+
+  useEffect(() => {
+    return () => {
+      activeStreamRef.current?.stop()
+    }
+  }, [])
 
   // 页面加载：恢复最近会话
   useEffect(() => {
@@ -309,19 +301,6 @@ export function ChatPage() {
     }
   }, [showTopicPicker])
 
-  // 点击外部关闭 source picker
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (sourcePickerRef.current && !sourcePickerRef.current.contains(e.target as Node)) {
-        setShowSourcePicker(false)
-      }
-    }
-    if (showSourcePicker) {
-      document.addEventListener('mousedown', handleClick)
-      return () => document.removeEventListener('mousedown', handleClick)
-    }
-  }, [showSourcePicker])
-
   const loadTopics = async () => {
     setLoadingTopics(true)
     try {
@@ -353,6 +332,10 @@ export function ChatPage() {
   const handleSelectTopic = (topic: KnowledgeBase) => {
     setSelectedTopic(topic.kb_uid, topic.name)
     setShowTopicPicker(false)
+  }
+
+  const stopStreaming = () => {
+    activeStreamRef.current?.stop()
   }
 
   const send = async (value = input) => {
@@ -392,7 +375,6 @@ export function ChatPage() {
       try {
         const session = await chatApi.createSession({
           topic_id: effectiveTopicId,
-          source_types: selectedSourceTypes.length > 0 ? selectedSourceTypes : undefined,
         })
         sessionId = session.id
         setCurrentSessionId(sessionId)
@@ -435,7 +417,15 @@ export function ChatPage() {
 
     let titleReceived = false
     const streamAbortController = new AbortController()
+    let streamStoppedByUser = false
     let streamTimedOut = false
+    activeStreamRef.current = {
+      controller: streamAbortController,
+      stop: () => {
+        streamStoppedByUser = true
+        streamAbortController.abort()
+      },
+    }
     let streamTimeoutId: number | undefined
     const refreshStreamTimeout = () => {
       if (streamTimeoutId !== undefined) window.clearTimeout(streamTimeoutId)
@@ -621,6 +611,12 @@ export function ChatPage() {
     } catch (e) {
       clearStreamTimeout()
       await flushTypewriterText()
+      const isUserStop = streamStoppedByUser && streamAbortController.signal.aborted
+      if (isUserStop) {
+        appendToLast(`\n\n已停止本次回答。`, sessionId, assistantMessageId)
+        finishLast(sessionId, assistantMessageId, 'error')
+        return
+      }
       const message = streamTimedOut
         ? '知识库检索时间过长，已停止本次请求。可以换个更具体的问题再试。'
         : (e as Error).message
@@ -629,6 +625,9 @@ export function ChatPage() {
     } finally {
       clearStreamTimeout()
       clearTypewriterTimer()
+      if (activeStreamRef.current?.controller === streamAbortController) {
+        activeStreamRef.current = null
+      }
       setSending(false)
       // 持久化 AI 回复 + 标题生成
       if (sessionId) {
@@ -672,7 +671,7 @@ export function ChatPage() {
         // 首轮问答后自动生成标题
         const userCount = msgs.filter((m) => m.role === 'user').length
         const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
-        if (!titleReceived && userCount === 1 && shouldAutoGenerateTitle(session?.title)) {
+        if (!titleReceived && !streamStoppedByUser && userCount === 1 && shouldAutoGenerateTitle(session?.title)) {
           try {
             const updated = await chatApi.generateTitle(sessionId)
             updateSessionTitle(sessionId, updated.title)
@@ -1054,80 +1053,6 @@ export function ChatPage() {
                 )}
               </div>
 
-              {/* 数据来源类型多选 */}
-              <div className="relative" ref={sourcePickerRef}>
-                <button
-                  type="button"
-                  onClick={() => setShowSourcePicker((v) => !v)}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
-                    selectedSourceTypes.length > 0
-                      ? 'border-violet-200 bg-violet-50 text-violet-700'
-                      : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-violet-700',
-                  )}
-                >
-                  <Layers size={12} />
-                  {selectedSourceTypes.length > 0
-                    ? selectedSourceTypes.map((t) => SOURCE_TYPE_OPTIONS.find((o) => o.value === t)?.label).join('/')
-                    : '数据类型'}
-                  <ChevronDown size={10} className={cn('transition', showSourcePicker && 'rotate-180')} />
-                </button>
-
-                {showSourcePicker && (
-                  <div className="absolute bottom-full left-0 z-30 mb-1 w-44 rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)]">
-                    <p className="px-2 pb-1 pt-0.5 text-[10px] text-slate-400">可多选，未选则全部</p>
-                    <div className="space-y-0.5">
-                      {SOURCE_TYPE_OPTIONS.map((option) => {
-                        const checked = selectedSourceTypes.includes(option.value)
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => toggleSourceType(option.value)}
-                            className={cn(
-                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition',
-                              checked
-                                ? 'bg-violet-50 text-violet-800'
-                                : 'text-slate-600 hover:bg-slate-50',
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border transition',
-                                checked
-                                  ? 'border-violet-400 bg-violet-500 text-white'
-                                  : 'border-slate-300 bg-white',
-                              )}
-                            >
-                              {checked && (
-                                <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-                                  <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              )}
-                            </span>
-                            <span className="inline-flex items-center gap-1">
-                              {sourceTypeIcon(option.value)}
-                              {option.label}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                    {selectedSourceTypes.length > 0 && (
-                      <div className="mt-1 border-t border-slate-100 pt-1">
-                        <button
-                          type="button"
-                          onClick={clearSelectedSourceTypes}
-                          className="w-full rounded-md px-2 py-1 text-left text-[10px] text-slate-400 transition hover:bg-slate-50 hover:text-slate-500"
-                        >
-                          清除
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
               {/* 右侧间距 + 清除按钮 */}
               <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
                 <button
@@ -1188,10 +1113,10 @@ export function ChatPage() {
               </label>
 
               <div className="flex-1" />
-              {(selectedTopicId || selectedSourceTypes.length > 0) && (
+              {selectedTopicId && (
                 <button
                   type="button"
-                  onClick={() => { clearSelectedTopic(); clearSelectedSourceTypes() }}
+                  onClick={clearSelectedTopic}
                   className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:text-slate-600"
                 >
                   清除筛选
@@ -1200,12 +1125,18 @@ export function ChatPage() {
 
               {/* 发送按钮 */}
               <button
-                type="submit"
-                aria-label="发送"
-                disabled={sending || !input.trim()}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)] text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300"
+                type={sending ? 'button' : 'submit'}
+                aria-label={sending ? '停止生成' : '发送'}
+                onClick={sending ? stopStreaming : undefined}
+                disabled={!sending && !input.trim()}
+                className={cn(
+                  'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300',
+                  sending
+                    ? 'bg-red-500 hover:bg-red-600'
+                    : 'bg-[var(--prism-blue)] hover:bg-blue-700',
+                )}
               >
-                <Send size={16} />
+                {sending ? <Square size={16} fill="currentColor" /> : <Send size={16} />}
               </button>
             </div>
           </div>

@@ -23,7 +23,7 @@ def _post_rerank(query: str, docs: list[str], top_n: int, timeout: float | None 
     """
     if not (settings.RERANK_API_BASE and settings.RERANK_API_KEY and settings.RERANK_MODEL):
         raise RuntimeError("rerank not configured")
-    url = settings.RERANK_API_BASE.rstrip("/") + "/rerank"
+    url = settings.RERANK_API_BASE.rstrip("/")
     body = json.dumps({"model": settings.RERANK_MODEL, "query": query, "documents": docs, "top_n": top_n}).encode("utf-8")
     req = urllib.request.Request(
         url, data=body, method="POST",

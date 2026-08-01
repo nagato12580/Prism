@@ -9,6 +9,7 @@ import {
   Download,
   Eye,
   Zap,
+  Network,
 } from 'lucide-react'
 import type { KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { filesApi, type KnowledgeFile, type FileListParams } from '@/features/knowledge/api/files'
@@ -154,6 +155,22 @@ export function KnowledgeFilesPage() {
       })
   }
 
+  const triggerGraph = (file: KnowledgeFile) => {
+    if (!kbUid) return
+    setItems((current) =>
+      current.map((row) =>
+        row.parse_status === 'succeeded' ? { ...row, graph_status: 'running' } : row,
+      ),
+    )
+    filesApi
+      .graph(kbUid, file.file_uid)
+      .then((job) => watchJob(job.id))
+      .catch((e) => {
+        setItems((current) => updateFileStage(current, file.file_uid, 'graph_status', 'failed'))
+        setError(e)
+      })
+  }
+
   const [confirmDelete, setConfirmDelete] = useState<KnowledgeFile | null>(null)
   const deleteFile = () => {
     if (!kbUid || !confirmDelete) return
@@ -245,7 +262,7 @@ export function KnowledgeFilesPage() {
       ) : (
         <div className="overflow-hidden rounded-xl border border-[var(--prism-line)] bg-white">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="border-b border-[var(--prism-line)] bg-slate-50/60 text-xs text-slate-500">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">文件名</th>
@@ -253,6 +270,7 @@ export function KnowledgeFilesPage() {
                   <th className="px-3 py-2.5 font-medium">大小</th>
                   <th className="px-3 py-2.5 font-medium">解析</th>
                   <th className="px-3 py-2.5 font-medium">索引</th>
+                  <th className="px-3 py-2.5 font-medium">图谱</th>
                   <th className="px-3 py-2.5 font-medium">操作</th>
                 </tr>
               </thead>
@@ -265,6 +283,7 @@ export function KnowledgeFilesPage() {
                     onDownload={() => downloadFile(file)}
                     onParse={() => triggerParse(file)}
                     onIndex={() => triggerIndex(file)}
+                    onGraph={() => triggerGraph(file)}
                     onDelete={() => setConfirmDelete(file)}
                   />
                 ))}
@@ -304,6 +323,7 @@ function FileRow({
   onDownload,
   onParse,
   onIndex,
+  onGraph,
   onDelete,
 }: {
   file: KnowledgeFile
@@ -311,10 +331,13 @@ function FileRow({
   onDownload: () => void
   onParse: () => void
   onIndex: () => void
+  onGraph: () => void
   onDelete: () => void
 }) {
   const sizeKb = Math.max(1, Math.round(file.size_bytes / 1024))
-  const canIndex = file.parse_status === 'succeeded' && file.index_status !== 'succeeded'
+  const canParse = !isRunningStage(file.parse_status)
+  const canIndex = file.parse_status === 'succeeded' && !isRunningStage(file.index_status)
+  const canGraph = file.parse_status === 'succeeded' && !isRunningStage(file.graph_status)
   return (
     <tr className="border-b border-[var(--prism-line)] last:border-0 hover:bg-slate-50/40">
       <td className="px-4 py-2.5">
@@ -336,17 +359,15 @@ function FileRow({
       <td className="px-3 py-2.5 text-xs text-slate-500">{sizeKb} KB</td>
       <td className="px-3 py-2.5">
         <StageBadge status={file.parse_status} />
+        {file.parse_error?.message ? <StageErrorText message={file.parse_error.message} /> : null}
       </td>
       <td className="px-3 py-2.5">
         <StageBadge status={file.index_status} />
-        {file.index_error?.message ? (
-          <div
-            className="mt-1 max-w-[240px] truncate text-[11px] leading-4 text-red-600"
-            title={file.index_error.message}
-          >
-            {file.index_error.message}
-          </div>
-        ) : null}
+        {file.index_error?.message ? <StageErrorText message={file.index_error.message} /> : null}
+      </td>
+      <td className="px-3 py-2.5">
+        <StageBadge status={file.graph_status} />
+        {file.graph_error?.message ? <StageErrorText message={file.graph_error.message} /> : null}
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1">
@@ -356,16 +377,15 @@ function FileRow({
           <IconBtn label="下载" onClick={onDownload}>
             <Download size={14} />
           </IconBtn>
-          {canIndex ? (
-            <IconBtn label="索引" onClick={() => canIndex && onIndex()}>
-              <Zap size={14} />
-            </IconBtn>
-          ) : null}
-          {file.parse_status !== 'succeeded' ? (
-            <IconBtn label="解析" onClick={onParse}>
-              <Loader2 size={14} />
-            </IconBtn>
-          ) : null}
+          <IconBtn label="解析" onClick={onParse} disabled={!canParse}>
+            <Loader2 size={14} />
+          </IconBtn>
+          <IconBtn label="索引" onClick={onIndex} disabled={!canIndex}>
+            <Zap size={14} />
+          </IconBtn>
+          <IconBtn label="图谱" onClick={onGraph} disabled={!canGraph}>
+            <Network size={14} />
+          </IconBtn>
           <IconBtn label="删除" danger onClick={onDelete}>
             <Trash2 size={14} />
           </IconBtn>
@@ -395,15 +415,32 @@ function StageBadge({ status }: { status: string }) {
   return <Badge tone={tone}>{label}</Badge>
 }
 
+function isRunningStage(status: string) {
+  return status === 'running' || status === 'queued' || status === 'claimed'
+}
+
+function StageErrorText({ message }: { message: string }) {
+  return (
+    <div
+      className="mt-1 max-w-[240px] truncate text-[11px] leading-4 text-red-600"
+      title={message}
+    >
+      {message}
+    </div>
+  )
+}
+
 function IconBtn({
   label,
   onClick,
   danger,
+  disabled,
   children,
 }: {
   label: string
   onClick: () => void
   danger?: boolean
+  disabled?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -412,9 +449,11 @@ function IconBtn({
       aria-label={label}
       title={label}
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         'rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60',
         danger ? 'hover:bg-red-50 hover:text-red-500' : 'hover:text-slate-700',
+        disabled ? 'cursor-not-allowed opacity-40 hover:bg-transparent hover:text-slate-400' : '',
       )}
     >
       {children}

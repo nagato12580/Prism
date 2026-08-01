@@ -167,6 +167,16 @@ assert.match(
 )
 assert.match(openHtml, /data-testid="graph-inspector-close"/, 'Open inspector markup should expose an explicit close control.')
 assert.match(openHtml, /Alpha Entity/, 'Open inspector markup should render the selected node details.')
+assert.match(
+  pageSource,
+  /data-testid="graph-inspector-overlay"[\s\S]*items-stretch[\s\S]*overflow-hidden[\s\S]*<GraphInspector/,
+  'Inspector overlay should stretch the drawer within the available graph viewport and clip overflow.',
+)
+assert.match(
+  pageSource,
+  /data-testid="graph-inspector-scroll"[\s\S]*min-h-0 flex-1[\s\S]*overflow-y-auto/,
+  'Inspector details should own a vertical scroll region so long node content remains reachable.',
+)
 assert.match(html, /\u91cd\u65b0\u805a\u7126/, 'Graph page should expose a refocus action at runtime.')
 assert.match(html, /\u5c55\u5f00\u66f4\u591a\u5173\u8054/, 'Graph page should expose an expand-more action at runtime.')
 assert.match(

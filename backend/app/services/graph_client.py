@@ -192,6 +192,54 @@ class GraphClient:
             {"tenant_id": tenant_id, "kb_uid": kb_uid, "item_id": item_id},
         )
 
+    def delete_personal_asset_unit_graph(
+        self,
+        unit_id: str,
+        *,
+        user_id: str,
+        entity_ids: list[str] | None = None,
+    ) -> None:
+        """Delete legacy graph projection for one PersonalAssetUnit source.
+
+        The personal-asset path predates scoped graph outbox projection, so it
+        writes legacy :Source/:Entity nodes directly. Deleting the source node
+        removes MENTIONED_IN edges; source-tagged RELATED_TO edges and orphaned
+        entities are cleaned when possible.
+        """
+        if not unit_id:
+            return
+        params = {
+            "source_kind": "personal_asset_unit",
+            "source_id": unit_id,
+            "source_node_id": f"personal_asset_unit:{unit_id}",
+            "user_id": user_id,
+            "entity_ids": list(entity_ids or []),
+        }
+        self._execute_write(
+            """
+            MATCH ()-[r]-()
+            WHERE r.source_kind = $source_kind AND r.source_id = $source_id
+            DELETE r
+            """,
+            params,
+        )
+        self._execute_write(
+            """
+            MATCH (s:Source {id: $source_node_id})
+            DETACH DELETE s
+            """,
+            params,
+        )
+        if entity_ids:
+            self._execute_write(
+                """
+                MATCH (e:Entity {user_id: $user_id})
+                WHERE e.id IN $entity_ids AND NOT (e)--()
+                DETACH DELETE e
+                """,
+                params,
+            )
+
     def _execute_read(self, query: str, params: dict[str, Any] | None = None, *, timeout: float | None = None) -> list[dict]:
         with self.driver.session(database=self.database) as session:
             if timeout is None:

@@ -102,15 +102,28 @@ test('KnowledgeFilesPage renders persisted file stage failure details', () => {
 
   assert.match(api, /parse_error:\s*StageError\s*\|\s*null/)
   assert.match(api, /index_error:\s*StageError\s*\|\s*null/)
+  assert.match(api, /graph_error:\s*StageError\s*\|\s*null/)
   assert.match(api, /last_job_id:\s*string\s*\|\s*null/)
+  assert.match(page, /file\.parse_error\?\.message/)
   assert.match(page, /file\.index_error\?\.message/)
-  assert.match(page, /title=\{file\.index_error\.message\}/)
+  assert.match(page, /file\.graph_error\?\.message/)
+  assert.match(page, /title=\{message\}/)
 })
 
-test('KnowledgeFilesPage only offers indexing after parse succeeds', () => {
+test('KnowledgeFilesPage exposes independent manual stage actions', () => {
   const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+  const api = read('src/features/knowledge/api/files.ts')
 
-  assert.match(page, /file\.parse_status\s*===\s*'succeeded'\s*&&\s*file\.index_status\s*!==\s*'succeeded'/)
+  assert.match(api, /graph\(kbUid:\s*string,\s*fileUid:\s*string\)/)
+  assert.match(page, /label="解析"/)
+  assert.match(page, /label="索引"/)
+  assert.match(page, /label="图谱"/)
+  assert.doesNotMatch(page, /function StageAction/)
+  assert.match(page, /filesApi[\s\S]*?\.parse\(/)
+  assert.match(page, /filesApi[\s\S]*?\.index\(/)
+  assert.match(page, /filesApi[\s\S]*?\.graph\(/)
+  assert.match(page, /file\.parse_status\s*===\s*'succeeded'\s*&&\s*!isRunningStage\(file\.index_status\)/)
+  assert.match(page, /file\.parse_status\s*===\s*'succeeded'\s*&&\s*!isRunningStage\(file\.graph_status\)/)
 })
 
 test('KnowledgeShell includes a subdued back action near the knowledge title', () => {

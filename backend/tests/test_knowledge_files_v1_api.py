@@ -175,6 +175,8 @@ def test_file_projection_includes_stage_error_details(client, db_session, file_h
     file_row = db_session.query(KnowledgeFile).filter_by(file_uid=file_uid).one()
     file_row.index_status = "failed"
     file_row.index_error = {"code": "INDEX_ERROR", "message": "Milvus flush deadline exceeded"}
+    file_row.graph_status = "failed"
+    file_row.graph_error = {"code": "GRAPH_ERROR", "message": "Neo4j projection failed"}
     file_row.last_job_id = "job-failed"
     db_session.commit()
 
@@ -189,9 +191,13 @@ def test_file_projection_includes_stage_error_details(client, db_session, file_h
         "code": "INDEX_ERROR",
         "message": "Milvus flush deadline exceeded",
     }
+    assert response.json()["graph_error"] == {
+        "code": "GRAPH_ERROR",
+        "message": "Neo4j projection failed",
+    }
 
 
-@pytest.mark.parametrize("command,job_type", [("parse", "parse"), ("index", "index")])
+@pytest.mark.parametrize("command,job_type", [("parse", "parse"), ("index", "index"), ("graph", "graph")])
 def test_file_command_returns_durable_job(client, file_headers, command, job_type):
     created = client.post(
         "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Command KB"}
@@ -211,6 +217,52 @@ def test_file_command_returns_durable_job(client, file_headers, command, job_typ
     assert response.status_code == 202
     assert response.json()["job_type"] == job_type
     assert response.json()["status"] == "queued"
+
+
+def test_graph_command_creates_file_scoped_jobs_across_files(client, db_session, file_headers):
+    from backend.app.models import KnowledgeFile, KnowledgeJob
+
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "KB-wide Graph Reuse"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    first = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("first.md", b"# First", "text/markdown")},
+    ).json()["file"]["file_uid"]
+    second = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("second.md", b"# Second", "text/markdown")},
+    ).json()["file"]["file_uid"]
+    file_a = db_session.query(KnowledgeFile).filter_by(file_uid=first).one()
+    file_b = db_session.query(KnowledgeFile).filter_by(file_uid=second).one()
+    file_a.parsed_content_version = 1
+    file_b.parsed_content_version = 1
+    db_session.commit()
+
+    first_response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_a.file_uid}/graph",
+        headers=file_headers,
+    )
+    second_response = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_b.file_uid}/graph",
+        headers=file_headers,
+    )
+
+    db_session.refresh(file_a)
+    db_session.refresh(file_b)
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert first_response.json()["id"] != second_response.json()["id"]
+    assert first_response.json()["status"] == "queued"
+    assert second_response.json()["status"] == "queued"
+    assert file_a.last_job_id == first_response.json()["id"]
+    assert file_b.last_job_id == second_response.json()["id"]
+    assert file_a.graph_status == "running"
+    assert file_b.graph_status == "running"
+    assert db_session.query(KnowledgeJob).filter_by(kb_uid=kb_uid, job_type="graph").count() == 2
 
 
 def test_index_command_requeues_after_failed_same_generation_job(client, db_session, file_headers):

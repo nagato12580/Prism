@@ -3,13 +3,17 @@ from backend.app.models import (
     EntityRelation,
     KnowledgeChunk,
     KnowledgeEntity,
+    KnowledgeFile,
     KnowledgeItem,
+    KnowledgeTopic,
     PersonalAssetUnit,
 )
 
 
 def _seed_unified_entity_graph(db_session):
     item = KnowledgeItem(
+        tenant_id="legacy-tenant",
+        kb_uid="legacy-kb",
         title="GraphRAG design doc",
         content="GraphRAG connects entities to evidence sources.",
         category="RAG",
@@ -29,7 +33,12 @@ def _seed_unified_entity_graph(db_session):
     db_session.flush()
 
     chunk = KnowledgeChunk(
+        tenant_id="legacy-tenant",
+        kb_uid="legacy-kb",
+        file_uid="legacy-file",
         item_id=item.id,
+        chunk_uid="legacy-chunk",
+        generation="1",
         chunk_text="GraphRAG links the same entity across multiple source types.",
         chunk_index=0,
         chunk_type="parent",
@@ -222,3 +231,133 @@ def test_unified_graph_source_view_returns_source_nodes_and_mentions_edges(clien
         if edge["target"] == graph_rag_node["id"]
     } == {chunk_source["id"], asset_unit_source["id"]}
     assert all(edge["type"] == "mentions_entity" for edge in payload["edges"])
+
+
+def test_unified_graph_includes_active_scoped_knowledge_base_entities(client, db_session):
+    topic = KnowledgeTopic(
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        name="多视图知识库",
+        active_graph_generation="graph-live",
+    )
+    db_session.add(topic)
+    db_session.flush()
+    item = KnowledgeItem(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        title="Multi-view paper",
+        content="Multi-view clustering uses graph learning.",
+    )
+    db_session.add(item)
+    db_session.flush()
+    file_row = KnowledgeFile(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        topic_id=topic.id,
+        item_id=item.id,
+        file_uid="file-mv",
+        original_filename="multi-view.pdf",
+        parse_status="succeeded",
+        graph_status="succeeded",
+        parsed_content_version=1,
+    )
+    chunk = KnowledgeChunk(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        file_uid=file_row.file_uid,
+        item_id=item.id,
+        generation="1",
+        chunk_uid="chunk-mv",
+        chunk_text="Multi-view clustering uses graph learning.",
+        chunk_type="child",
+    )
+    entity = KnowledgeEntity(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation=topic.active_graph_generation,
+        user_id="scoped-user",
+        entity_type="concept",
+        canonical_name="Multi-view clustering",
+        normalized_key="multi-view clustering",
+        status="active",
+    )
+    related = KnowledgeEntity(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation=topic.active_graph_generation,
+        user_id="scoped-user",
+        entity_type="concept",
+        canonical_name="Graph learning",
+        normalized_key="graph learning",
+        status="active",
+    )
+    stale = KnowledgeEntity(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation="old-graph",
+        user_id="scoped-user",
+        entity_type="concept",
+        canonical_name="Old graph entity",
+        normalized_key="old graph entity",
+        status="active",
+    )
+    db_session.add_all([file_row, chunk, entity, related, stale])
+    db_session.flush()
+    db_session.add_all([
+        EntityMention(
+            tenant_id=topic.tenant_id,
+            kb_uid=topic.kb_uid,
+            graph_generation=topic.active_graph_generation,
+            file_uid=file_row.file_uid,
+            chunk_uid=chunk.chunk_uid,
+            entity_id=entity.id,
+            source_kind="document_chunk",
+            source_id=chunk.chunk_uid,
+            item_id=item.id,
+            chunk_id=chunk.chunk_uid,
+            surface_text="Multi-view clustering",
+            normalized_key="multi-view clustering",
+            evidence_span="Multi-view clustering uses graph learning.",
+        ),
+        EntityMention(
+            tenant_id=topic.tenant_id,
+            kb_uid=topic.kb_uid,
+            graph_generation=topic.active_graph_generation,
+            file_uid=file_row.file_uid,
+            chunk_uid=chunk.chunk_uid,
+            entity_id=related.id,
+            source_kind="document_chunk",
+            source_id=chunk.chunk_uid,
+            item_id=item.id,
+            chunk_id=chunk.chunk_uid,
+            surface_text="Graph learning",
+            normalized_key="graph learning",
+            evidence_span="Multi-view clustering uses graph learning.",
+        ),
+        EntityRelation(
+            tenant_id=topic.tenant_id,
+            kb_uid=topic.kb_uid,
+            graph_generation=topic.active_graph_generation,
+            file_uid=file_row.file_uid,
+            subject_entity_id=entity.id,
+            predicate="uses",
+            object_entity_id=related.id,
+            source_kind="document_chunk",
+            source_id=chunk.chunk_uid,
+            evidence_span="Multi-view clustering uses graph learning.",
+        ),
+    ])
+    db_session.commit()
+
+    response = client.get("/api/v1/unified-graph?q=Multi-view&limit=20")
+
+    assert response.status_code == 200
+    payload = response.json()
+    labels = {node["label"] for node in payload["nodes"]}
+    assert "Multi-view clustering" in labels
+    assert "Graph learning" in labels
+    assert "Old graph entity" not in labels
+    source = next(node for node in payload["nodes"] if node["type"] == "document_chunk")
+    assert source["label"] == "multi-view.pdf"
+    assert source["knowledge_base"] == "多视图知识库"
+    assert any(edge["type"] == "related_to" and edge["label"] == "uses" for edge in payload["edges"])

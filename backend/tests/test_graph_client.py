@@ -250,6 +250,24 @@ def test_all_generation_cleanup_deletes_scoped_and_legacy_sources():
     assert "MATCH (s:Source" in queries[1]
 
 
+def test_personal_asset_unit_graph_cleanup_deletes_source_edges_and_orphan_entities():
+    driver = FakeDriver()
+    client = GraphClient(driver=driver)
+
+    client.delete_personal_asset_unit_graph("unit-a", user_id="user-a", entity_ids=["entity-a"])
+
+    queries = [query for query, _ in driver.session_obj.tx.queries]
+    params = [params for _, params in driver.session_obj.tx.queries]
+    assert len(queries) == 3
+    assert "WHERE r.source_kind = $source_kind AND r.source_id = $source_id" in queries[0]
+    assert "MATCH (s:Source {id: $source_node_id})" in queries[1]
+    assert "WHERE e.id IN $entity_ids AND NOT (e)--()" in queries[2]
+    assert params[0]["source_kind"] == "personal_asset_unit"
+    assert params[0]["source_id"] == "unit-a"
+    assert params[0]["source_node_id"] == "personal_asset_unit:unit-a"
+    assert params[0]["entity_ids"] == ["entity-a"]
+
+
 def test_legacy_entity_alias_source_and_relationship_contract_remains_unscoped():
     driver = FakeDriver()
     client = GraphClient(driver=driver)

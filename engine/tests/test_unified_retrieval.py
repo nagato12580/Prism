@@ -437,3 +437,47 @@ def test_unified_search_loads_chunk_text_when_index_generation_differs_from_pars
 
     assert out[0]["chunk_id"] == "chunk-side-index"
     assert out[0]["text"] == "Text must be loaded even though active index generation is different."
+
+
+@patch("engine.app.retrieval.unified.expand_candidates", lambda *args, **kwargs: [])
+@patch("engine.app.retrieval.unified.rerank", lambda q, c, **kw: c)
+@patch("engine.app.retrieval.unified.recall", lambda *a, **kw: _recalled({
+    "chunk_id": "chunk-duplicate-text",
+    "item_id": "item-duplicate-text",
+    "file_uid": "file-duplicate-text",
+    "score": 0.8,
+    "content": "Index metadata text should not be duplicated in public hits.",
+}))
+def test_unified_search_omits_duplicate_index_content_when_text_is_loaded():
+    db = _test_session()
+    try:
+        db.add(
+            KnowledgeItem(
+                id="item-duplicate-text",
+                tenant_id="tenant-test",
+                kb_uid="kb-test",
+                title="Duplicate text item",
+                user_id="default-user",
+            )
+        )
+        db.add(
+            KnowledgeChunk(
+                id="internal-duplicate-text-row",
+                chunk_uid="chunk-duplicate-text",
+                tenant_id="tenant-test",
+                kb_uid="kb-test",
+                file_uid="file-duplicate-text",
+                generation="gen-test",
+                item_id="item-duplicate-text",
+                chunk_text="Index metadata text should not be duplicated in public hits.",
+                chunk_type="child",
+            )
+        )
+        db.commit()
+
+        out = unified_search("duplicate text?", top_k=5, mode="fast", db=db, graph_client=None, scope=SCOPE)
+    finally:
+        db.close()
+
+    assert out[0]["text"] == "Index metadata text should not be duplicated in public hits."
+    assert "content" not in out[0]

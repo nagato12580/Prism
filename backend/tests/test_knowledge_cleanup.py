@@ -4,6 +4,7 @@ from backend.app.models import (
     KnowledgeItem,
     KnowledgeJob,
     KnowledgeTopic,
+    PersonalAssetUnit,
 )
 from backend.app.models.entity import EntityMention, EntityRelation, KnowledgeEntity
 from backend.app.utils.time import local_now
@@ -141,6 +142,98 @@ def test_cleanup_graph_step_uses_scoped_document_facts_and_projects_delete(db_se
     assert db_session.get(EntityRelation, own_rel_id) is None
     assert db_session.get(EntityMention, wrong_kind_id) is not None
     assert db_session.get(EntityRelation, wrong_rel_id) is not None
+
+
+def test_cleanup_graph_step_removes_personal_asset_unit_legacy_graph_facts(db_session):
+    from backend.app.services.knowledge_cleanup import KnowledgeCleanupService
+    from backend.app.services.personal_inbox import PERSONAL_ASSET_UNIT_SOURCE_KIND, PERSONAL_INBOX_SYSTEM_TYPE
+
+    topic = KnowledgeTopic(
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        user_id="alice",
+        name="个人随手记",
+        system_type=PERSONAL_INBOX_SYSTEM_TYPE,
+    )
+    db_session.add(topic)
+    db_session.flush()
+    unit = PersonalAssetUnit(
+        id="unit-clean",
+        user_id="alice",
+        title="Unit Clean",
+        content="Graph cleanup content",
+        status="confirmed",
+    )
+    file_row = KnowledgeFile(
+        tenant_id="tenant-a",
+        user_id="alice",
+        kb_uid=topic.kb_uid,
+        topic_id=topic.id,
+        file_uid="file-unit-clean",
+        original_filename="unit.md",
+        storage_uri="local://tenant/kb/file/source.md",
+        source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+        source_id=unit.id,
+        system_type=PERSONAL_INBOX_SYSTEM_TYPE,
+        deleted_at=local_now(),
+    )
+    job = KnowledgeJob(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        file_uid=file_row.file_uid,
+        idempotency_key="delete-unit-clean",
+        job_type="delete",
+        status="processing",
+    )
+    entity = KnowledgeEntity(
+        id="entity-unit-clean",
+        user_id="alice",
+        entity_type="concept",
+        canonical_name="Unit Clean",
+        normalized_key="unit-clean",
+    )
+    db_session.add_all([unit, file_row, job, entity])
+    db_session.flush()
+    mention = EntityMention(
+        id="mention-unit-clean",
+        entity_id=entity.id,
+        source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+        source_id=unit.id,
+        item_id=unit.id,
+        surface_text="Unit Clean",
+        normalized_key="unit-clean",
+    )
+    relation = EntityRelation(
+        id="relation-unit-clean",
+        subject_entity_id=entity.id,
+        predicate="related_to",
+        object_literal="cleanup",
+        source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+        source_id=unit.id,
+    )
+    db_session.add_all([mention, relation])
+    db_session.commit()
+
+    class Graph:
+        calls = []
+
+        def delete_personal_asset_unit_graph(self, unit_id, *, user_id, entity_ids=None):
+            self.calls.append((unit_id, user_id, tuple(entity_ids or ())))
+
+    graph = Graph()
+    result = KnowledgeCleanupService(
+        db_session,
+        FakeExternalIndex(),
+        FakeExternalIndex(),
+        FakeStorage(),
+        graph_client=graph,
+    ).run(file_row.file_uid, job_id=job.id)
+
+    assert result.status == "succeeded"
+    assert graph.calls == [("unit-clean", "alice", ("entity-unit-clean",))]
+    assert db_session.get(EntityMention, "mention-unit-clean") is None
+    assert db_session.get(EntityRelation, "relation-unit-clean") is None
+    assert db_session.get(KnowledgeEntity, "entity-unit-clean") is None
 
 
 def test_graph_failure_rolls_back_mysql_facts_and_keeps_es_checkpoint(db_session):
