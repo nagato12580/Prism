@@ -202,7 +202,34 @@ def test_query_kb_passes_only_verified_scope_and_strips_tenant(db_session):
 
     assert result["status"] == "ok"
     assert ctx.retrieval_service.calls[0]["tenant_id"] == "tenant-a"
+    assert ctx.retrieval_service.calls[0]["depth"] == "standard"
+    assert ctx.retrieval_service.calls[0]["max_iterations"] == 3
     assert "tenant_id" not in str(result)
+
+
+def test_query_kb_uses_chat_deep_search_depth_controls(db_session):
+    from engine.app.agent.tools.knowledge_base import build_tools
+
+    _seed(db_session)
+    ctx = _context(db_session)
+    ctx.deep_search_enabled = True
+    ctx.deep_search_depth = "deep"
+    ctx.deep_search_top_k = 18
+    ctx.graph_hops = 3
+    ctx.rag_max_iterations = 5
+
+    result = build_tools(ctx)["query_kb"].invoke({
+        "kb_uid": "kb-a",
+        "query_text": "architecture",
+    })
+
+    assert result["status"] == "ok"
+    call = ctx.retrieval_service.calls[0]
+    assert call["mode"] == "deep"
+    assert call["depth"] == "deep"
+    assert call["top_k"] == 18
+    assert call["graph_hops"] == 3
+    assert call["max_iterations"] == 5
 
 
 def test_query_kb_resolves_file_filter_filenames_to_file_uids(db_session):

@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(netstat -tlnp)",
+      "Bash(docker exec aione-mysql-1 *)",
+      "Bash(docker exec *)",
+      "Bash(python3 -c ' *)",
+      "Bash(docker port *)"
     ]
   }
 }

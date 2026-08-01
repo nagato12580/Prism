@@ -43,6 +43,31 @@ assert.equal(
   false,
   'Serialized chat payload should include include_personal_inbox=false by default.',
 )
+assert.equal(
+  defaultPayload.deep_search_enabled,
+  false,
+  'Serialized chat payload should include the deep search toggle.',
+)
+assert.equal(
+  defaultPayload.deep_search_depth,
+  'standard',
+  'Serialized chat payload should include the selected deep search depth.',
+)
+assert.equal(
+  defaultPayload.mode,
+  'standard',
+  'Serialized chat payload should keep standard mode when deep search is off.',
+)
+assert.deepEqual(
+  defaultPayload.kb_uids,
+  ['kb-1'],
+  'Serialized chat payload should authorize the selected knowledge base.',
+)
+assert.equal(
+  'topic_id' in defaultPayload,
+  false,
+  'Serialized chat payload should use the backend authorized proxy schema, not the legacy Engine topic_id.',
+)
 
 const enabledPayload = JSON.parse(JSON.stringify(buildChatRequestPayload({
   ...baseArgs,
@@ -55,9 +80,26 @@ assert.equal(
   'Serialized chat payload should include include_personal_inbox=true after enabling the control.',
 )
 
+const deepPayload = JSON.parse(JSON.stringify(buildChatRequestPayload({
+  ...baseArgs,
+  deepSearchEnabled: true,
+  deepSearchDepth: 'deep',
+  includePersonalInbox: false,
+})))
+
+assert.equal(
+  deepPayload.mode,
+  'deep',
+  'Serialized chat payload should switch to deep mode when deep search is on.',
+)
+assert.equal(
+  deepPayload.deep_search_depth,
+  'deep',
+  'Serialized chat payload should carry the selected agentic depth.',
+)
+
 assert.match(
   chatPage,
   /buildChatRequestPayload\(\{/,
   'ChatPage should use the tested payload helper for the fetch body.',
 )
-

@@ -21,12 +21,13 @@ export function buildChatRequestPayload({
 }: BuildChatRequestPayloadArgs) {
   return {
     query,
-    topic_id: effectiveTopicId,
+    kb_uids: [effectiveTopicId],
     history,
     session_id: sessionId,
     user_message_id: engineUserMessageId,
-    mode: deepSearchEnabled || deepSearchDepth === 'deep' ? 'deep' : 'standard',
+    deep_search_enabled: deepSearchEnabled,
+    deep_search_depth: deepSearchDepth,
+    mode: deepSearchEnabled ? 'deep' : 'standard',
     include_personal_inbox: includePersonalInbox,
   }
 }
-

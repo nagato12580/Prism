@@ -7,12 +7,12 @@ services:
       - --innodb-log-file-size=64M
       - --max-connections=80
     environment:
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-change-me}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-CHANGE-ME}"
       MYSQL_DATABASE: "${MYSQL_DATABASE:-prism_db}"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-change-me}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-CHANGE-ME}"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -128,7 +128,7 @@ services:
     env_file:
       - .env.ecs-full
     environment:
-      DATABASE_URL: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-change-me}@mysql:3306/${MYSQL_DATABASE:-prism_db}?charset=utf8mb4"
+      DATABASE_URL: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-CHANGE-ME}@mysql:3306/${MYSQL_DATABASE:-prism_db}?charset=utf8mb4"
       REDIS_URL: "redis://redis:6379/0"
       MILVUS_HOST: "milvus"
       MILVUS_PORT: "19530"
@@ -175,7 +175,7 @@ services:
     env_file:
       - .env.ecs-full
     environment:
-      DATABASE_URL: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-change-me}@mysql:3306/${MYSQL_DATABASE:-prism_db}?charset=utf8mb4"
+      DATABASE_URL: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-CHANGE-ME}@mysql:3306/${MYSQL_DATABASE:-prism_db}?charset=utf8mb4"
       REDIS_URL: "redis://redis:6379/0"
       MILVUS_HOST: "milvus"
       MILVUS_PORT: "19530"
@@ -225,7 +225,7 @@ services:
       engine:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
       interval: 20s
       timeout: 10s
       retries: 20

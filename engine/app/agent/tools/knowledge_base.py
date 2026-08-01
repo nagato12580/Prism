@@ -290,6 +290,22 @@ def _require_retrieval(ctx: ToolContext):
     return ctx.retrieval_service
 
 
+def _query_mode(ctx: ToolContext, requested: str) -> str:
+    return "deep" if requested == "deep" or ctx.deep_search_enabled else "fast"
+
+
+def _query_controls(ctx: ToolContext) -> dict[str, Any]:
+    return {
+        "depth": ctx.deep_search_depth,
+        "graph_hops": ctx.graph_hops,
+        "max_iterations": ctx.rag_max_iterations,
+    }
+
+
+def _query_top_k(ctx: ToolContext, fallback: int) -> int:
+    return ctx.deep_search_top_k if ctx.deep_search_enabled else fallback
+
+
 def _encode_cursor(after: str) -> str:
     payload = json.dumps({"v": _CURSOR_VERSION, "after": after}, separators=(",", ":"))
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
@@ -632,9 +648,10 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
                             tenant_id=scope.tenant_id,
                             kb_uid=resolved_kb_uid,
                             query=query_text,
-                            mode="deep" if mode == "deep" else "fast",
+                            mode=_query_mode(ctx, mode),
                             file_uids=requested_file_uids,
                             top_k=global_top_k,
+                            **_query_controls(ctx),
                         )
                     except Exception:  # isolate retrieval provider failures per page
                         logger.exception(
@@ -747,9 +764,10 @@ def _build_query_kb(ctx: ToolContext) -> StructuredTool:
                         tenant_id=scope.tenant_id,
                         kb_uid=target_kb_uid,
                         query=query_text,
-                        mode="deep" if mode == "deep" else "fast",
+                        mode=_query_mode(ctx, mode),
                         file_uids=resolved_file_uids,
-                        top_k=10,
+                        top_k=_query_top_k(ctx, 10),
+                        **_query_controls(ctx),
                     )
                 except Exception:  # keep other authorized KBs usable
                     logger.exception(

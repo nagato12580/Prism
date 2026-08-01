@@ -23,6 +23,11 @@ class ToolContext:
     run_id: str | None = None
     knowledge_scope: Any | None = None
     retrieval_service: Any | None = None
+    deep_search_enabled: bool = False
+    deep_search_depth: str = "standard"
+    deep_search_top_k: int = 8
+    graph_hops: int = 1
+    rag_max_iterations: int = 3
 
 
 @dataclass(frozen=True, slots=True)

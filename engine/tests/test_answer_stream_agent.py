@@ -41,6 +41,67 @@ def test_knowledge_retrieval_service_passes_explicit_top_k_override(monkeypatch)
     assert captured["request"].config.top_k == 37
 
 
+def test_knowledge_retrieval_service_deep_mode_uses_depth_controls(monkeypatch):
+    class Topic:
+        active_index_generation = "index-1"
+        active_graph_generation = "graph-1"
+
+    class Query:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return Topic()
+
+    class DB:
+        def query(self, model):
+            return Query()
+
+    captured = {}
+
+    class FakeAgenticResult:
+        status = "sufficient"
+        evidence = [{
+            "file_uid": "file-a",
+            "chunk_id": "chunk-a",
+            "text": "grounded text",
+            "channels": {"graph": {"raw_score": 1.0, "raw_rank": 1}},
+        }]
+        iterations = 5
+
+    class FakeRunner:
+        def __init__(self, **kwargs):
+            captured["config"] = kwargs["config"]
+
+        def run(self, query):
+            captured["query"] = query
+            return FakeAgenticResult()
+
+    monkeypatch.setattr(answer, "AgenticRagRunner", FakeRunner)
+    monkeypatch.setattr(answer, "make_unified_search", lambda **_kwargs: lambda *_args, **_kw: [])
+    monkeypatch.setattr(answer, "_load_chunks", lambda *_args, **_kwargs: {})
+
+    result = answer._KnowledgeRetrievalService(DB()).query(
+        tenant_id="tenant-a",
+        kb_uid="kb-a",
+        query="all papers",
+        mode="deep",
+        top_k=12,
+        depth="deep",
+        max_iterations=10,
+    )
+
+    assert result["status"] == "ok"
+    assert result["retrieval_health"]["agentic"]["iterations"] == 5
+    config = captured["config"]
+    assert (config.mode, config.top_k, config.graph_hops, config.max_iterations) == (
+        "deep",
+        12,
+        3,
+        5,
+    )
+
+
 def test_load_chunks_resolves_public_chunk_uid_not_internal_id(monkeypatch):
     class Chunk:
         id = "internal-row-id"; chunk_uid = "public-chunk-uid"; parent_id = None

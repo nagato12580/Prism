@@ -24,6 +24,13 @@ _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=
 _Session = sessionmaker(bind=_engine)
 
 
+_DEPTH_CONTROLS = {
+    "quick": (1, 1),
+    "standard": (2, 3),
+    "deep": (3, 5),
+}
+
+
 class _KnowledgeRetrievalService:
     def __init__(self, db):
         self.db = db
@@ -37,6 +44,9 @@ class _KnowledgeRetrievalService:
         mode: str = "fast",
         file_uids: tuple[str, ...] = (),
         top_k: int = 10,
+        depth: str = "standard",
+        graph_hops: int | None = None,
+        max_iterations: int | None = None,
     ) -> dict[str, Any]:
         from backend.app.models import KnowledgeTopic
 
@@ -73,8 +83,104 @@ class _KnowledgeRetrievalService:
             index_generation=topic.active_index_generation,
             graph_generation=topic.active_graph_generation,
         )
+        if mode == "deep":
+            return self._agentic_query(
+                scope=scope,
+                query=query,
+                file_uids=tuple(file_uids),
+                top_k=top_k,
+                depth=depth,
+                graph_hops=graph_hops,
+                max_iterations=max_iterations,
+            )
         response = execute_retrieval(request, scope)
         return response.model_dump()
+
+    def _agentic_query(
+        self,
+        *,
+        scope: RetrievalScope,
+        query: str,
+        file_uids: tuple[str, ...],
+        top_k: int,
+        depth: str,
+        graph_hops: int | None,
+        max_iterations: int | None,
+    ) -> dict[str, Any]:
+        depth_hops, depth_iterations = _DEPTH_CONTROLS.get(depth, _DEPTH_CONTROLS["standard"])
+        effective_hops = depth_hops
+        if graph_hops is not None and depth == "quick":
+            effective_hops = min(graph_hops, depth_hops)
+        effective_iterations = depth_iterations
+        if max_iterations is not None:
+            effective_iterations = min(max_iterations, depth_iterations)
+        scope = scope.model_copy(update={"file_uids": tuple(file_uids), "source_types": ()})
+        search = make_unified_search(mode="deep", scope=scope)
+        runner = AgenticRagRunner(
+            search=search,
+            load_chunks=lambda chunk_ids: _load_chunks(chunk_ids, scope=scope),
+            judge=_judge_rag,
+            config=RagRunConfig(
+                mode="deep",
+                top_k=top_k,
+                graph_hops=effective_hops,
+                max_iterations=effective_iterations,
+            ),
+        )
+        result = runner.run(query)
+        evidence = []
+        for hit in result.evidence:
+            item = self._agentic_hit_to_evidence(scope, hit)
+            if item is not None:
+                evidence.append(item)
+        status = "ok" if result.status == "sufficient" else ("degraded" if evidence else "no_hits")
+        warnings = [] if result.status == "sufficient" else [{
+            "code": "AGENTIC_RAG_INSUFFICIENT",
+            "message": "agentic retrieval did not judge the evidence sufficient",
+            "retryable": False,
+        }]
+        return {
+            "status": status,
+            "evidence": evidence,
+            "warnings": warnings,
+            "retrieval_health": {
+                "agentic": {
+                    "status": result.status,
+                    "iterations": result.iterations,
+                    "depth": depth,
+                    "graph_hops": effective_hops,
+                }
+            },
+        }
+
+    @staticmethod
+    def _agentic_hit_to_evidence(scope: RetrievalScope, hit: dict[str, Any]) -> dict[str, Any] | None:
+        file_uid = hit.get("file_uid")
+        chunk_uid = hit.get("chunk_uid") or hit.get("chunk_id")
+        if not file_uid or not chunk_uid:
+            return None
+        channels = hit.get("channels")
+        if isinstance(channels, dict):
+            retrieval_channels = tuple(channels.keys())
+        elif isinstance(channels, (list, tuple)):
+            retrieval_channels = tuple(str(item) for item in channels)
+        else:
+            retrieval_channels = ()
+        graph_rag = hit.get("graph_rag") if isinstance(hit.get("graph_rag"), dict) else {}
+        return {
+            "tenant_id": scope.tenant_id,
+            "kb_uid": scope.kb_uid,
+            "file_uid": str(file_uid),
+            "item_id": hit.get("item_id"),
+            "chunk_uid": str(chunk_uid),
+            "display_title": str(hit.get("display_title") or hit.get("title") or hit.get("doc_name") or ""),
+            "excerpt": str(hit.get("excerpt") or hit.get("snippet") or hit.get("text") or ""),
+            "score": hit.get("rerank_score") or hit.get("score") or hit.get("rrf_score"),
+            "retrieval_channels": retrieval_channels,
+            "graph_path": graph_rag.get("path") if isinstance(graph_rag, dict) else (),
+            "evidence_type": "chunk",
+            "index_generation": scope.index_generation,
+        }
 
 
 def _strip_tool_guidance(prompt: str, disabled_tools: set[str]) -> str:
@@ -357,6 +463,11 @@ def build_agent_runner(
             citations=[],
             stats_holder={},
             clarify_holder={},
+            deep_search_enabled=deep_search_enabled,
+            deep_search_depth=deep_search_depth,
+            deep_search_top_k=deep_search_top_k,
+            graph_hops=graph_hops,
+            rag_max_iterations=rag_max_iterations,
         )
         knowledge_tools = list(build_knowledge_tools(ctx).values())
         general_keys = ("clarify_user", "datetime", "memory_search")

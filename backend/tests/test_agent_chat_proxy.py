@@ -59,6 +59,35 @@ def test_chat_answer_request_defaults_allow_multi_step_knowledge_synthesis():
     req = ChatAnswerRequest(query="summarize", kb_uids=["kb-a"])
 
     assert req.rag_max_iterations == 10
+    assert req.deep_search_enabled is False
+    assert req.deep_search_depth == "standard"
+
+
+def test_backend_proxy_forwards_deep_search_depth_controls(client, db_session, monkeypatch):
+    _enable_scope_secret(monkeypatch)
+    _seed_owned_kb(db_session, "kb-a")
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["payload"] = payload
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "query": "hi",
+            "kb_uids": ["kb-a"],
+            "mode": "deep",
+            "deep_search_enabled": True,
+            "deep_search_depth": "deep",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["payload"]["deep_search_enabled"] is True
+    assert captured["payload"]["deep_search_depth"] == "deep"
 
 
 def test_backend_proxy_signs_only_authorized_kbs(client, db_session, monkeypatch):
