@@ -470,7 +470,7 @@ def build_agent_runner(
             rag_max_iterations=rag_max_iterations,
         )
         knowledge_tools = list(build_knowledge_tools(ctx).values())
-        general_keys = ("clarify_user", "datetime", "memory_search")
+        general_keys = ("clarify_user", "datetime", "memory_search", "capture_thought")
         general_tools = [
             BUILTIN_REGISTRY[key].builder(ctx)
             for key in general_keys

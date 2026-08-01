@@ -404,6 +404,55 @@ class CaptureThoughtInput(BaseModel):
     title: str | None = Field(None, description="Optional short title.")
 
 
+def _normalize_capture_with_llm(text: str, title: str = "") -> dict[str, Any] | None:
+    """AI 规范化：把原始捕获内容整理成 Markdown 草稿。
+
+    返回与 ``create_asset_item_from_raw`` 的 ``parsed`` 兼容的 dict；任何失败
+    （无 API 配置、超时、返回非法 JSON 等）返回 None，由规则兜底完成捕获——
+    采集不因规范化失败而中断。
+    """
+    try:
+        from backend.app.prompts.asset_parse import build_capture_normalize_messages
+        from backend.app.services.asset_items import _parse_json_object
+        from engine.app.llm.client import chat as llm_chat
+
+        system_prompt, user_message = build_capture_normalize_messages(content=text, title=title)
+        raw = llm_chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            timeout_seconds=10,
+            max_retries=1,
+        )
+        if not raw:
+            return None
+        data = _parse_json_object(raw)
+        content_md = str(data.get("content_md") or "").strip()
+        if not content_md:
+            return None
+        return {
+            "title": str(data.get("title") or "").strip(),
+            "asset_kind": str(data.get("asset_kind") or "").strip(),
+            "summary": str(data.get("summary") or "").strip(),
+            "category": str(data.get("category") or "").strip(),
+            "tags": data.get("tags") if isinstance(data.get("tags"), list) else None,
+            "rewritten_content": content_md,
+            "extracts": [{"type": "content_md", "content": content_md, "confidence": 0.8}],
+            "confidence": {
+                "overall": 0.8,
+                "classification": 0.7,
+                "source": 0.9,
+                "extraction": 0.8,
+                "relation": 0.0,
+                "extension": 0.0,
+            },
+            "rationale": "捕获内容已由 AI 规范化为 Markdown 草稿。",
+        }
+    except Exception:
+        return None
+
+
 def _build_capture_thought(ctx: ToolContext) -> StructuredTool:
     def run(text: str, title: str | None = None) -> str:
         from backend.app.services.asset_items import create_asset_item_from_raw
@@ -413,24 +462,31 @@ def _build_capture_thought(ctx: ToolContext) -> StructuredTool:
             return json.dumps({"status": "error", "message": "没有可记录的内容。"}, ensure_ascii=False)
         db = _Session()
         try:
+            parsed = _normalize_capture_with_llm(text, title or "")
             item = create_asset_item_from_raw(
                 db,
                 raw_text=text,
                 raw_title=title or "",
                 raw_source_type="chat",
                 raw_metadata={"entrypoint": "chat_capture"},
-                parsed=None,
+                parsed=parsed,
             )
         finally:
             db.close()
-        ctx.stats_holder["capture_thought"] = {"item_id": item.id, "title": item.title}
+        ctx.stats_holder["capture_thought"] = {"item_id": item.id, "title": item.title, "llm_normalized": parsed is not None}
+        message = (
+            f"已记录「{item.title}」，AI 已整理成 Markdown 草稿，等待你在审核台确认入库。"
+            if parsed is not None
+            else f"已记录「{item.title}」，等待你在审核台确认入库。"
+        )
         return json.dumps(
             {
                 "status": "ok",
                 "item_id": item.id,
                 "title": item.title,
-                "summary": f"已记录「{item.title}」，等待你在审核台确认入库。",
-                "message": f"已记录「{item.title}」，等待你在审核台确认入库。",
+                "llm_normalized": parsed is not None,
+                "summary": message,
+                "message": message,
             },
             ensure_ascii=False,
         )

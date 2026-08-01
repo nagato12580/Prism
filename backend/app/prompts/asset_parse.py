@@ -113,6 +113,68 @@ def build_asset_parse_messages(
 
 
 # ---------------------------------------------------------------------------
+# Capture Normalization (raw chat thought -> Markdown draft)
+# ---------------------------------------------------------------------------
+
+CAPTURE_NORMALIZE_SYSTEM_PROMPT = (
+    "你是 Prism 的碎片规范化器。把用户随手记下的原始想法整理成结构化、可入库的 Markdown 草稿。"
+    "只返回严格 JSON，不要输出 Markdown 代码块包裹。"
+)
+
+CAPTURE_NORMALIZE_TASK = "把用户原始想法规范化为 Markdown 知识草稿。只返回 JSON。"
+
+CAPTURE_NORMALIZE_RULES = [
+    "content_md 必须是 Markdown 正文：结构清晰（可使用标题、列表、加粗、任务列表），去除口语和冗余，保留全部关键信息。",
+    "只能依据用户原文组织内容，不要编造、不要补充原文没有的信息。",
+    "title 是短标题，不超过 40 字。",
+    "如果原文包含待办或计划，content_md 用任务列表清晰列出。",
+    "tags 使用 2-6 个简洁标签，category 是主题分类。",
+]
+
+JSON_SHAPE_CAPTURE_NORMALIZE: dict[str, Any] = {
+    "title": "短标题，不超过40字",
+    "asset_kind": "开放字符串，例如 knowledge/opinion/resource/task/idea",
+    "summary": "一两句话总结主要信息点",
+    "content_md": "规范化后的 Markdown 正文",
+    "tags": ["2-6个标签"],
+    "category": "主题分类",
+}
+
+
+def build_capture_normalize_request(
+    *,
+    content: str,
+    title: str = "",
+    max_content_length: int = 6000,
+) -> str:
+    """Build the user message JSON for capture normalization."""
+    request = {
+        "task": CAPTURE_NORMALIZE_TASK,
+        "source": {"title": title, "content": content[:max_content_length]},
+        "json_shape": JSON_SHAPE_CAPTURE_NORMALIZE,
+        "rules": CAPTURE_NORMALIZE_RULES,
+    }
+    return json.dumps(request, ensure_ascii=False)
+
+
+def build_capture_normalize_messages(
+    *,
+    content: str,
+    title: str = "",
+    max_content_length: int = 6000,
+) -> tuple[str, str]:
+    """Build the system and user messages for capture normalization."""
+    return (
+        CAPTURE_NORMALIZE_SYSTEM_PROMPT,
+        build_capture_normalize_request(
+            content=content,
+            title=title,
+            max_content_length=max_content_length,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Knowledge Synthesis (multiple confirmed assets -> knowledge unit draft)
 # ---------------------------------------------------------------------------
 

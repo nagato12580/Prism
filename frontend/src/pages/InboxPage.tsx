@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Inbox, Loader2, RefreshCw, Save, Search, Tags, X } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { assetApi, type AssetDraft } from '@/app/api'
 import { cn } from '@/lib/utils'
 
@@ -245,6 +247,7 @@ function EditorPanel({
   const [summary, setSummary] = useState('')
   const [rawText, setRawText] = useState('')
   const [rewrittenContent, setRewrittenContent] = useState('')
+  const [rewrittenMode, setRewrittenMode] = useState<'preview' | 'edit'>('preview')
   const [category, setCategory] = useState('')
   const [assetKind, setAssetKind] = useState('')
   const [tags, setTags] = useState('')
@@ -255,6 +258,7 @@ function EditorPanel({
     setSummary(item?.summary ?? '')
     setRawText(item?.raw_text || '')
     setRewrittenContent(item?.rewritten_content ?? '')
+    setRewrittenMode('preview')
     setCategory(item?.category ?? '')
     setAssetKind(item?.asset_kind ?? '')
     setTags(joinTags(item?.tags))
@@ -352,7 +356,42 @@ function EditorPanel({
         </div>
         <div className="mt-3 grid gap-3">
           <LabeledTextarea label="摘要" value={summary} onChange={setSummary} rows={4} />
-          <LabeledTextarea label="AI 改写内容" value={rewrittenContent} onChange={setRewrittenContent} rows={8} />
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500">AI 改写内容（Markdown）</span>
+              <div className="flex items-center gap-1 rounded-lg border border-[var(--prism-line)] bg-white p-0.5 text-[10px]">
+                {(['preview', 'edit'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setRewrittenMode(mode)}
+                    className={cn(
+                      'rounded-md px-2 py-0.5 transition',
+                      rewrittenMode === mode ? 'bg-[var(--prism-blue)] text-white' : 'text-slate-500 hover:text-slate-700',
+                    )}
+                  >
+                    {mode === 'preview' ? 'Markdown 预览' : '编辑'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {rewrittenMode === 'preview' ? (
+              <div className="markdown-body min-h-24 rounded-lg border border-[var(--prism-line)] bg-slate-50 px-2.5 py-2 text-xs leading-5">
+                {rewrittenContent.trim() ? (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{rewrittenContent}</ReactMarkdown>
+                ) : (
+                  <span className="text-slate-400">暂无改写内容</span>
+                )}
+              </div>
+            ) : (
+              <textarea
+                value={rewrittenContent}
+                rows={8}
+                onChange={(event) => setRewrittenContent(event.target.value)}
+                className="w-full resize-none rounded-lg border border-[var(--prism-line)] bg-white px-2.5 py-2 text-xs leading-5 outline-none transition focus:border-[var(--prism-blue)]"
+              />
+            )}
+          </div>
           <LabeledTextarea label="原始内容" value={rawText} onChange={setRawText} rows={12} />
           <ReadBlock label="来源" value={[item.raw_source_type, item.raw_source_platform, item.raw_source_url].filter(Boolean).join(' / ') || '-'} />
         </div>

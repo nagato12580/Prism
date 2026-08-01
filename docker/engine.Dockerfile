@@ -7,10 +7,13 @@ ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DEFAULT_TIMEOUT=120 \
-    PIP_RETRIES=8
+    PIP_RETRIES=8 \
+    TIKTOKEN_CACHE_DIR=/app/.tiktoken-cache
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt
+RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt \
+    && mkdir -p /app/.tiktoken-cache \
+    && python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 COPY backend ./backend
 COPY engine ./engine
