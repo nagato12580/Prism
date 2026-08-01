@@ -6,7 +6,8 @@
       "Bash(docker exec aione-mysql-1 *)",
       "Bash(docker exec *)",
       "Bash(python3 -c ' *)",
-      "Bash(docker port *)"
+      "Bash(docker port *)",
+      "Bash(systemctl status *)"
     ]
   }
 }

@@ -422,8 +422,8 @@ def _normalize_capture_with_llm(text: str, title: str = "") -> dict[str, Any] | 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            timeout_seconds=10,
-            max_retries=1,
+            timeout_seconds=8,
+            max_retries=0,
         )
         if not raw:
             return None
