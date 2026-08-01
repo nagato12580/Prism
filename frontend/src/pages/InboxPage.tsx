@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Inbox, Loader2, Plus, RefreshCw, Save, Search, Tags, X } from 'lucide-react'
-import VoiceRecordButton from '@/components/VoiceRecordButton'
+import { Check, Inbox, Loader2, RefreshCw, Save, Search, Tags, X } from 'lucide-react'
 import { assetApi, type AssetDraft } from '@/app/api'
 import { cn } from '@/lib/utils'
 
@@ -31,13 +30,6 @@ export function InboxPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-
-  const [draftText, setDraftText] = useState('')
-  const [draftTitle, setDraftTitle] = useState('')
-  const [draftSourceType, setDraftSourceType] = useState('manual')
-  const [draftSourcePlatform, setDraftSourcePlatform] = useState('')
-  const [draftSourceUrl, setDraftSourceUrl] = useState('')
-  const [draftTags, setDraftTags] = useState('')
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -90,41 +82,6 @@ export function InboxPage() {
   useEffect(() => {
     loadItems()
   }, [])
-
-  const createItem = async () => {
-    const text = draftText.trim()
-    if (!text) {
-      setError('请输入要收集的碎片内容。')
-      return
-    }
-    setSaving(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const created = await assetApi.createItem({
-        raw_text: text,
-        raw_title: draftTitle.trim() || undefined,
-        raw_source_type: draftSourceType.trim() || 'manual',
-        raw_source_platform: draftSourcePlatform.trim() || undefined,
-        raw_source_url: draftSourceUrl.trim() || undefined,
-        raw_tags: splitTags(draftTags),
-        raw_metadata: { entrypoint: 'inbox' },
-      })
-      setItems((current) => [created, ...current])
-      setActiveId(created.id)
-      setDraftText('')
-      setDraftTitle('')
-      setDraftSourceType('manual')
-      setDraftSourcePlatform('')
-      setDraftSourceUrl('')
-      setDraftTags('')
-      setNotice('已放入收件箱，等待确认入库。')
-    } catch (err) {
-      setError(`创建碎片失败：${getErrorMessage(err)}`)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const updateActive = async (patch: Partial<AssetDraft>) => {
     if (!active) return
@@ -182,7 +139,7 @@ export function InboxPage() {
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
               <Inbox size={15} />
-              <span>收件箱</span>
+              <span>审核台</span>
             </div>
             <h1 className="mt-1 text-base font-semibold text-slate-950">待确认碎片</h1>
           </div>
@@ -221,7 +178,7 @@ export function InboxPage() {
           {loading ? (
             <StateBlock text="正在加载待确认碎片" />
           ) : filtered.length === 0 ? (
-            <StateBlock text="暂无待确认碎片。可以在右侧添加新的碎片。" />
+            <StateBlock text="暂无待确认碎片。在对话页说「帮我记一下…」即可采集想法，稍后来这里确认入库。" />
           ) : (
             <div className="space-y-2">
               {filtered.map((item) => (
@@ -258,7 +215,7 @@ export function InboxPage() {
         </div>
       </section>
 
-      <main className="grid min-h-0 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <main className="min-h-0 overflow-hidden">
         <EditorPanel
           item={active}
           saving={saving}
@@ -266,44 +223,6 @@ export function InboxPage() {
           onConfirm={confirmActive}
           onReject={rejectActive}
         />
-
-        <section className="prism-panel flex min-h-0 flex-col rounded-lg p-3">
-          {/* Voice recording / upload area */}
-          <div className="mb-3">
-            <VoiceRecordButton
-              onResult={(item) => {
-                setItems((current) => [item, ...current])
-                setActiveId(item.id)
-                setNotice('语音已转写并放入收件箱，等待确认入库。')
-              }}
-              onError={(msg) => setError(msg)}
-            />
-          </div>
-
-          <div className="mb-3 flex items-center gap-2">
-            <Plus size={16} className="text-[var(--prism-blue)]" />
-            <h2 className="text-sm font-semibold text-slate-950">添加碎片</h2>
-          </div>
-          <div className="space-y-3">
-            <LabeledInput label="标题" value={draftTitle} onChange={setDraftTitle} placeholder="可选" />
-            <LabeledTextarea label="内容" value={draftText} onChange={setDraftText} rows={8} placeholder="粘贴想收集的知识碎片、想法、评论或资源摘录" />
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-              <LabeledInput label="来源类型" value={draftSourceType} onChange={setDraftSourceType} placeholder="manual/comment/web" />
-              <LabeledInput label="来源平台" value={draftSourcePlatform} onChange={setDraftSourcePlatform} placeholder="知乎、网页、手动输入..." />
-            </div>
-            <LabeledInput label="来源链接" value={draftSourceUrl} onChange={setDraftSourceUrl} placeholder="可选" />
-            <LabeledInput label="原始标签" value={draftTags} onChange={setDraftTags} placeholder="用逗号分隔" icon={<Tags size={15} />} />
-            <button
-              type="button"
-              disabled={saving}
-              onClick={createItem}
-              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[var(--prism-blue)] px-3 text-xs font-medium text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-              放入收件箱
-            </button>
-          </div>
-        </section>
       </main>
     </div>
   )
@@ -348,7 +267,7 @@ function EditorPanel({
         <Inbox size={34} className="mb-3 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-950">选择或添加一个碎片</h2>
         <p className="mt-2 max-w-md text-xs leading-5 text-slate-500">
-          收件箱现在直接操作 personal_asset_item。确认后，碎片会进入资产层并沉淀到 PKU/CKP。
+          想法从对话页采集，在这里确认后进入资产层。
         </p>
       </section>
     )

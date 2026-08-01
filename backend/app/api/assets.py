@@ -1,8 +1,6 @@
 # prism/backend/app/api/assets.py
-import json
 import logging
 import os
-import re
 import threading
 import uuid
 from collections import Counter
@@ -24,6 +22,14 @@ from ..prompts.asset_parse import (
 from ..models.asset import AssetRelation, AssetUsageEvent, ExtensionPoint, PersonalAsset, PersonalAssetItem, PersonalAssetUnit
 from ..models.memory import MemoryEntry
 from ..services.knowledge_governance import GovernanceResult
+from ..services.asset_items import (
+    _clean_dict_list,
+    _clean_tags,
+    _keyword_index_text,
+    _parse_json_object,
+    _short_title,
+    create_asset_item_from_raw,
+)
 from ..services.memory_context import recall_preference_context
 from ..services.memory_entity import extract_and_link_entities
 from ..services.memory_vectors import upsert_entry_vector
@@ -52,34 +58,6 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 DEFAULT_USER_ID = "default-user"
 DEFAULT_TENANT_ID = "default-user"
 log = logging.getLogger(__name__)
-
-
-def _short_title(text: str, fallback: str = "未命名资产") -> str:
-    text = re.sub(r"\s+", " ", (text or "").strip())
-    if not text:
-        return fallback
-    return text[:40] + ("..." if len(text) > 40 else "")
-
-
-def _clean_tags(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    tags: list[str] = []
-    for item in value[:12]:
-        tag = str(item).strip().strip("#")
-        if tag and tag not in tags:
-            tags.append(tag[:32])
-    return tags
-
-
-def _clean_dict_list(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    result: list[dict[str, Any]] = []
-    for item in value[:20]:
-        if isinstance(item, dict):
-            result.append(item)
-    return result
 
 
 _MEMORY_TYPE_BY_KIND = {
@@ -144,168 +122,6 @@ def _merge_confirmed_extensions(
         count += 1
 
     return extensions, count
-
-
-def _extract_keywords(text: str, tags: list[str] | None = None) -> list[str]:
-    raw = re.findall(r"[A-Za-z0-9_+#.-]+|[\u4e00-\u9fff]{2,}", text or "")
-    keywords: list[str] = []
-    for item in [*(tags or []), *raw]:
-        word = str(item).strip().strip("#").lower()
-        if len(word) < 2 or word in keywords:
-            continue
-        keywords.append(word[:48])
-        if len(keywords) >= 24:
-            break
-    return keywords
-
-
-def _keyword_index_text(*parts: Any) -> str:
-    values: list[str] = []
-    for part in parts:
-        if part is None:
-            continue
-        if isinstance(part, list):
-            values.extend(str(item) for item in part)
-        elif isinstance(part, dict):
-            values.extend(str(value) for value in part.values())
-        else:
-            values.append(str(part))
-    return " ".join(value.strip() for value in values if value and value.strip())[:10000]
-
-
-def _parse_json_object(text: str) -> dict[str, Any]:
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).strip()
-        text = re.sub(r"```$", "", text).strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        text = text[start : end + 1]
-    payload = json.loads(text)
-    return payload if isinstance(payload, dict) else {}
-
-
-def _fallback_parse(
-    *,
-    content: str,
-    title: str = "",
-    source_type: str = "manual",
-    source_platform: str = "",
-    source_url: str = "",
-) -> dict[str, Any]:
-    has_url = bool(source_url) or "http://" in content or "https://" in content
-    lowered = content.lower()
-    if has_url:
-        kind = "resource"
-        category = "资源"
-    elif any(key in lowered for key in ["观点", "认为", "看法", "评论", "启发"]):
-        kind = "opinion"
-        category = "观点"
-    elif len(content) > 180 or any(key in lowered for key in ["技术", "知识", "教程", "原理", "系统"]):
-        kind = "knowledge"
-        category = "知识点"
-    else:
-        kind = "idea"
-        category = "灵感"
-    summary = _short_title(content, "暂无摘要")
-    return {
-        "title": title or _short_title(content),
-        "asset_kind": kind,
-        "source": {
-            "type": source_type or "manual",
-            "platform": source_platform or "",
-            "url": source_url or "",
-        },
-        "summary": summary,
-        "rewritten_content": "",
-        "extracts": [{"type": "summary", "content": summary, "confidence": 0.4}],
-        "tags": [category],
-        "category": category,
-        "suggested_relations": [],
-        "suggested_extensions": [],
-        "confidence": {
-            "overall": 0.4,
-            "classification": 0.45,
-            "source": 0.4,
-            "extraction": 0.4,
-            "relation": 0.0,
-            "extension": 0.0,
-        },
-        "rationale": "AI 解析不可用，使用规则兜底生成最低可用草稿。",
-    }
-
-
-def _ai_parse_asset(
-    *,
-    content: str,
-    title: str = "",
-    source_type: str = "manual",
-    source_platform: str = "",
-    source_url: str = "",
-    user_preferences: str = "",
-) -> dict[str, Any] | None:
-    if not settings.LLM_API_BASE or not settings.LLM_API_KEY:
-        return None
-    client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
-    system_prompt, user_message = build_asset_parse_messages(
-        content=content,
-        title=title,
-        source_type=source_type,
-        source_platform=source_platform,
-        source_url=source_url,
-        user_preferences=user_preferences,
-    )
-    try:
-        resp = client.chat.completions.create(
-            model=settings.LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.2
-        )
-        return _parse_json_object(resp.choices[0].message.content or "")
-    except Exception:
-        return None
-
-
-def _normalize_parse(
-    *,
-    content: str,
-    title: str,
-    source_type: str,
-    source_platform: str,
-    source_url: str,
-    parsed: dict[str, Any] | None,
-) -> dict[str, Any]:
-    fallback = _fallback_parse(
-        content=content,
-        title=title,
-        source_type=source_type,
-        source_platform=source_platform,
-        source_url=source_url,
-    )
-    data = parsed if isinstance(parsed, dict) else fallback
-    source = data.get("source") if isinstance(data.get("source"), dict) else {}
-    confidence = data.get("confidence") if isinstance(data.get("confidence"), dict) else fallback["confidence"]
-    return {
-        "title": _short_title(str(data.get("title") or fallback["title"])),
-        "summary": str(data.get("summary") or fallback["summary"]).strip()[:1200],
-        "rewritten_content": str(data.get("rewritten_content") or fallback["rewritten_content"] or "").strip(),
-        "asset_kind": str(data.get("asset_kind") or fallback["asset_kind"]).strip()[:64] or "idea",
-        "source_type": str(source.get("type") or source_type or fallback["source"]["type"]).strip()[:64],
-        "source_platform": str(source.get("platform") or source_platform or "").strip()[:128],
-        "source_url": str(source.get("url") or source_url or "").strip()[:1000],
-        "media_type": str(data.get("media_type") or "text").strip()[:64] or "text",
-        "category": str(data.get("category") or fallback["category"]).strip()[:128],
-        "tags": _clean_tags(data.get("tags")) or fallback["tags"],
-        "extracts": _clean_dict_list(data.get("extracts")) or fallback["extracts"],
-        "suggested_relations": _clean_dict_list(data.get("suggested_relations")),
-        "suggested_extensions": _clean_dict_list(data.get("suggested_extensions")),
-        "confidence": confidence,
-        "rationale": str(data.get("rationale") or fallback["rationale"]).strip()[:1200],
-    }
 
 
 def _asset_result(asset: PersonalAsset, score: float) -> AssetSearchResult:
@@ -481,6 +297,40 @@ def _schedule_asset_unit_entity_graph_ingestion(unit_id: str) -> None:
     thread.start()
 
 
+def _ai_parse_asset(
+    *,
+    content: str,
+    title: str = "",
+    source_type: str = "manual",
+    source_platform: str = "",
+    source_url: str = "",
+    user_preferences: str = "",
+) -> dict[str, Any] | None:
+    if not settings.LLM_API_BASE or not settings.LLM_API_KEY:
+        return None
+    client = OpenAI(base_url=settings.LLM_API_BASE, api_key=settings.LLM_API_KEY)
+    system_prompt, user_message = build_asset_parse_messages(
+        content=content,
+        title=title,
+        source_type=source_type,
+        source_platform=source_platform,
+        source_url=source_url,
+        user_preferences=user_preferences,
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.2
+        )
+        return _parse_json_object(resp.choices[0].message.content or "")
+    except Exception:
+        return None
+
+
 def _create_asset_item_from_raw(
     *,
     db: Session,
@@ -511,66 +361,18 @@ def _create_asset_item_from_raw(
         source_url=raw_source_url,
         user_preferences=user_preferences,
     )
-    data = _normalize_parse(
-        content=raw_text,
-        title=raw_title,
-        source_type=raw_source_type,
-        source_platform=raw_source_platform,
-        source_url=raw_source_url,
+    return create_asset_item_from_raw(
+        db,
+        raw_text=raw_text,
+        raw_title=raw_title,
+        raw_source_type=raw_source_type,
+        raw_source_platform=raw_source_platform,
+        raw_source_url=raw_source_url,
+        raw_author=raw_author,
+        raw_tags=raw_tags,
+        raw_metadata=raw_metadata,
         parsed=parsed,
     )
-    raw_tags = _clean_tags(raw_tags or [])
-    keywords = _extract_keywords(raw_text, [*raw_tags, *data["tags"]])
-    item = PersonalAssetItem(
-        user_id=DEFAULT_USER_ID,
-        raw_text=raw_text,
-        raw_title=(raw_title or "")[:255],
-        raw_source_type=(raw_source_type or "manual")[:64],
-        raw_source_platform=(raw_source_platform or "")[:128],
-        raw_source_url=(raw_source_url or "")[:1000],
-        raw_author=(raw_author or "")[:255],
-        raw_tags=raw_tags,
-        raw_metadata=raw_metadata or {},
-        raw_keywords=keywords,
-        keyword_index_text=_keyword_index_text(
-            raw_title,
-            raw_text,
-            raw_tags,
-            keywords,
-            data["title"],
-            data["summary"],
-            data["rewritten_content"],
-            data["tags"],
-            data["category"],
-        ),
-        raw_embedding_status="pending",
-        title=data["title"],
-        summary=data["summary"],
-        asset_kind=data["asset_kind"],
-        source_type=data["source_type"],
-        source_platform=data["source_platform"],
-        source_url=data["source_url"],
-        media_type=data["media_type"],
-        category=data["category"],
-        tags=data["tags"],
-        extracts=data["extracts"],
-        suggested_relations=data["suggested_relations"],
-        suggested_extensions=data["suggested_extensions"],
-        confidence=data["confidence"],
-        rationale=data["rationale"],
-        rewritten_content=data["rewritten_content"],
-        extra_meta={"raw_metadata": raw_metadata or {}},
-        capabilities=["searchable", "summarizable"],
-        source_ref_type="fragment",
-        importance=float((data["confidence"] or {}).get("overall", 0.5) or 0.5),
-        status="pending_review",
-    )
-    db.add(item)
-    db.flush()
-    item.source_ref_id = item.id
-    db.commit()
-    db.refresh(item)
-    return item
 
 
 @router.post("/items", response_model=PersonalAssetItemOut)

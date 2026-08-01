@@ -397,3 +397,62 @@ register_tool(
         default_enabled=False,
     )
 )
+
+
+class CaptureThoughtInput(BaseModel):
+    text: str = Field(..., description="The thought/idea/opinion content to record.")
+    title: str | None = Field(None, description="Optional short title.")
+
+
+def _build_capture_thought(ctx: ToolContext) -> StructuredTool:
+    def run(text: str, title: str | None = None) -> str:
+        from backend.app.services.asset_items import create_asset_item_from_raw
+
+        text = (text or "").strip()
+        if not text:
+            return json.dumps({"status": "error", "message": "没有可记录的内容。"}, ensure_ascii=False)
+        db = _Session()
+        try:
+            item = create_asset_item_from_raw(
+                db,
+                raw_text=text,
+                raw_title=title or "",
+                raw_source_type="chat",
+                raw_metadata={"entrypoint": "chat_capture"},
+                parsed=None,
+            )
+        finally:
+            db.close()
+        ctx.stats_holder["capture_thought"] = {"item_id": item.id, "title": item.title}
+        return json.dumps(
+            {
+                "status": "ok",
+                "item_id": item.id,
+                "title": item.title,
+                "summary": f"已记录「{item.title}」，等待你在审核台确认入库。",
+                "message": f"已记录「{item.title}」，等待你在审核台确认入库。",
+            },
+            ensure_ascii=False,
+        )
+
+    return StructuredTool.from_function(
+        func=run,
+        name="capture_thought",
+        description=(
+            "Record a thought, idea, opinion, snippet, to-do, or resource the user explicitly asks to save. "
+            "Creates a pending item that the user confirms later in the review station. "
+            "Use when the user says things like '帮我记一下', '记下来', '收藏这个', '记录：...'."
+        ),
+        args_schema=CaptureThoughtInput,
+    )
+
+
+register_tool(
+    ToolSpec(
+        key="capture_thought",
+        name="capture_thought",
+        description="Record a thought/idea the user asks to save into the review station.",
+        builder=_build_capture_thought,
+        default_enabled=True,
+    )
+)

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { EvidenceDrawer } from '@/features/chat/EvidenceDrawer'
+import VoiceRecordButton from '@/components/VoiceRecordButton'
 import {
   AlertTriangle,
   ArrowRight,
@@ -15,6 +16,7 @@ import {
   Library,
   Loader2,
   MessageSquarePlus,
+  Mic,
   Pencil,
   Plus,
   Search,
@@ -195,6 +197,8 @@ export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [includePersonalInbox, setIncludePersonalInbox] = useState(false)
+  const [lastCapture, setLastCapture] = useState<{ summary: string } | null>(null)
+  const [showVoice, setShowVoice] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingSessionTitle, setEditingSessionTitle] = useState('')
@@ -507,9 +511,11 @@ export function ChatPage() {
           }, sessionId, assistantMessageId)
           if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'tool_result') {
-          finishLastToolRun(safeString(msg.data?.tool, 'tool'), {
+          const toolName = safeString(msg.data?.tool, 'tool')
+          const toolSummary = safeString(msg.data?.summary)
+          finishLastToolRun(toolName, {
             status: safeString(msg.data?.status) === 'error' ? 'error' : 'success',
-            summary: safeString(msg.data?.summary),
+            summary: toolSummary,
             stats: msg.data?.stats,
             latencyMs: msg.data?.latency_ms,
             evidenceItems: normalizeEvidenceItems(msg.data?.evidence_items),
@@ -519,6 +525,9 @@ export function ChatPage() {
               msg.data?.stats?.trace_steps,
             ),
           }, sessionId, assistantMessageId)
+          if (toolName === 'capture_thought' && safeString(msg.data?.status) !== 'error') {
+            setLastCapture({ summary: toolSummary || '已记录，等待你在审核台确认入库。' })
+          }
           if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'clarify') {
           setLastClarify({
@@ -978,6 +987,32 @@ export function ChatPage() {
           )}
         </div>
 
+        {/* 采集反馈：捕获 chip + 语音面板 */}
+        {lastCapture ? (
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            <span className="min-w-0 truncate">{lastCapture.summary}</span>
+            <Link to="/inbox" className="shrink-0 font-semibold text-emerald-700 transition hover:underline">
+              去审核台确认 →
+            </Link>
+          </div>
+        ) : null}
+        {showVoice ? (
+          <div className="mb-2">
+            <VoiceRecordButton
+              onResult={(item) => {
+                setShowVoice(false)
+                setLastCapture({
+                  summary: `语音已记录「${item.title || '新想法'}」，等待你在审核台确认入库。`,
+                })
+              }}
+              onError={(msg) => {
+                setShowVoice(false)
+                window.alert(msg)
+              }}
+            />
+          </div>
+        ) : null}
+
         {/* 输入区域：输入框 + 内嵌工具栏 */}
         <form
           className="shrink-0 bg-white/90 p-3 sm:p-4"
@@ -1122,6 +1157,21 @@ export function ChatPage() {
                   清除筛选
                 </button>
               )}
+
+              {/* 语音采集开关 */}
+              <button
+                type="button"
+                aria-label="语音记录"
+                onClick={() => setShowVoice((value) => !value)}
+                className={cn(
+                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition',
+                  showVoice
+                    ? 'border-red-200 bg-red-50 text-red-600'
+                    : 'border-[var(--prism-line)] bg-white text-slate-500 hover:border-blue-200 hover:text-[var(--prism-blue)]',
+                )}
+              >
+                <Mic size={15} />
+              </button>
 
               {/* 发送按钮 */}
               <button
@@ -1583,6 +1633,7 @@ function toolLabel(tool: string) {
   const labels: Record<string, string> = {
     chat: '闲聊',
     knowledge_search: '检索知识库',
+    capture_thought: '记录想法',
     clarify_user: '补充信息',
     retrieve: '检索',
     search: '搜索',

@@ -46,6 +46,9 @@ AGENT_SYSTEM_PROMPT = """
 * `knowledge_search`：统一知识检索（向量 + 关键词 + 图谱扩展 + 重排），返回带出处的证据。适合大多数知识库提问——主题、观点、事实、规则、原文片段都会在证据包里一并返回。
 * `deep_knowledge_search`：深度统一检索（多轮 + 2 跳图扩展 + 社区/god/surprising），适合跨资料综合、矛盾核查、命名实体核实、关系梳理、复杂或多源问题。
 * `memory_search`：搜索用户长期记忆与画像上下文，例如偏好、目标、约束、当前项目。
+* `capture_thought`：当用户明确要求记录/收藏一个想法、观点、心得、片段、待办或资源时调用。它会创建一个待确认项，稍后用户在「审核台」确认后进入资产层。
+  - 只在用户明确说「帮我记一下」「记下来」「收藏这个」「记录：…」这类采集意图时调用；普通提问不要调用，继续走 knowledge_search。
+  - 不要和 memory_search 混淆：memory_search 是检索已有长期记忆；capture_thought 是新增一条待入库的知识碎片。
 
 统一检索内部已包含实体图谱扩展与别名匹配，无需再单独查实体图谱。当用户问“我之前关于 X 的资料里有什么观点”时，直接用 `knowledge_search` 或 `deep_knowledge_search`，并依据返回证据里的 excerpt/source 组织回答。
 
