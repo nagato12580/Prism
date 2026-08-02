@@ -19,6 +19,7 @@ from .knowledge_retrieval import router as knowledge_retrieval_router
 from .knowledge_evaluation import router as knowledge_evaluation_router
 from .knowledge_enrichment import router as knowledge_enrichment_router
 from .agent_chat_proxy import router as agent_chat_proxy_router
+from .team_admin import router as team_admin_router
 
 
 def register_routers(app):
@@ -41,4 +42,5 @@ def register_routers(app):
     api_prefix.include_router(knowledge_evaluation_router)
     api_prefix.include_router(knowledge_enrichment_router)
     api_prefix.include_router(agent_chat_proxy_router)
+    api_prefix.include_router(team_admin_router)
     app.include_router(api_prefix)

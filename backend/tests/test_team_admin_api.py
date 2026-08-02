@@ -110,3 +110,91 @@ def test_mutations_write_audit_logs(db_session):
     assert "team_member.add" in actions
     assert "team_member.update" in actions
     assert "team_member.remove" in actions
+
+
+# ---------------------------------------------------------------------------
+# API tests (Task 2)
+# ---------------------------------------------------------------------------
+
+from backend.app.models import TeamMember, TeamRole
+
+
+def auth_headers(user: str, tenant: str = "tenant-a", roles: str = ""):
+    headers = {"X-Prism-Actor": user, "X-Prism-Tenant": tenant}
+    if roles:
+        headers["X-Prism-Roles"] = roles
+    return headers
+
+
+def test_members_endpoints_require_admin(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="bob", role=TeamRole.MEMBER.value, status="active"))
+    db_session.commit()
+
+    for method, path, kwargs in [
+        ("get", "/api/v1/team/admin/members", {}),
+        ("post", "/api/v1/team/admin/members", {"json": {"user_id": "carol", "role": "member"}}),
+        ("put", "/api/v1/team/admin/members/carol", {"json": {"role": "admin"}}),
+        ("delete", "/api/v1/team/admin/members/carol", {}),
+    ]:
+        response = getattr(client, method)(path, headers=auth_headers("bob"), **kwargs)
+        assert response.status_code == 403, f"{method.upper()} {path} should be 403 for non-admin"
+
+
+def test_admin_can_add_list_update_remove_member(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+
+    added = client.post(
+        "/api/v1/team/admin/members",
+        json={"user_id": "bob", "role": "member", "status": "active"},
+        headers=auth_headers("admin"),
+    )
+    assert added.status_code == 200
+    assert added.json()["user_id"] == "bob"
+    assert added.json()["role"] == "member"
+
+    listed = client.get("/api/v1/team/admin/members", headers=auth_headers("admin"))
+    assert listed.status_code == 200
+    assert {m["user_id"] for m in listed.json()["items"]} == {"admin", "bob"}
+    assert listed.json()["total"] == 2
+
+    updated = client.put(
+        "/api/v1/team/admin/members/bob",
+        json={"role": "admin"},
+        headers=auth_headers("admin"),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["role"] == "admin"
+
+    removed = client.delete("/api/v1/team/admin/members/bob", headers=auth_headers("admin"))
+    assert removed.status_code == 200
+    assert removed.json()["detail"] == "deleted"
+
+
+def test_admin_cannot_operate_on_self(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+
+    response = client.put(
+        "/api/v1/team/admin/members/admin",
+        json={"role": "member"},
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "SELF_OPERATION_DENIED"
+
+
+def test_admin_cannot_remove_last_admin(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+
+    # A distinct admin (via the header roles fast-path) removes the only
+    # active admin in the DB. Deleting yourself is always SELF_OPERATION_DENIED
+    # (the service checks self-op before the last-admin guard), so a separate
+    # actor is required to exercise the LAST_ADMIN guard.
+    response = client.delete(
+        "/api/v1/team/admin/members/admin",
+        headers=auth_headers("boss", roles="admin"),
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "LAST_ADMIN_OPERATION_DENIED"
