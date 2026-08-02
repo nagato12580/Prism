@@ -75,6 +75,23 @@ def test_update_self_raises_self_operation_denied(db_session):
         update_team_member(db_session, actor=actor("admin"), user_id="admin", role=TeamRole.MEMBER.value)
 
 
+def test_demote_last_active_admin_raises_last_admin_denied(db_session):
+    # actor "admin" has no TeamMember row, so the self-op guard
+    # (user_id == actor.actor_id) does not fire; only "boss" is seeded as the
+    # sole active admin, so demoting it genuinely hits the last-admin guard.
+    seed_member(db_session, "boss", TeamRole.ADMIN.value)
+    with pytest.raises(TeamMemberLastAdminDenied):
+        update_team_member(db_session, actor=actor("admin"), user_id="boss", role=TeamRole.MEMBER.value)
+
+
+def test_disable_last_active_admin_raises_last_admin_denied(db_session):
+    # Same actor/target split as above: actor "admin" != target "boss", so the
+    # self-op guard is bypassed and the disabling-last-admin branch fires.
+    seed_member(db_session, "boss", TeamRole.ADMIN.value)
+    with pytest.raises(TeamMemberLastAdminDenied):
+        update_team_member(db_session, actor=actor("admin"), user_id="boss", status="disabled")
+
+
 def test_remove_member_ok(db_session):
     seed_member(db_session, "admin", TeamRole.ADMIN.value)
     seed_member(db_session, "bob")
@@ -198,3 +215,44 @@ def test_admin_cannot_remove_last_admin(client, db_session):
     )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "LAST_ADMIN_OPERATION_DENIED"
+
+
+def test_post_member_invalid_role_returns_422(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/team/admin/members",
+        json={"user_id": "carol", "role": "superadmin"},
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_MEMBER_FIELD"
+
+
+def test_post_member_duplicate_returns_409(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="carol", role=TeamRole.MEMBER.value, status="active"))
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/team/admin/members",
+        json={"user_id": "carol", "role": "member"},
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "MEMBER_CONFLICT"
+
+
+def test_put_member_invalid_role_returns_422(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="bob", role=TeamRole.MEMBER.value, status="active"))
+    db_session.commit()
+
+    response = client.put(
+        "/api/v1/team/admin/members/bob",
+        json={"role": "superadmin"},
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_MEMBER_FIELD"

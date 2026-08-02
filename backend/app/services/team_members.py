@@ -25,6 +25,10 @@ class TeamMemberConflict(ValueError):
     pass
 
 
+class TeamMemberValidationError(ValueError):
+    pass
+
+
 class TeamMemberSelfOperationDenied(PermissionError):
     pass
 
@@ -95,9 +99,9 @@ def add_team_member(
     status: str = "active",
 ) -> TeamMember:
     if role not in _TEAM_ROLES:
-        raise TeamMemberConflict(f"invalid team role: {role}")
+        raise TeamMemberValidationError(f"invalid team role: {role}")
     if status not in _TEAM_STATUSES:
-        raise TeamMemberConflict(f"invalid member status: {status}")
+        raise TeamMemberValidationError(f"invalid member status: {status}")
 
     existing = (
         db.query(TeamMember)
@@ -139,9 +143,9 @@ def update_team_member(
         raise TeamMemberSelfOperationDenied("cannot operate on yourself")
 
     if role is not None and role not in _TEAM_ROLES:
-        raise TeamMemberConflict(f"invalid team role: {role}")
+        raise TeamMemberValidationError(f"invalid team role: {role}")
     if status is not None and status not in _TEAM_STATUSES:
-        raise TeamMemberConflict(f"invalid member status: {status}")
+        raise TeamMemberValidationError(f"invalid member status: {status}")
 
     row = _load_member(db, tenant_id=actor.tenant_id, user_id=user_id)
     before = {"role": row.role, "status": row.status}

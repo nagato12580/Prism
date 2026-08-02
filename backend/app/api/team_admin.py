@@ -13,6 +13,7 @@ from backend.app.services.team_members import (
     TeamMemberLastAdminDenied,
     TeamMemberNotFound,
     TeamMemberSelfOperationDenied,
+    TeamMemberValidationError,
     add_team_member,
     list_team_members,
     remove_team_member,
@@ -93,6 +94,8 @@ def create_member(
             role=body.role,
             status=body.status,
         )
+    except TeamMemberValidationError as e:
+        raise ApiProblem(422, "INVALID_MEMBER_FIELD", str(e))
     except TeamMemberConflict as e:
         raise ApiProblem(409, "MEMBER_CONFLICT", str(e))
     return _team_member_dto(row)
@@ -121,6 +124,8 @@ def update_member(
         raise ApiProblem(409, "LAST_ADMIN_OPERATION_DENIED", str(e))
     except TeamMemberNotFound as e:
         raise ApiProblem(404, "MEMBER_NOT_FOUND", str(e))
+    except TeamMemberValidationError as e:
+        raise ApiProblem(422, "INVALID_MEMBER_FIELD", str(e))
     except TeamMemberConflict as e:
         raise ApiProblem(422, "INVALID_MEMBER_FIELD", str(e))
     return _team_member_dto(row)
