@@ -92,6 +92,12 @@ class Settings:
     GRAPH_EXPAND_MAX_CANDIDATES: int = int(os.getenv("GRAPH_EXPAND_MAX_CANDIDATES", "60"))
 
     AGENT_TOOL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "12"))
+    INTENT_RECENT_TURNS: int = int(os.getenv("INTENT_RECENT_TURNS", "5"))
+    LOOP_RECENT_TURNS: int = int(os.getenv("LOOP_RECENT_TURNS", "10"))
+    MIN_LOOP_RECENT_TURNS: int = int(os.getenv("MIN_LOOP_RECENT_TURNS", "6"))
+    CONTEXT_COMPRESSION_THRESHOLD: float = float(os.getenv("CONTEXT_COMPRESSION_THRESHOLD", "0.8"))
+    MAX_SUMMARY_TOKENS: int = int(os.getenv("MAX_SUMMARY_TOKENS", "1200"))
+    DEFAULT_MAX_CONTEXT_TOKENS: int = int(os.getenv("DEFAULT_MAX_CONTEXT_TOKENS", "32000"))
     KNOWLEDGE_SCOPE_SECRET: str = os.getenv("KNOWLEDGE_SCOPE_SECRET", "")
     DEEP_SEARCH_JUDGE_API_BASE: str = os.getenv("DEEP_SEARCH_JUDGE_API_BASE", "")
     DEEP_SEARCH_JUDGE_API_KEY: str = os.getenv("DEEP_SEARCH_JUDGE_API_KEY", "")
