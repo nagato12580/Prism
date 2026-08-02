@@ -56,7 +56,6 @@ _INTENT_CLASSIFY_PROMPT = """你是一个意图分类器。分析用户的输入
 4. 需要查资料、文档、知识库内容 → knowledge
 5. 知识库相关的问题如果也涉及用户个人偏好，可以同时启用 knowledge 和 memory
 6. 如果用户明确提到了具体的知识库名称，在 kb_specs 中列出
-7. 工具分组可以组合给出，比如 ["knowledge", "memory"]，表示同时启用知识库和记忆工具组
 
 返回纯 JSON（不要 markdown 代码块）：
 {"groups": ["knowledge", "memory"], "kb_specs": [], "reasoning": "简短中文说明"}
