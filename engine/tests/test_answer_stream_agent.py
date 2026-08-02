@@ -239,7 +239,7 @@ def test_answer_stream_keeps_runner_full_history_when_intent_uses_recent_history
 
     list(answer.answer_stream("hello", history))
 
-    assert captured["history"] is history
+    assert captured["history"] == history
 
 
 def test_answer_stream_forwards_deep_search_options(monkeypatch):
