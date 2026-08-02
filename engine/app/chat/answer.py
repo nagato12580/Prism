@@ -76,13 +76,13 @@ def classify_intent(query: str, history: list[dict] | None = None) -> dict[str, 
     (list of explicitly mentioned KB names), and ``reasoning`` (short
     explanation).  On failure, defaults to enabling all groups for safety.
     """
-    classifier_input = json.dumps({
+    classifier_input = {
         "query": query,
         "recent_history": _intent_history_payload(history),
-    }, ensure_ascii=False)
+    }
     messages: list[dict[str, str]] = [
         {"role": "system", "content": _INTENT_CLASSIFY_PROMPT},
-        {"role": "user", "content": classifier_input},
+        {"role": "user", "content": json.dumps(classifier_input, ensure_ascii=False)},
     ]
     try:
         raw = chat(messages, timeout_seconds=5, max_retries=0)
