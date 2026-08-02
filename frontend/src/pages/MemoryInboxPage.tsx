@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BrainCircuit, Check, GitCompareArrows, Loader2, RefreshCw, Search, X } from 'lucide-react'
+import { BrainCircuit, Check, ChevronDown, ChevronRight, GitCompareArrows, Loader2, RefreshCw, Search, X } from 'lucide-react'
 import { chatApi, memoryApi, type ChatSessionOut, type MemoryDraft, type MemoryExtractionResult } from '@/app/api'
 
 function draftTitle(draft: MemoryDraft) {
@@ -10,6 +10,33 @@ function draftTitle(draft: MemoryDraft) {
 
 function formatPayload(payload: Record<string, unknown>) {
   return JSON.stringify(payload, null, 2)
+}
+
+function PayloadBlock({ payload }: { payload: Record<string, unknown> }) {
+  const [expanded, setExpanded] = useState(false)
+  const text = formatPayload(payload)
+  const lineCount = text.split('\n').length
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between gap-2 rounded-md bg-slate-950 px-3 py-2 text-[11px] font-medium text-slate-200 transition-colors hover:bg-slate-800"
+      >
+        <span>Payload</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-slate-400">
+          {lineCount} lines
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+      </button>
+      {expanded ? (
+        <pre className="mt-1 max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
+          {text}
+        </pre>
+      ) : null}
+    </div>
+  )
 }
 
 export function MemoryInboxPage() {
@@ -216,9 +243,9 @@ export function MemoryInboxPage() {
                   <span className="rounded-md bg-slate-100 px-2 py-1">confidence: {Math.round(draft.confidence * 100)}%</span>
                   <span className="rounded-md bg-slate-100 px-2 py-1">{draft.status}</span>
                 </div>
-                <h2 className="mt-2 text-sm font-semibold text-slate-950">{draftTitle(draft)}</h2>
+                <h2 className="mt-2 break-words text-sm font-semibold leading-6 text-slate-950">{draftTitle(draft)}</h2>
                 {draft.source?.span_text ? (
-                  <blockquote className="mt-3 rounded-md border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                  <blockquote className="mt-3 break-words rounded-md border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-xs leading-5 text-slate-600">
                     <div className="mb-1 font-medium text-slate-700">Source</div>
                     {draft.source.span_text}
                   </blockquote>
@@ -229,9 +256,7 @@ export function MemoryInboxPage() {
                     <div className="mt-1 break-all">{draft.conflict_ids.join(', ')}</div>
                   </div>
                 ) : null}
-                <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
-                  {formatPayload(draft.payload)}
-                </pre>
+                <PayloadBlock payload={draft.payload} />
               </div>
               {draft.status === 'draft' ? (
                 <div className="flex shrink-0 flex-col gap-2 md:w-64">
