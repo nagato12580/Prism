@@ -400,6 +400,24 @@ class FakeGraphExplainRagRunner:
         return FakeGraphExplainRagResult()
 
 
+def test_recent_turn_history_keeps_last_ten_user_turns():
+    history = []
+    for index in range(1, 13):
+        history.append({"role": "user", "content": f"user {index}"})
+        history.append({"role": "assistant", "content": f"assistant {index}"})
+
+    recent = runner_mod._recent_turn_history(history, 10)
+
+    assert [item["content"] for item in recent][:2] == ["user 3", "assistant 3"]
+    assert [item["content"] for item in recent][-2:] == ["user 12", "assistant 12"]
+    assert len(recent) == 20
+
+
+def test_estimate_tokens_uses_characters_divided_by_three():
+    assert runner_mod._estimate_text_tokens("abcdef") == 2
+    assert runner_mod._estimate_text_tokens("") == 0
+
+
 def test_runner_records_tool_trace_and_streams_evidence_items():
     model = FakeEvidenceModel()
     recorder = FakeTraceRecorder()

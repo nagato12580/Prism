@@ -50,6 +50,47 @@ class SynthesisEvidence:
 _TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="agent-tool")
 OPEN_KB_DOCUMENT_PER_FILE_LIMIT = 5
 DOCUMENT_WINDOW_SUCCESS_STATUSES = frozenset({"ok", "success", "degraded"})
+CONTEXT_SUMMARY_HEADER = "会话早期摘要："
+
+
+def _estimate_text_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return (len(text) + 2) // 3
+
+
+def _message_dict_text(message: dict[str, Any]) -> str:
+    role = str(message.get("role") or "")
+    content = message.get("content")
+    if not isinstance(content, str):
+        return ""
+    return f"{role}: {content}"
+
+
+def _recent_turn_history(history: list[dict[str, Any]], turns: int) -> list[dict[str, Any]]:
+    if turns <= 0:
+        return []
+    selected: list[dict[str, Any]] = []
+    user_turns = 0
+    for item in reversed(history):
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str) or not content.strip():
+            continue
+        selected.append(item)
+        if role == "user":
+            user_turns += 1
+            if user_turns >= turns:
+                break
+    return list(reversed(selected))
+
+
+def _history_token_estimate(history: list[dict[str, Any]]) -> int:
+    return sum(_estimate_text_tokens(_message_dict_text(item)) for item in history)
+
+
 FORCED_PARTIAL_DOCUMENT_ANSWER = (
     "我已经连续读取了这篇文档的 5 个窗口，但目前还没读取完整篇文档。"
     "我会先基于已经读取到的内容回答；是否继续读取后续部分，请回复“继续”。"
