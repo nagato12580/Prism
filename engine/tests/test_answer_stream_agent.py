@@ -176,6 +176,13 @@ def test_classify_intent_sends_recent_history_to_llm(monkeypatch):
     }
 
 
+def test_intent_classifier_prompt_guides_contextual_followups():
+    assert "这些 / 它 / 它们 / 继续 / 刚才那个 / 这篇 / 上述 / 前面" in answer._INTENT_CLASSIFY_PROMPT
+    assert "知识库文档、论文、上传资料、引用、表格或章节" in answer._INTENT_CLASSIFY_PROMPT
+    assert "出处 / 分别 / 展开 / 继续 / 对比" in answer._INTENT_CLASSIFY_PROMPT
+    assert "我的论文 / 我的项目 / 我的设定" in answer._INTENT_CLASSIFY_PROMPT
+
+
 def test_answer_stream_delegates_to_agent_runner(monkeypatch):
     captured = {}
 

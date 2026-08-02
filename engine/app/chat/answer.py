@@ -56,6 +56,10 @@ _INTENT_CLASSIFY_PROMPT = """你是意图分类器。根据用户当前问题和
 4. 需要查询资料、文档或知识库内容时启用 knowledge。
 5. 知识库问题也涉及用户个人偏好时，可以同时启用 knowledge 和 memory。
 6. 用户明确提到具体知识库名称时，在 kb_specs 中列出。
+7. 必须结合当前问题与近期对话记录分类。当前输入出现“这些 / 它 / 它们 / 继续 / 刚才那个 / 这篇 / 上述 / 前面”等代词或省略式指代时，先使用近期对话补全语义，再进行分类。
+8. 近期对话讨论知识库文档、论文、上传资料、引用、表格或章节时，简短的追问通常继承相同的知识任务领域，应启用 knowledge。
+9. 如果最近一条助手消息刚枚举了一组对象，用户追问“出处 / 分别 / 展开 / 继续 / 对比”等内容时，通常仍是知识任务，应启用 knowledge。
+10. 问题需要结合用户个人背景解释“我的论文 / 我的项目 / 我的设定”等表达时，可以同时启用 memory 和 knowledge。
 
 输入是 JSON 对象，包含 query（当前问题）和 recent_history（近期对话记录）。
 
@@ -72,12 +76,13 @@ def classify_intent(query: str, history: list[dict] | None = None) -> dict[str, 
     (list of explicitly mentioned KB names), and ``reasoning`` (short
     explanation).  On failure, defaults to enabling all groups for safety.
     """
+    classifier_input = json.dumps({
+        "query": query,
+        "recent_history": _intent_history_payload(history),
+    }, ensure_ascii=False)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": _INTENT_CLASSIFY_PROMPT},
-        {"role": "user", "content": json.dumps({
-            "query": query,
-            "recent_history": _intent_history_payload(history),
-        }, ensure_ascii=False)},
+        {"role": "user", "content": classifier_input},
     ]
     try:
         raw = chat(messages, timeout_seconds=5, max_retries=0)
