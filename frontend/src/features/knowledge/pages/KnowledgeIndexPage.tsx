@@ -13,9 +13,134 @@ function isDeleteDisabled(kb: KnowledgeBase) {
   return kb.is_system || kb.delete_disabled
 }
 
+function canDeleteKb(kb: KnowledgeBase) {
+  return kb.can_delete && !kb.is_system && !kb.delete_disabled
+}
+
 function systemKbLabel(kb: KnowledgeBase) {
   if (kb.system_type === 'personal_inbox') return '个人随手记'
   return '系统知识库'
+}
+
+function renderKnowledgeCard(
+  kb: KnowledgeBase,
+  navigate: ReturnType<typeof useNavigate>,
+  setCreateError: (e: unknown) => void,
+  setDeleting: (kb: KnowledgeBase) => void,
+  onAction: () => void,
+) {
+  return (
+    <button
+      key={kb.kb_uid}
+      type="button"
+      onClick={() => navigate(`/knowledge/${kb.kb_uid}/files`)}
+      className="group flex flex-col gap-3 rounded-xl border border-[var(--prism-line)] bg-white p-4 text-left shadow-[0_8px_30px_-18px_rgba(15,23,42,0.25)] transition hover:border-blue-200 hover:shadow-[0_16px_40px_-24px_rgba(37,99,235,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)]/10 text-[var(--prism-blue)]">
+          <BookOpen size={18} />
+        </div>
+        {canDeleteKb(kb) ? (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="删除知识库"
+            title="删除知识库"
+            onClick={(e) => {
+              e.stopPropagation()
+              setCreateError(null)
+              setDeleting(kb)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                setCreateError(null)
+                setDeleting(kb)
+              }
+            }}
+            className="rounded-md p-1.5 text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+          >
+            <Trash2 size={14} />
+          </span>
+        ) : isDeleteDisabled(kb) ? (
+          <span
+            aria-label="系统知识库不能删除"
+            title="系统知识库不能删除"
+            className="rounded-md px-2 py-1 text-[10px] font-medium text-slate-400 opacity-0 transition group-hover:opacity-100"
+          >
+            系统保护
+          </span>
+        ) : null}
+      </div>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-slate-900">{kb.name}</div>
+        <div className="mt-0.5 line-clamp-2 text-xs text-slate-500">
+          {kb.description || '暂无描述'}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge tone={kb.status === 'active' ? 'green' : 'amber'}>{kb.status}</Badge>
+        {kb.is_system || kb.system_type ? (
+          <Badge tone="violet">{systemKbLabel(kb)}</Badge>
+        ) : null}
+        {kb.active_index_generation ? (
+          <Badge tone="blue">已索引</Badge>
+        ) : (
+          <Badge tone="neutral">未索引</Badge>
+        )}
+      </div>
+      {kb.governance_status === 'personal' ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation()
+            knowledgeBasesApi.requestTransfer(kb.kb_uid, { message: null }).then(onAction)
+          }}
+        >
+          提交为团队库
+        </Button>
+      ) : kb.governance_status === 'pending_transfer' ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation()
+            knowledgeBasesApi.withdrawTransfer(kb.kb_uid).then(onAction)
+          }}
+        >
+          撤回提交
+        </Button>
+      ) : null}
+    </button>
+  )
+}
+
+function KnowledgeSection({
+  title,
+  items,
+  navigate,
+  setCreateError,
+  setDeleting,
+  onAction,
+}: {
+  title: string
+  items: KnowledgeBase[]
+  navigate: ReturnType<typeof useNavigate>
+  setCreateError: (e: unknown) => void
+  setDeleting: (kb: KnowledgeBase) => void
+  onAction: () => void
+}) {
+  if (items.length === 0) return null
+  return (
+    <section className="space-y-2">
+      <h2 className="text-xs font-semibold text-slate-500">{title}</h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((kb) => renderKnowledgeCard(kb, navigate, setCreateError, setDeleting, onAction))}
+      </div>
+    </section>
+  )
 }
 
 export function KnowledgeIndexPage() {
@@ -42,6 +167,10 @@ export function KnowledgeIndexPage() {
 
   useEffect(load, [])
 
+  const personalItems = items.filter((kb) => kb.governance_status === 'personal')
+  const pendingItems = items.filter((kb) => kb.governance_status === 'pending_transfer')
+  const managedItems = items.filter((kb) => kb.governance_status === 'managed')
+
   const submitCreate = () => {
     if (!name.trim()) return
     setCreating(true)
@@ -60,8 +189,8 @@ export function KnowledgeIndexPage() {
 
   const confirmDelete = () => {
     if (!deleting) return
-    if (isDeleteDisabled(deleting)) {
-      setCreateError(new Error('系统知识库不能删除'))
+    if (!canDeleteKb(deleting)) {
+      setCreateError(new Error('没有删除权限'))
       return
     }
     knowledgeBasesApi
@@ -101,70 +230,31 @@ export function KnowledgeIndexPage() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((kb) => (
-            <button
-              key={kb.kb_uid}
-              type="button"
-              onClick={() => navigate(`/knowledge/${kb.kb_uid}/files`)}
-              className="group flex flex-col gap-3 rounded-xl border border-[var(--prism-line)] bg-white p-4 text-left shadow-[0_8px_30px_-18px_rgba(15,23,42,0.25)] transition hover:border-blue-200 hover:shadow-[0_16px_40px_-24px_rgba(37,99,235,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--prism-blue)]/10 text-[var(--prism-blue)]">
-                  <BookOpen size={18} />
-                </div>
-                {isDeleteDisabled(kb) ? (
-                  <span
-                    aria-label="系统知识库不能删除"
-                    title="系统知识库不能删除"
-                    className="rounded-md px-2 py-1 text-[10px] font-medium text-slate-400 opacity-0 transition group-hover:opacity-100"
-                  >
-                    系统保护
-                  </span>
-                ) : (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label="删除知识库"
-                    title="删除知识库"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setCreateError(null)
-                      setDeleting(kb)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setCreateError(null)
-                        setDeleting(kb)
-                      }
-                    }}
-                    className="rounded-md p-1.5 text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-slate-900">{kb.name}</div>
-                <div className="mt-0.5 line-clamp-2 text-xs text-slate-500">
-                  {kb.description || '暂无描述'}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge tone={kb.status === 'active' ? 'green' : 'amber'}>{kb.status}</Badge>
-                {kb.is_system || kb.system_type ? (
-                  <Badge tone="violet">{systemKbLabel(kb)}</Badge>
-                ) : null}
-                {kb.active_index_generation ? (
-                  <Badge tone="blue">已索引</Badge>
-                ) : (
-                  <Badge tone="neutral">未索引</Badge>
-                )}
-              </div>
-            </button>
-          ))}
+        <div className="flex flex-col gap-6">
+          <KnowledgeSection
+            title="我的个人库"
+            items={personalItems}
+            navigate={navigate}
+            setCreateError={setCreateError}
+            setDeleting={setDeleting}
+            onAction={load}
+          />
+          <KnowledgeSection
+            title="提交中"
+            items={pendingItems}
+            navigate={navigate}
+            setCreateError={setCreateError}
+            setDeleting={setDeleting}
+            onAction={load}
+          />
+          <KnowledgeSection
+            title="团队库"
+            items={managedItems}
+            navigate={navigate}
+            setCreateError={setCreateError}
+            setDeleting={setDeleting}
+            onAction={load}
+          />
         </div>
       )}
 
@@ -208,7 +298,7 @@ export function KnowledgeIndexPage() {
             <Button variant="ghost" onClick={() => setDeleting(null)}>
               取消
             </Button>
-            <Button variant="danger" onClick={confirmDelete} disabled={!!deleting && isDeleteDisabled(deleting)}>
+            <Button variant="danger" onClick={confirmDelete} disabled={!!deleting && !canDeleteKb(deleting)}>
               <Trash2 size={14} /> 确认删除
             </Button>
           </div>
