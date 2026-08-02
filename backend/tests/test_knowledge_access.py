@@ -258,3 +258,80 @@ def test_visible_kb_uids_includes_owned_pending_and_authorized_managed(db_sessio
     assert pending.kb_uid in visible
     assert managed_visible.kb_uid in visible
     assert managed_hidden.kb_uid not in visible
+
+
+# ---------------------------------------------------------------------------
+# Service tests (Task 3)
+# ---------------------------------------------------------------------------
+
+def test_transfer_request_accept_grants_original_owner_editor(db_session):
+    from backend.app.models import KnowledgeAccessAuditLog, KnowledgeBaseMembership
+    from backend.app.services.knowledge_rbac import accept_transfer, request_transfer
+
+    team_member(db_session, "admin", TeamRole.ADMIN.value)
+    topic = kb(db_session, owner="alice", status=KnowledgeGovernanceStatus.PERSONAL.value)
+
+    requested = request_transfer(db_session, actor("alice"), topic.kb_uid, "ready for team")
+    assert requested.governance_status == KnowledgeGovernanceStatus.PENDING_TRANSFER.value
+    assert requested.transfer_requested_by == "alice"
+
+    accepted = accept_transfer(db_session, actor("admin"), topic.kb_uid)
+    assert accepted.governance_status == KnowledgeGovernanceStatus.MANAGED.value
+
+    membership = db_session.query(KnowledgeBaseMembership).filter_by(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        user_id="alice",
+    ).one()
+    assert membership.role == KnowledgeBaseRole.EDITOR.value
+
+    actions = [row.action for row in db_session.query(KnowledgeAccessAuditLog).all()]
+    assert "transfer.request" in actions
+    assert "transfer.accept" in actions
+
+
+def test_owner_can_withdraw_pending_transfer(db_session):
+    from backend.app.services.knowledge_rbac import request_transfer, withdraw_transfer
+
+    topic = kb(db_session, owner="alice")
+    request_transfer(db_session, actor("alice"), topic.kb_uid, None)
+    withdrawn = withdraw_transfer(db_session, actor("alice"), topic.kb_uid)
+    assert withdrawn.governance_status == KnowledgeGovernanceStatus.PERSONAL.value
+    assert withdrawn.transfer_requested_by is None
+
+
+def test_admin_reject_returns_to_personal_with_reason(db_session):
+    from backend.app.services.knowledge_rbac import reject_transfer, request_transfer
+
+    team_member(db_session, "admin", TeamRole.ADMIN.value)
+    topic = kb(db_session, owner="alice")
+    request_transfer(db_session, actor("alice"), topic.kb_uid, None)
+    rejected = reject_transfer(db_session, actor("admin"), topic.kb_uid, "needs cleanup")
+    assert rejected.governance_status == KnowledgeGovernanceStatus.PERSONAL.value
+    assert rejected.transfer_rejection_reason == "needs cleanup"
+
+
+def test_manager_can_grant_editor_but_not_manager(db_session):
+    from backend.app.services.knowledge_rbac import upsert_membership
+    from backend.app.services.knowledge_access import KnowledgeAccessDenied
+
+    topic = kb(db_session, owner="alice", status=KnowledgeGovernanceStatus.MANAGED.value)
+    grant(db_session, topic, "manager", KnowledgeBaseRole.MANAGER.value)
+
+    membership = upsert_membership(
+        db_session,
+        actor("manager"),
+        topic.kb_uid,
+        "bob",
+        KnowledgeBaseRole.EDITOR.value,
+    )
+    assert membership.role == KnowledgeBaseRole.EDITOR.value
+
+    with pytest.raises(KnowledgeAccessDenied):
+        upsert_membership(
+            db_session,
+            actor("manager"),
+            topic.kb_uid,
+            "charlie",
+            KnowledgeBaseRole.MANAGER.value,
+        )
