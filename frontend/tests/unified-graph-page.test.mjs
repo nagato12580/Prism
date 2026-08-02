@@ -58,6 +58,11 @@ assert.match(
 )
 assert.match(
   page,
+  /ref=\{graphContainerRef\}[\s\S]*bg-\[radial-gradient\(circle_at_50%_42%/,
+  'Graph canvas frame should own a full-frame surface background so SVG aspect-ratio letterboxing does not expose blank bands.',
+)
+assert.match(
+  page,
   /function solveFreeScatterLayout\(/,
   'Knowledge graph page should promote solveFreeScatterLayout as the main graph layout contract.',
 )

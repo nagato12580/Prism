@@ -937,7 +937,7 @@ export const assetApi = {
 }
 
 export type UnifiedGraphView = 'entity' | 'source'
-export type UnifiedGraphNodeType = 'entity' | 'document_chunk' | 'personal_asset_unit'
+export type UnifiedGraphNodeType = 'entity' | 'document_chunk'
 export type UnifiedGraphEdgeType =
   | 'mentioned_in'
   | 'mentions_entity'

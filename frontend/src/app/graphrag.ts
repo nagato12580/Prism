@@ -32,7 +32,7 @@ export function graphPathLabels(graphPath: GraphRagPathEntry[]) {
     if (isGraphRagPathRoute(entry) && entry.steps.length > 0) {
       const sourceMarker = typeof entry.source_marker === 'string' && entry.source_marker.trim()
         ? entry.source_marker
-        : 'graph route'
+        : '图谱路径'
       const matchedEntityIds = Array.isArray(entry.matched_entity_ids)
         ? entry.matched_entity_ids.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
         : []
@@ -42,7 +42,7 @@ export function graphPathLabels(graphPath: GraphRagPathEntry[]) {
       return [routeLabel, ...entry.steps.map((step) => graphStepLabel(step))]
     }
     if (isGraphRagPathRoute(entry)) {
-      return [entry.source_marker?.trim() || 'graph route']
+      return [entry.source_marker?.trim() || '图谱路径']
     }
     return [graphStepLabel(entry)]
   })
@@ -53,7 +53,7 @@ export function nodeGraphExplain(node: GraphRagNodeLike): GraphRagExplain | null
   if (explain?.why && explain?.evidence_type) return explain
   if (node.evidence_type) {
     return {
-      why: 'This node includes retrieval-backed graph evidence.',
+      why: '该节点包含检索返回的图证据。',
       evidence_type: node.evidence_type,
     }
   }
@@ -68,7 +68,7 @@ export function edgeGraphExplain(edge: GraphRagEdgeLike): GraphRagExplain | null
       why:
         edge.reason?.trim() ||
         edge.evidence_span?.trim() ||
-        'This relation includes retrieval-backed graph evidence.',
+        '该关系包含检索返回的图证据。',
       evidence_type: edge.evidence_type,
     }
   }
@@ -102,7 +102,7 @@ export function selectInspectorExplain<T extends GraphRagEdgeLike & { id: string
   )
 
   return {
-    why: `This node has ${edgeExplains.length} retrieval-backed relations. Review the relation details below one by one.`,
+    why: `该节点包含 ${edgeExplains.length} 条检索返回的关联关系，请在下方逐一查看关系详情。`,
     evidence_type: edgeExplains.some(({ explain }) => explain.evidence_type === 'INFERRED')
       ? 'INFERRED'
       : edgeExplains[0].explain.evidence_type,

@@ -63,7 +63,7 @@ function Brand({ isDark = false }: { isDark?: boolean }) {
         <div className={cn('truncate text-[15px] font-semibold tracking-normal', isDark ? 'text-white' : 'text-slate-950')}>
           棱镜 Prism
         </div>
-        <div className="truncate text-[11px] text-slate-500">Personal knowledge lab</div>
+        <div className="truncate text-[11px] text-slate-500">个人知识实验室</div>
       </div>
     </div>
   )

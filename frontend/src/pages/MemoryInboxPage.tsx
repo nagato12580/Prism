@@ -24,9 +24,9 @@ function PayloadBlock({ payload }: { payload: Record<string, unknown> }) {
         aria-expanded={expanded}
         className="flex w-full items-center justify-between gap-2 rounded-md bg-slate-950 px-3 py-2 text-[11px] font-medium text-slate-200 transition-colors hover:bg-slate-800"
       >
-        <span>Payload</span>
+        <span>负载数据</span>
         <span className="flex shrink-0 items-center gap-1.5 text-slate-400">
-          {lineCount} lines
+          {lineCount} 行
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
       </button>
@@ -144,37 +144,37 @@ export function MemoryInboxPage() {
   return (
     <div data-testid="memory-inbox-page" className="flex h-[calc(100vh-9rem)] flex-col space-y-3 text-[13px]">
       <section className="shrink-0 border-b border-[var(--prism-line)] pb-3">
-        <div className="text-xs font-medium text-slate-500">Memory governance</div>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-950">Memory Inbox</h1>
+        <div className="text-xs font-medium text-slate-500">记忆治理</div>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-950">记忆收件箱</h1>
       </section>
 
       <section className="shrink-0 rounded-lg border border-[var(--prism-line)] bg-white p-3">
         <div className="flex flex-col gap-2 md:flex-row md:items-end">
           <label className="min-w-0 flex-1">
-            <span className="mb-1 block text-[11px] font-medium text-slate-500">Chat session</span>
+            <span className="mb-1 block text-[11px] font-medium text-slate-500">聊天会话</span>
             <select
               value={selectedSessionId}
               onChange={(event) => setSelectedSessionId(event.target.value)}
-              aria-label="Chat session for memory extraction"
+              aria-label="用于记忆提取的聊天会话"
               className="h-9 w-full rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs outline-none focus:border-[var(--prism-blue)]"
             >
-              {sessions.length === 0 ? <option value="">No chat sessions</option> : null}
+              {sessions.length === 0 ? <option value="">暂无聊天会话</option> : null}
               {sessions.map((session) => (
-                <option key={session.id} value={session.id} title={session.title || 'Untitled session'}>
-                  {session.title || 'Untitled session'}
+                <option key={session.id} value={session.id} title={session.title || '未命名会话'}>
+                  {session.title || '未命名会话'}
                 </option>
               ))}
             </select>
           </label>
           <label className="w-full md:w-28">
-            <span className="mb-1 block text-[11px] font-medium text-slate-500">Messages</span>
+            <span className="mb-1 block text-[11px] font-medium text-slate-500">消息数</span>
             <input
               type="number"
               min={1}
               max={100}
               value={extractLimit}
               onChange={(event) => setExtractLimit(Number(event.target.value) || 20)}
-              aria-label="Messages to scan for memory extraction"
+              aria-label="用于记忆提取的扫描消息数"
               className="h-9 w-full rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs outline-none focus:border-[var(--prism-blue)]"
             />
           </label>
@@ -185,13 +185,13 @@ export function MemoryInboxPage() {
             className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-50"
           >
             {extracting ? <Loader2 size={15} className="animate-spin" /> : <BrainCircuit size={15} />}
-            Extract from session
+            从会话中提取
           </button>
         </div>
         {extractionResult ? (
           <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-            Scanned {extractionResult.messages_scanned} messages, found {extractionResult.candidates_found} candidates,
-            created {extractionResult.drafts_created} drafts, skipped {extractionResult.candidates_skipped}.
+            扫描了 {extractionResult.messages_scanned} 条消息，发现 {extractionResult.candidates_found} 个候选，
+            创建了 {extractionResult.drafts_created} 条草稿，跳过 {extractionResult.candidates_skipped} 个候选。
           </div>
         ) : null}
       </section>
@@ -202,21 +202,21 @@ export function MemoryInboxPage() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search memory drafts"
-            placeholder="Search drafts, source text, payload"
+            aria-label="搜索记忆草稿"
+            placeholder="搜索草稿、来源文本、负载数据"
             className="h-9 w-full rounded-md border border-[var(--prism-line)] bg-white pl-8 pr-3 text-xs outline-none focus:border-[var(--prism-blue)]"
           />
         </label>
         <select
           value={status}
           onChange={(event) => setStatus(event.target.value)}
-          aria-label="Filter memory drafts by status"
+          aria-label="按状态过滤记忆草稿"
           className="h-9 rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs"
         >
-          <option value="draft">Draft</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="rejected">Rejected</option>
-          <option value="">All</option>
+          <option value="draft">草稿</option>
+          <option value="confirmed">已确认</option>
+          <option value="rejected">已拒绝</option>
+          <option value="">全部</option>
         </select>
         <button
           type="button"
@@ -225,7 +225,7 @@ export function MemoryInboxPage() {
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-[var(--prism-line)] bg-white px-3 text-xs font-medium text-slate-600 disabled:opacity-50"
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-          Refresh
+          刷新
         </button>
       </section>
 
@@ -246,13 +246,13 @@ export function MemoryInboxPage() {
                 <h2 className="mt-2 break-words text-sm font-semibold leading-6 text-slate-950">{draftTitle(draft)}</h2>
                 {draft.source?.span_text ? (
                   <blockquote className="mt-3 break-words rounded-md border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-xs leading-5 text-slate-600">
-                    <div className="mb-1 font-medium text-slate-700">Source</div>
+                    <div className="mb-1 font-medium text-slate-700">来源</div>
                     {draft.source.span_text}
                   </blockquote>
                 ) : null}
                 {draft.conflict_ids.length > 0 ? (
                   <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    <div className="font-medium">Conflicts</div>
+                    <div className="font-medium">冲突</div>
                     <div className="mt-1 break-all">{draft.conflict_ids.join(', ')}</div>
                   </div>
                 ) : null}
@@ -286,7 +286,7 @@ export function MemoryInboxPage() {
                             [draft.id]: event.target.value,
                           }))
                         }
-                        aria-label="Statement id to supersede"
+                        aria-label="要替换的陈述 ID"
                         className="h-8 w-full rounded-md border border-[var(--prism-line)] bg-white px-2 text-xs outline-none focus:border-[var(--prism-blue)]"
                       />
                       <button

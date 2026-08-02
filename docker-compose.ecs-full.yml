@@ -110,9 +110,10 @@ services:
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "${ES_JAVA_OPTS:--Xms768m -Xmx768m}"
+      ES_JAVA_OPTS: "${ES_JAVA_OPTS:--Xms512m -Xmx512m}"
     volumes:
       - es_data:/usr/share/elasticsearch/data
+    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
       interval: 20s

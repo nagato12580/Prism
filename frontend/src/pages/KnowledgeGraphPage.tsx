@@ -1,9 +1,9 @@
 import React, { type PointerEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Boxes,
   ChevronDown,
   ChevronUp,
   FileText,
+  Filter,
   Loader2,
   Maximize2,
   Network,
@@ -35,21 +35,23 @@ type PositionedNode = UnifiedGraphNode & { x: number; y: number }
 type PositionMap = Record<string, { x: number; y: number }>
 type PinnedState = Record<string, boolean>
 type DragState = { id: string; dx: number; dy: number; originX: number; originY: number; moved: boolean } | null
+type PanState = { startX: number; startY: number; originPanX: number; originPanY: number } | null
 type DistanceTier = 'focus' | 'near' | 'mid' | 'far' | 'dim'
 
-const graphWidth = 1180
-const graphHeight = 720
+const minGraphWidth = 1180
+const minGraphHeight = 720
 const graphNodeClampPadding = 44
+const maxNodeVisualExtent = 33
 const minGraphZoom = 0.55
 const maxGraphZoom = 1.8
 const graphZoomStep = 0.15
 const scatterPaddingX = graphNodeClampPadding
 const scatterPaddingY = graphNodeClampPadding
-const scatterMinSpacing = 150
+const scatterMinSpacing = 180
 const scatterIdealEdgeLength = 228
-const scatterRepelStrength = 14
-const scatterAttractStrength = 0.04
-const scatterRelaxationPasses = 20
+const scatterRepelStrength = 18
+const scatterAttractStrength = 0.018
+const scatterRelaxationPasses = 60
 const dragThreshold = 3
 const maxExplorerDepth = 3
 const defaultVisibleSeedLimit = 4
@@ -86,12 +88,6 @@ const nodeMeta: Record<
     fill: '#ecfdf5',
     icon: FileText,
   },
-  personal_asset_unit: {
-    label: '个人资产单元',
-    color: '#be185d',
-    fill: '#fdf2f8',
-    icon: Boxes,
-  },
 }
 
 const fallbackNodeMeta = {
@@ -123,10 +119,11 @@ function positionKey(view: UnifiedGraphView, nodeId: string) {
   return `${view}:${nodeId}`
 }
 
-function clampScatterPoint(point: { x: number; y: number }) {
+function clampScatterPoint(point: { x: number; y: number }, width: number, height: number) {
+  const pad = scatterPaddingX + maxNodeVisualExtent
   return {
-    x: clamp(point.x, scatterPaddingX, graphWidth - scatterPaddingX),
-    y: clamp(point.y, scatterPaddingY, graphHeight - scatterPaddingY),
+    x: clamp(point.x, pad, width - pad),
+    y: clamp(point.y, pad, height - pad),
   }
 }
 
@@ -308,30 +305,32 @@ function tierWeight(tier: DistanceTier) {
 }
 
 function distanceLabel(distance: number) {
-  return distance === 1 ? '1-hop' : `${distance}-hop`
+  return distance === 1 ? '1 跳' : `${distance} 跳`
 }
 
-function seededScatterPoint(index: number, count: number) {
+function seededScatterPoint(index: number, count: number, width: number, height: number) {
   if (count <= 1) {
-    return { x: graphWidth / 2, y: graphHeight / 2 }
+    return { x: width / 2, y: height / 2 }
   }
 
   const angle = index * 2.399963229728653
   const radius = Math.sqrt((index + 0.5) / Math.max(1, count))
-  const usableWidth = graphWidth - scatterPaddingX * 2
-  const usableHeight = graphHeight - scatterPaddingY * 2
+  const usableWidth = width - scatterPaddingX * 2
+  const usableHeight = height - scatterPaddingY * 2
 
   return clampScatterPoint({
-    x: graphWidth / 2 + Math.cos(angle) * radius * (usableWidth / 2),
-    y: graphHeight / 2 + Math.sin(angle) * radius * (usableHeight / 2),
-  })
+    x: width / 2 + Math.cos(angle) * radius * (usableWidth / 2),
+    y: height / 2 + Math.sin(angle) * radius * (usableHeight / 2),
+  }, width, height)
 }
 
 function relaxScatterLayout(
   points: Array<{ id: string; x: number; y: number; pinned: boolean }>,
   edges: UnifiedGraphEdge[],
+  width: number,
+  height: number,
 ) {
-  const relaxed = points.map((point) => ({ ...clampScatterPoint(point), pinned: point.pinned, id: point.id }))
+  const relaxed = points.map((point) => ({ ...clampScatterPoint(point, width, height), pinned: point.pinned, id: point.id }))
   const indexById = new Map(relaxed.map((point, index) => [point.id, index]))
 
   for (let pass = 0; pass < scatterRelaxationPasses; pass += 1) {
@@ -404,10 +403,10 @@ function relaxScatterLayout(
 
     relaxed.forEach((point) => {
       if (!point.pinned) {
-        point.x += (graphWidth / 2 - point.x) * 0.012
-        point.y += (graphHeight / 2 - point.y) * 0.012
+        point.x += (width / 2 - point.x) * 0.012
+        point.y += (height / 2 - point.y) * 0.012
       }
-      const clamped = clampScatterPoint(point)
+      const clamped = clampScatterPoint(point, width, height)
       point.x = clamped.x
       point.y = clamped.y
     })
@@ -422,13 +421,9 @@ function solveFreeScatterLayout(
   view: UnifiedGraphView,
   pinned: PinnedState,
   current: PositionMap,
+  width: number,
+  height: number,
 ): PositionMap {
-  // Scatter layout target:
-  // - remove lane-based x positioning as the main layout strategy
-  // - seed nodes across the full canvas
-  // - iteratively repel overlapping nodes
-  // - softly attract connected nodes
-  // - keep user-pinned positions stable
   const adjacency = buildAdjacency(nodes, edges)
   const ordered = nodes.slice().sort((a, b) => {
     const degreeOrder = (adjacency.get(b.id)?.length ?? 0) - (adjacency.get(a.id)?.length ?? 0)
@@ -441,14 +436,14 @@ function solveFreeScatterLayout(
     return !(pinned[key] && current[key])
   })
   const seededById = new Map(
-    floatingNodes.map((node, index) => [node.id, seededScatterPoint(index, floatingNodes.length)] as const),
+    floatingNodes.map((node, index) => [node.id, seededScatterPoint(index, floatingNodes.length, width, height)] as const),
   )
   const relaxed = relaxScatterLayout(
     ordered.map((node) => {
       const key = positionKey(view, node.id)
       const pinnedPoint = pinned[key] ? current[key] : undefined
-      const seededPoint = seededById.get(node.id) ?? { x: graphWidth / 2, y: graphHeight / 2 }
-      const point = pinnedPoint ? clampScatterPoint(pinnedPoint) : seededPoint
+      const seededPoint = seededById.get(node.id) ?? { x: width / 2, y: height / 2 }
+      const point = pinnedPoint ? clampScatterPoint(pinnedPoint, width, height) : seededPoint
       return {
         id: node.id,
         x: point.x,
@@ -457,6 +452,8 @@ function solveFreeScatterLayout(
       }
     }),
     edges,
+    width,
+    height,
   )
 
   return relaxed.reduce((acc, point) => {
@@ -471,13 +468,22 @@ function mergeSolvedPositions(
   current: PositionMap,
   pinned: PinnedState,
   view: UnifiedGraphView,
+  width: number,
+  height: number,
 ): PositionMap {
-  const solved = solveFreeScatterLayout(nodes, edges, view, pinned, current)
+  const solved = solveFreeScatterLayout(nodes, edges, view, pinned, current, width, height)
   return nodes.reduce((acc, node) => {
     const key = positionKey(view, node.id)
-    acc[key] = solved[key] ?? current[key] ?? { x: graphWidth / 2, y: graphHeight / 2 }
+    acc[key] = solved[key] ?? current[key] ?? { x: width / 2, y: height / 2 }
     return acc
   }, {} as PositionMap)
+}
+
+function pickLayoutDimensions(nodes: UnifiedGraphNode[], positions: PositionMap, view: UnifiedGraphView) {
+  const positioned = nodes
+    .map((n) => positions[positionKey(view, n.id)])
+    .filter((p): p is { x: number; y: number } => Boolean(p))
+  return computeNodesBounds(positioned, scatterPaddingX)
 }
 
 function omitViewEntries<T>(record: Record<string, T>, view: UnifiedGraphView) {
@@ -670,6 +676,40 @@ function graphNodeAriaLabel(node: UnifiedGraphNode, metaLabel: string, active: b
   return `图节点 ${node.label}，状态：${states.join('、')}`
 }
 
+function computeNodesBounds(nodes: Array<{ x: number; y: number }>, padding: number) {
+  if (!nodes.length) {
+    return { minX: 0, minY: 0, maxX: minGraphWidth, maxY: minGraphHeight, width: minGraphWidth, height: minGraphHeight }
+  }
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  nodes.forEach((n) => {
+    if (n.x < minX) minX = n.x
+    if (n.y < minY) minY = n.y
+    if (n.x > maxX) maxX = n.x
+    if (n.y > maxY) maxY = n.y
+  })
+  const padX = padding + maxNodeVisualExtent + 60
+  const padY = padding + maxNodeVisualExtent + 80
+  const rawW = maxX - minX + padX * 2
+  const rawH = maxY - minY + padY * 2
+  const width = Math.max(minGraphWidth, rawW)
+  const height = Math.max(minGraphHeight, rawH)
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  const halfW = width / 2
+  const halfH = height / 2
+  return {
+    minX: cx - halfW,
+    minY: cy - halfH,
+    maxX: cx + halfW,
+    maxY: cy + halfH,
+    width,
+    height,
+  }
+}
+
 type KnowledgeGraphPageProps = {
   initialPayload?: UnifiedGraphPayload | null
   initialSelectedId?: string | null
@@ -688,8 +728,10 @@ export function KnowledgeGraphPage({
   const initialView = initialGraphView(initialPayload)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const graphContainerRef = useRef<HTMLDivElement | null>(null)
-  const [graphContainerWidth, setGraphContainerWidth] = useState(graphWidth)
+  const [graphContainerWidth, setGraphContainerWidth] = useState(minGraphWidth)
+  const [graphContainerHeight, setGraphContainerHeight] = useState(minGraphHeight)
   const didDragRef = useRef(false)
+  const hasEverFittedRef = useRef(false)
   const justDraggedRef = useRef(false)
   const justDraggedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinnedRef = useRef<PinnedState>({})
@@ -697,7 +739,17 @@ export function KnowledgeGraphPage({
   const loadRunnerRef = useRef(createLatestRequestRunner())
   const [payload, setPayload] = useState<UnifiedGraphPayload | null>(initialPayload)
   const [positions, setPositions] = useState<PositionMap>(() =>
-    initialPayload ? mergeSolvedPositions(initialPayload.nodes, initialPayload.edges, {}, {}, initialView) : {},
+    initialPayload
+      ? mergeSolvedPositions(
+          initialPayload.nodes,
+          initialPayload.edges,
+          {},
+          {},
+          initialView,
+          Math.max(minGraphWidth, graphContainerWidth || minGraphWidth),
+          Math.max(minGraphHeight, graphContainerHeight || minGraphHeight),
+        )
+      : {},
   )
   const [pinned, setPinned] = useState<PinnedState>({})
   const [query, setQuery] = useState(() => initialPayload?.focus?.query ?? '')
@@ -709,8 +761,20 @@ export function KnowledgeGraphPage({
   const [view, setView] = useState<UnifiedGraphView>(() => initialPayload?.focus?.view ?? initialPayload?.view ?? 'entity')
   const [graphZoom, setGraphZoom] = useState(1)
   const [dragging, setDragging] = useState<DragState>(null)
+  const [panning, setPanning] = useState<PanState>(null)
+  const [panX, setPanX] = useState(0)
+  const [panY, setPanY] = useState(0)
+  const draggingRef = useRef<DragState>(null)
+  const panningRef = useRef<PanState>(null)
+  const panXRef = useRef(0)
+  const panYRef = useRef(0)
+
+  useEffect(() => { draggingRef.current = dragging }, [dragging])
+  useEffect(() => { panningRef.current = panning }, [panning])
+  useEffect(() => { panXRef.current = panX }, [panX])
+  useEffect(() => { panYRef.current = panY }, [panY])
   const [typeFilter, setTypeFilter] = useState<Set<UnifiedGraphNodeType>>(
-    () => new Set<UnifiedGraphNodeType>(['entity', 'document_chunk', 'personal_asset_unit']),
+    () => new Set<UnifiedGraphNodeType>(['entity', 'document_chunk']),
   )
   const [showFilterMenu, setShowFilterMenu] = useState(false)
 
@@ -730,11 +794,17 @@ export function KnowledgeGraphPage({
     const el = graphContainerRef.current
     if (!el) return
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setGraphContainerWidth(entry.contentRect.width)
+      if (entry) {
+        setGraphContainerWidth(entry.contentRect.width)
+        setGraphContainerHeight(entry.contentRect.height)
+      }
     })
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  const layoutWidth = Math.max(minGraphWidth, graphContainerWidth)
+  const layoutHeight = Math.max(minGraphHeight, graphContainerHeight)
 
   const loadGraph = async (nextView: UnifiedGraphView = view, nextQuery: string = query) => {
     await loadRunnerRef.current.run(
@@ -751,10 +821,23 @@ export function KnowledgeGraphPage({
         },
         onSuccess: (data) => {
           setPayload(data)
-          setPositions((current) => ({
-            ...current,
-            ...mergeSolvedPositions(data.nodes, data.edges, current, pinnedRef.current, nextView),
-          }))
+          setPositions((current) => {
+            const dims = pickLayoutDimensions(data.nodes, current, nextView)
+            const w = Math.max(dims.width, graphContainerWidth, minGraphWidth)
+            const h = Math.max(dims.height, graphContainerHeight, minGraphHeight)
+            return {
+              ...current,
+              ...mergeSolvedPositions(
+                data.nodes,
+                data.edges,
+                current,
+                pinnedRef.current,
+                nextView,
+                w,
+                h,
+              ),
+            }
+          })
           setSelectedId((current) => {
             if (current && data.nodes.some((node) => node.id === current)) return current
             return null
@@ -783,9 +866,9 @@ export function KnowledgeGraphPage({
     () =>
       (payload?.nodes ?? []).map((node) => ({
         ...node,
-        ...(positions[positionKey(view, node.id)] ?? { x: graphWidth / 2, y: graphHeight / 2 }),
+        ...(positions[positionKey(view, node.id)] ?? { x: layoutWidth / 2, y: layoutHeight / 2 }),
       })),
-    [payload?.nodes, positions, view],
+    [payload?.nodes, positions, view, layoutWidth, layoutHeight],
   )
 
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node] as const)), [nodes])
@@ -886,6 +969,7 @@ export function KnowledgeGraphPage({
     () =>
       nodes
         .filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id))
+        .filter((node) => typeFilter.has(node.type))
         .slice()
         .sort((a, b) => {
           const tierOrder = tierWeight(nodeTiers.get(a.id) ?? 'dim') - tierWeight(nodeTiers.get(b.id) ?? 'dim')
@@ -896,12 +980,17 @@ export function KnowledgeGraphPage({
           if (focusRoot?.id === b.id) return -1
           return compareNodeIdentity(a, b)
         }),
-    [focusRoot?.id, nodeTiers, nodes, selected?.id, visibleNodeIds],
+    [focusRoot?.id, nodeTiers, nodes, selected?.id, visibleNodeIds, typeFilter],
   )
   const renderedEdges = useMemo(
     () =>
       (payload?.edges ?? [])
         .filter((edge) => !visibleNodeIds || (visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)))
+        .filter((edge) => {
+          const source = nodeById.get(edge.source)
+          const target = nodeById.get(edge.target)
+          return source && target && typeFilter.has(source.type) && typeFilter.has(target.type)
+        })
         .map((edge) => {
           let tier = edgeDistanceTier(activeDistances.get(edge.source), activeDistances.get(edge.target), focusDepth)
           if (tier === 'dim' && selected?.id && (selected.id === edge.source || selected.id === edge.target)) {
@@ -910,7 +999,7 @@ export function KnowledgeGraphPage({
           return { edge, tier }
         })
         .sort((a, b) => tierWeight(a.tier) - tierWeight(b.tier)),
-    [activeDistances, focusDepth, payload?.edges, selected?.id, visibleNodeIds],
+    [activeDistances, focusDepth, payload?.edges, selected?.id, visibleNodeIds, typeFilter, nodeById],
   )
   const selectedEdges = useMemo(
     () => (payload?.edges ?? []).filter((edge) => edge.source === selected?.id || edge.target === selected?.id),
@@ -930,27 +1019,109 @@ export function KnowledgeGraphPage({
     [nodeById, selected?.id, selectedEdges],
   )
 
+  const graphBounds = useMemo(
+    () => computeNodesBounds(renderedNodes, scatterPaddingX),
+    [renderedNodes],
+  )
+  const graphWidth = graphBounds.width
+  const graphHeight = graphBounds.height
+  const graphViewMinX = graphBounds.minX
+  const graphViewMinY = graphBounds.minY
+
+  const toggleTypeFilter = (type: UnifiedGraphNodeType) => {
+    setTypeFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(type)) {
+        next.delete(type)
+      } else {
+        next.add(type)
+      }
+      return next
+    })
+  }
+
   const setZoom = (nextZoom: number) => {
     setGraphZoom(clamp(Number(nextZoom.toFixed(2)), minGraphZoom, maxGraphZoom))
   }
 
   const zoomIn = () => setZoom(graphZoom + graphZoomStep)
   const zoomOut = () => setZoom(graphZoom - graphZoomStep)
-  const fitGraph = () => setZoom(1)
+  const applyFitToContainer = (bounds: { width: number; height: number; minX: number; minY: number }) => {
+    const cw = graphContainerWidth
+    const ch = graphContainerHeight
+    if (bounds.width <= 0 || bounds.height <= 0 || cw <= 0 || ch <= 0) {
+      setGraphZoom(1)
+      panXRef.current = 0
+      panYRef.current = 0
+      setPanX(0)
+      setPanY(0)
+      return
+    }
+    const pad = 64
+    const scaleX = (cw - pad * 2) / bounds.width
+    const scaleY = (ch - pad * 2) / bounds.height
+    const fitZoom = clamp(Math.min(scaleX, scaleY), minGraphZoom, maxGraphZoom)
+    const contentCenterX = bounds.minX + bounds.width / 2
+    const contentCenterY = bounds.minY + bounds.height / 2
+    const fitPanX = contentCenterX * (1 - fitZoom)
+    const fitPanY = contentCenterY * (1 - fitZoom)
+    setGraphZoom(fitZoom)
+    panXRef.current = fitPanX
+    panYRef.current = fitPanY
+    setPanX(fitPanX)
+    setPanY(fitPanY)
+  }
+
+  const fitGraph = () => {
+    if (!renderedNodes.length) {
+      setGraphZoom(1)
+      panXRef.current = 0
+      panYRef.current = 0
+      setPanX(0)
+      setPanY(0)
+      return
+    }
+    applyFitToContainer(graphBounds)
+  }
   const resetScatterLayout = () => {
     if (!payload) return
 
     const nextPinned = omitViewEntries(pinnedRef.current, view)
     pinnedRef.current = nextPinned
     setPinned(nextPinned)
+    const w = Math.max(graphContainerWidth, minGraphWidth)
+    const h = Math.max(graphContainerHeight, minGraphHeight)
     setPositions((current) => {
       const nextPositions = omitViewEntries(current, view)
       return {
         ...nextPositions,
-        ...mergeSolvedPositions(payload.nodes, payload.edges, nextPositions, nextPinned, view),
+        ...mergeSolvedPositions(payload.nodes, payload.edges, nextPositions, nextPinned, view, w, h),
       }
     })
+    setGraphZoom(1)
+    panXRef.current = 0
+    panYRef.current = 0
+    setPanX(0)
+    setPanY(0)
+    hasEverFittedRef.current = false
   }
+
+  const applyFitToContainerRef = useRef(applyFitToContainer)
+  applyFitToContainerRef.current = applyFitToContainer
+
+  useEffect(() => {
+    if (!payload || !renderedNodes.length) return
+    const cw = graphContainerWidth
+    const ch = graphContainerHeight
+    if (cw <= 0 || ch <= 0) return
+    if (hasEverFittedRef.current) return
+
+    hasEverFittedRef.current = true
+    const raf = requestAnimationFrame(() => {
+      applyFitToContainerRef.current(graphBounds)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [payload, renderedNodes.length, graphContainerWidth, graphContainerHeight, graphBounds])
 
   const handlePointerDown = (event: PointerEvent<SVGGElement>, node: PositionedNode) => {
     const svg = svgRef.current
@@ -962,40 +1133,77 @@ export function KnowledgeGraphPage({
       justDraggedTimerRef.current = null
     }
     const point = svgPoint(svg, event as unknown as PointerEvent<SVGSVGElement>)
-    setDragging({
+    const dragState: DragState = {
       id: node.id,
       dx: point.x - node.x,
       dy: point.y - node.y,
       originX: node.x,
       originY: node.y,
       moved: false,
-    })
+    }
+    draggingRef.current = dragState
+    setDragging(dragState)
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
-  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
-    if (!dragging || !svgRef.current) return
-    const point = svgPoint(svgRef.current, event)
-    const x = clamp(point.x - dragging.dx, graphNodeClampPadding, graphWidth - graphNodeClampPadding)
-    const y = clamp(point.y - dragging.dy, graphNodeClampPadding, graphHeight - graphNodeClampPadding)
-    const moved =
-      dragging.moved || Math.abs(x - dragging.originX) >= dragThreshold || Math.abs(y - dragging.originY) >= dragThreshold
-    if (!moved) return
+  const handleSvgPointerDown = (event: PointerEvent<SVGSVGElement>) => {
+    const target = event.target as SVGElement
+    if (target.closest('[role="button"]')) return
 
-    didDragRef.current = true
-    const key = positionKey(view, dragging.id)
-    setPositions((current) => ({ ...current, [key]: { x, y } }))
-    setPinned((current) => {
-      if (current[key]) return current
-      const next = { ...current, [key]: true }
-      pinnedRef.current = next
-      return next
-    })
-    setDragging((current) => (current ? { ...current, moved: true } : current))
+    const svg = svgRef.current
+    if (!svg) return
+    const point = svgPoint(svg, event)
+    const panState: PanState = { startX: point.x, startY: point.y, originPanX: panXRef.current, originPanY: panYRef.current }
+    panningRef.current = panState
+    setPanning(panState)
+    svg.setPointerCapture(event.pointerId)
   }
 
-  const stopDragging = () => {
-    if (didDragRef.current || dragging?.moved) {
+  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
+    const currentDrag = draggingRef.current
+    if (currentDrag && svgRef.current) {
+      const bounds = graphBounds
+      const dragPad = graphNodeClampPadding + maxNodeVisualExtent
+      const point = svgPoint(svgRef.current, event)
+      const x = clamp(point.x - currentDrag.dx, bounds.minX + dragPad, bounds.maxX - dragPad)
+      const y = clamp(point.y - currentDrag.dy, bounds.minY + dragPad, bounds.maxY - dragPad)
+      const moved =
+        currentDrag.moved || Math.abs(x - currentDrag.originX) >= dragThreshold || Math.abs(y - currentDrag.originY) >= dragThreshold
+      if (!moved) return
+
+      didDragRef.current = true
+      const key = positionKey(view, currentDrag.id)
+      setPositions((current) => ({ ...current, [key]: { x, y } }))
+      setPinned((current) => {
+        if (current[key]) return current
+        const next = { ...current, [key]: true }
+        pinnedRef.current = next
+        return next
+      })
+      const updatedDrag = { ...currentDrag, moved: true }
+      draggingRef.current = updatedDrag
+      setDragging(updatedDrag)
+      return
+    }
+
+    const currentPan = panningRef.current
+    if (currentPan && svgRef.current) {
+      const point = svgPoint(svgRef.current, event)
+      const dx = point.x - currentPan.startX
+      const dy = point.y - currentPan.startY
+      const nextPanX = currentPan.originPanX + dx
+      const nextPanY = currentPan.originPanY + dy
+      panXRef.current = nextPanX
+      panYRef.current = nextPanY
+      setPanX(nextPanX)
+      setPanY(nextPanY)
+      return
+    }
+  }
+
+  const stopInteraction = () => {
+    const currentDrag = draggingRef.current
+    if (didDragRef.current || currentDrag?.moved) {
       justDraggedRef.current = true
       if (justDraggedTimerRef.current) {
         clearTimeout(justDraggedTimerRef.current)
@@ -1006,7 +1214,10 @@ export function KnowledgeGraphPage({
       }, 0)
     }
     didDragRef.current = false
+    draggingRef.current = null
+    panningRef.current = null
     setDragging(null)
+    setPanning(null)
   }
 
   const handleNodeSelect = (nodeId: string) => {
@@ -1032,12 +1243,23 @@ export function KnowledgeGraphPage({
   const handleGraphWheel = (event: WheelEvent<HTMLDivElement>) => {
     if (!event.ctrlKey && !event.metaKey) return
     event.preventDefault()
-    setZoom(graphZoom + (event.deltaY > 0 ? -graphZoomStep : graphZoomStep))
+    const svg = svgRef.current
+    if (!svg) return
+    const point = svgPoint(svg, event as unknown as PointerEvent<SVGSVGElement>)
+    const oldZoom = graphZoom
+    const newZoom = clamp(oldZoom + (event.deltaY > 0 ? -graphZoomStep : graphZoomStep), minGraphZoom, maxGraphZoom)
+    const scale = newZoom / oldZoom
+    const newPanX = point.x - scale * (point.x - panXRef.current)
+    const newPanY = point.y - scale * (point.y - panYRef.current)
+    setZoom(newZoom)
+    panXRef.current = newPanX
+    panYRef.current = newPanY
+    setPanX(newPanX)
+    setPanY(newPanY)
   }
 
   const totalNodeCount = payload?.stats.node_count ?? 0
   const totalEdgeCount = payload?.stats.edge_count ?? 0
-  const pendingIndexCount = countFor(payload, 'document_chunk') + countFor(payload, 'personal_asset_unit')
 
   return (
     <div className="flex h-[calc(100vh-9rem)] min-h-0 flex-col overflow-hidden" data-testid="unified-graph-page">
@@ -1089,13 +1311,75 @@ export function KnowledgeGraphPage({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') void loadGraph()
               }}
-              placeholder={view === 'entity' ? 'Search entities or relationships' : 'Search document or asset sources'}
+              placeholder={view === 'entity' ? '搜索实体或关系' : '搜索文档或资产来源'}
               className={cn(
                 'h-10 w-full rounded-full border border-slate-200 bg-white/90 pl-9 pr-3 text-sm outline-none',
                 graphInputFocusClass,
                 graphControlTransitionClass,
               )}
             />
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowFilterMenu((prev) => !prev)}
+              className={cn(
+                'inline-flex h-10 items-center justify-center gap-1.5 rounded-full border px-3 text-sm font-medium',
+                graphControlTransitionClass,
+                graphControlFocusClass,
+                typeFilter.size < 2
+                  ? 'border-amber-300 bg-amber-50 text-amber-700'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+              )}
+            >
+              <Filter size={14} />
+              类型过滤
+              {typeFilter.size < 2 ? (
+                <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-200 px-1 text-[10px] font-bold text-amber-800">
+                  {typeFilter.size}/2
+                </span>
+              ) : null}
+            </button>
+            {showFilterMenu ? (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowFilterMenu(false)} />
+                <div className="absolute left-0 top-full z-40 mt-2 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.12)]">
+                  {(
+                    [
+                      ['entity', '实体', '#155eef'],
+                      ['document_chunk', '文档分块', '#0f766e'],
+                    ] as const
+                  ).map(([type, label, color]) => {
+                    const checked = typeFilter.has(type)
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => toggleTypeFilter(type)}
+                        className={cn(
+                          'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                          checked ? 'text-slate-800' : 'text-slate-400',
+                        )}
+                      >
+                        <span
+                          className="inline-flex h-3 w-3 shrink-0 rounded-sm border-2"
+                          style={{
+                            backgroundColor: checked ? color : 'transparent',
+                            borderColor: color,
+                          }}
+                        />
+                        <span>{label}</span>
+                        {checked ? (
+                          <span className="ml-auto text-[10px] text-slate-400">显示</span>
+                        ) : (
+                          <span className="ml-auto text-[10px] text-slate-300">隐藏</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            ) : null}
           </div>
           <button
             type="button"
@@ -1113,32 +1397,18 @@ export function KnowledgeGraphPage({
 
         <div
           className={cn(
-            'absolute right-5 top-5 z-20 rounded-[20px] border border-slate-200/70 bg-white/90 px-4 py-3 text-sm shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur',
-            floatingSurfaceMotionClass,
-          )}
-        >
-          <div className="flex items-center gap-2 text-slate-700">
-            <Boxes size={15} />
-            <span className="font-medium">Pending index</span>
-          </div>
-          <div className="mt-1 text-xs text-slate-500">Status capsule</div>
-          <div className="mt-2 text-lg font-semibold text-slate-950">{pendingIndexCount}</div>
-        </div>
-
-        <div
-          className={cn(
             'absolute bottom-5 left-5 z-20 rounded-[20px] border border-slate-200/70 bg-white/88 px-4 py-3 text-sm shadow-[0_12px_30px_rgba(15,23,42,0.08)] backdrop-blur',
             floatingSurfaceMotionClass,
           )}
         >
           <div className="flex items-center gap-3 text-slate-700">
-            <span className="font-medium">Nodes {totalNodeCount}</span>
+            <span className="font-medium">节点 {totalNodeCount}</span>
             <span className="text-slate-300">|</span>
-            <span className="font-medium">Edges {totalEdgeCount}</span>
+            <span className="font-medium">边 {totalEdgeCount}</span>
           </div>
           <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
             <Sparkles size={13} className="text-blue-600" />
-            <span>{countFor(payload, 'entity')} entities</span>
+            <span>实体 {countFor(payload, 'entity')}</span>
             <FileText size={13} className="ml-1 text-emerald-700" />
             <span>文档分块 {countFor(payload, 'document_chunk')}</span>
           </div>
@@ -1171,7 +1441,7 @@ export function KnowledgeGraphPage({
               graphControlTransitionClass,
               graphControlFocusClass,
             )}
-            title="Zoom out"
+            title="缩小"
           >
             <ZoomOut size={15} />
           </button>
@@ -1206,7 +1476,8 @@ export function KnowledgeGraphPage({
 
         <div className="relative h-full min-h-0 p-4 pt-28">
           <div
-            className="relative min-h-0 h-full overflow-auto rounded-[24px] border border-white/70 bg-white/52 shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]"
+            ref={graphContainerRef}
+            className="relative min-h-0 h-full overflow-auto rounded-[24px] border border-white/70 bg-[radial-gradient(circle_at_50%_42%,_rgba(255,255,255,0.72),_rgba(255,255,255,0.08)_58%,_rgba(219,231,244,0.16)_100%),linear-gradient(135deg,_#fffefb_0%,_#f8f8f4_52%,_#eff4fb_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]"
             onWheel={handleGraphWheel}
           >
             {!nodes.length ? (
@@ -1217,26 +1488,21 @@ export function KnowledgeGraphPage({
               <>
                 <svg
                   ref={svgRef}
-                  viewBox={`0 0 ${graphWidth} ${graphHeight}`}
-                  className="block max-w-none touch-none select-none"
-                  style={{
-                    width: graphWidth * graphZoom,
-                    height: graphHeight * graphZoom,
-                    minWidth: graphWidth * graphZoom,
-                    minHeight: graphHeight * graphZoom,
-                  }}
+                  viewBox={`${graphViewMinX} ${graphViewMinY} ${graphWidth} ${graphHeight}`}
+                  preserveAspectRatio="xMidYMid meet"
+                  className="block h-full w-full touch-none select-none"
                   role="group"
-                  aria-label={view === 'entity' ? 'Entity graph explorer' : 'Source graph explorer'}
-                  aria-roledescription="interactive knowledge graph"
+                  aria-label={view === 'entity' ? '实体图谱浏览器' : '来源图谱浏览器'}
+                  aria-roledescription="交互式知识图谱"
+                  onPointerDown={handleSvgPointerDown}
                   onPointerMove={handlePointerMove}
-                  onPointerUp={stopDragging}
-                  onPointerLeave={stopDragging}
-                  onPointerCancel={stopDragging}
+                  onPointerUp={stopInteraction}
+                  onPointerLeave={stopInteraction}
+                  onPointerCancel={stopInteraction}
                 >
-                  <title>{view === 'entity' ? 'Entity graph explorer' : 'Source graph explorer'}</title>
+                  <title>{view === 'entity' ? '实体图谱浏览器' : '来源图谱浏览器'}</title>
                   <desc>
-                    Interactive graph showing entities, document chunks, and personal asset units with their linked
-                    evidence and relationships.
+                    交互式图谱，展示实体、文档分块及其关联证据与关系。
                   </desc>
                   <defs>
                     <linearGradient id="graph-drift" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -1281,23 +1547,23 @@ export function KnowledgeGraphPage({
                     })}
                   </defs>
                   <rect
-                    x="0"
-                    y="0"
+                    x={graphViewMinX}
+                    y={graphViewMinY}
                     width={graphWidth}
                     height={graphHeight}
                     fill="url(#graph-drift)"
                     pointerEvents="none"
                   />
                   <rect
-                    x="0"
-                    y="0"
+                    x={graphViewMinX}
+                    y={graphViewMinY}
                     width={graphWidth}
                     height={graphHeight}
                     fill="url(#graph-haze)"
                     opacity="0.9"
                     pointerEvents="none"
                   />
-                  <g>
+                  <g transform={`translate(${panX}, ${panY}) scale(${graphZoom})`}>
                     {renderedEdges.map(({ edge, tier }) => {
                       const source = nodeById.get(edge.source)
                       const target = nodeById.get(edge.target)
@@ -1338,7 +1604,7 @@ export function KnowledgeGraphPage({
                       )
                     })}
                   </g>
-                  <g>
+                  <g transform={`translate(${panX}, ${panY}) scale(${graphZoom})`}>
                     {renderedNodes.map((node) => (
                       <GraphNode
                         key={node.id}
@@ -1638,10 +1904,10 @@ function GraphInspector({
   const focusRootTitle = compactInspectorTitle(focusRoot?.label ?? node.label)
   const explorerHeading = isFocusNode ? '当前节点是探索中心' : `围绕 ${focusRootTitle} 继续探索`
   const explorerSummary = isFocusNode
-    ? `${nodeTitle} 是当前探索中心。你正在查看它在 ${focusDepth}-hop 范围内关联到的实体、文档证据和个人资产证据。`
+    ? `${nodeTitle} 是当前探索中心。你正在查看它在 ${focusDepth} 跳范围内关联到的实体和文档证据。`
     : `${nodeTitle} 当前位于 ${focusRootTitle} 的 ${distanceLabel(nodeDistance ?? 1)} 范围内，可以继续展开或重新聚焦。`
   const explorerHint = isFocusNode
-    ? '重新聚焦会把当前节点设为新的中心，并重置到 1-hop 视图。'
+    ? '重新聚焦会把当前节点设为新的中心，并重置到 1 跳视图。'
     : '如果想让当前节点成为新的探索中心，使用[重新聚焦]；如果想保留现有焦点并继续向外看，使用[展开更多关联]。'
 
   return (
@@ -1702,11 +1968,11 @@ function GraphInspector({
         <div className="rounded-lg border border-[var(--prism-line)] bg-slate-50 px-3 py-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-medium text-slate-500">Explorer</div>
+              <div className="text-xs font-medium text-slate-500">探索器</div>
               <div className="mt-1 text-sm font-semibold text-slate-950">{explorerHeading}</div>
             </div>
             <div className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500">
-              {focusDepth}-hop 范围
+              {focusDepth} 跳范围
             </div>
           </div>
           <p className="mt-3 text-xs leading-5 text-slate-600">{explorerSummary}</p>
@@ -1741,7 +2007,7 @@ function GraphInspector({
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {explorerNodes.length === 0 ? (
-              <span className="text-xs text-slate-500">No more related nodes are available for the current focus depth.</span>
+              <span className="text-xs text-slate-500">当前探索深度下没有更多关联节点。</span>
             ) : (
               explorerNodes.map((relatedNode) => (
                   <button
@@ -1796,9 +2062,9 @@ function GraphInspector({
         {retrievalExplain ? (
           <div className="space-y-2 rounded-lg border border-[var(--prism-line)] bg-slate-50 px-3 py-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-medium text-slate-500">Retrieval evidence</div>
+              <div className="text-xs font-medium text-slate-500">检索证据</div>
               <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                {formatEvidenceTypeLabel(retrievalExplain.evidence_type) || 'Unknown evidence'}
+                {formatEvidenceTypeLabel(retrievalExplain.evidence_type) || '未知证据'}
               </span>
             </div>
             <p className="text-sm leading-6 text-slate-700">
@@ -1806,16 +2072,16 @@ function GraphInspector({
             </p>
             {typeof retrievalExplain.source_marker === 'string' && retrievalExplain.source_marker.trim() ? (
               <div className="text-[11px] text-slate-500">
-                route: {retrievalExplain.source_marker}
+                路径: {retrievalExplain.source_marker}
               </div>
             ) : null}
           </div>
         ) : null}
 
         <div className="border-t border-[var(--prism-line)] pt-4">
-          <h3 className="mb-2 text-sm font-semibold text-slate-950">Related nodes</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-950">关联节点</h3>
           {relatedNodes.length === 0 ? (
-            <p className="text-sm leading-6 text-slate-500">No directly connected nodes are available for the current selection.</p>
+            <p className="text-sm leading-6 text-slate-500">当前选中节点没有直接关联的其他节点。</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {relatedNodes.map((relatedNode) => (
@@ -1839,9 +2105,9 @@ function GraphInspector({
         </div>
 
         <div className="border-t border-[var(--prism-line)] pt-4">
-          <h3 className="mb-2 text-sm font-semibold text-slate-950">Related edges</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-950">关联边</h3>
           {edges.length === 0 ? (
-            <p className="text-sm leading-6 text-slate-500">No edge evidence is available for the current selection.</p>
+            <p className="text-sm leading-6 text-slate-500">当前选中节点没有关联的边证据。</p>
           ) : (
             <div className="space-y-2">
               {edges.map((edge) => {
@@ -1862,11 +2128,11 @@ function GraphInspector({
                       <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[11px] font-medium text-slate-600">
-                            {formatEvidenceTypeLabel(edgeExplain.evidence_type) || 'Unknown evidence'}
+                            {formatEvidenceTypeLabel(edgeExplain.evidence_type) || '未知证据'}
                           </span>
                           {typeof edgeExplain.source_marker === 'string' && edgeExplain.source_marker.trim() ? (
                             <span className="text-[10px] text-slate-500">
-                              route: {edgeExplain.source_marker}
+                              路径: {edgeExplain.source_marker}
                             </span>
                           ) : null}
                         </div>
@@ -1876,7 +2142,7 @@ function GraphInspector({
                       </div>
                     ) : null}
                     {typeof edge.confidence === 'number' ? (
-                      <div className="mt-1 text-[11px] text-slate-500">Confidence {edge.confidence.toFixed(2)}</div>
+                      <div className="mt-1 text-[11px] text-slate-500">置信度 {edge.confidence.toFixed(2)}</div>
                     ) : null}
                   </div>
                 )
@@ -1899,11 +2165,11 @@ function GraphCanvasGuidance({ hasGraphData = true }: { hasGraphData?: boolean }
     >
       {!hasGraphData ? (
         <p className="text-sm leading-6 text-slate-500">
-          No graph data yet. Run a search or open a source-linked query to load the unified graph explorer.
+          暂无图谱数据。执行搜索或打开关联查询以加载统一图谱浏览器。
         </p>
       ) : null}
       <p className={cn('leading-6 text-slate-600', hasGraphData ? '' : 'mt-3')}>
-        选择一个节点，查看它在 unified graph 里的结构、来源证据和关联关系。
+        选择一个节点，查看它在统一图谱里的结构、来源证据和关联关系。
       </p>
       <div className={cn('mt-4 flex flex-wrap gap-2', hasGraphData ? '' : 'justify-center')}>
         <button
@@ -2075,5 +2341,3 @@ function ChipBlock({ label, values }: { label: string; values: string[] }) {
     </div>
   )
 }
-
-

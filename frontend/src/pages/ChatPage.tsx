@@ -943,7 +943,7 @@ export function ChatPage() {
                           <input
                             value={editingSessionTitle}
                             onChange={(event) => setEditingSessionTitle(event.target.value)}
-                            aria-label="Session title"
+                            aria-label="会话标题"
                             className="min-w-0 flex-1 rounded-md border border-[var(--prism-line)] bg-white px-2 py-1.5 text-sm font-semibold text-slate-950 outline-none focus:border-[var(--prism-blue)]"
                             autoFocus
                           />
