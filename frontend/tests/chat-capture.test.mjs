@@ -24,11 +24,11 @@ assert.equal(toolLabel('unknown_tool'), 'unknown_tool')
 // Builds the capture feedback chip state from a capture_thought tool_result.
 function captureChipFromToolResult(summary, status = 'ok') {
   if (status === 'error') return null
-  return { summary: summary || '已记录，等待你在审核台确认入库。' }
+  return { summary: summary || '已记录，等待你在记录审核确认入库。' }
 }
 
-assert.deepEqual(captureChipFromToolResult('已记录「季度复盘」，等待你在审核台确认入库。'), {
-  summary: '已记录「季度复盘」，等待你在审核台确认入库。',
+assert.deepEqual(captureChipFromToolResult('已记录「季度复盘」，等待你在记录审核确认入库。'), {
+  summary: '已记录「季度复盘」，等待你在记录审核确认入库。',
 })
 assert.equal(captureChipFromToolResult('', 'error'), null)
 

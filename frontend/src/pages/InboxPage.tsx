@@ -158,7 +158,7 @@ export function InboxPage() {
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
               <Inbox size={15} />
-              <span>审核台</span>
+              <span>记录审核</span>
             </div>
             <h1 className="mt-1 text-base font-semibold text-slate-950">待确认记录</h1>
           </div>

@@ -184,9 +184,9 @@ export function AssetsPage() {
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
               <Boxes size={15} />
-              <span>已入库碎片</span>
+              <span>记录合并</span>
             </div>
-            <h1 className="mt-1 text-base font-semibold text-slate-950">最小资产单元</h1>
+            <h1 className="mt-1 text-base font-semibold text-slate-950">已入库碎片</h1>
           </div>
           <button
             type="button"
@@ -421,7 +421,7 @@ function AssetWorkspace({
         <Layers3 size={34} className="mb-3 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-950">从左侧选择已入库碎片</h2>
         <p className="mt-2 max-w-md text-xs leading-5 text-slate-500">
-          资产页只治理已经确认入库的最小碎片单元。原始采集请在收件箱完成。
+          记录合并只治理已经确认入库的最小碎片单元。原始采集请在记录审核完成。
         </p>
       </section>
     )

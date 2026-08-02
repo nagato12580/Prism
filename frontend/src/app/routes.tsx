@@ -31,8 +31,16 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <ChatPage /> },
       { path: 'chat', element: <ChatPage /> },
-      { path: 'review', element: <InboxPage /> },
-      { path: 'assets', element: <AssetsPage /> },
+      { path: 'review', element: <Navigate to="/records/review" replace /> },
+      { path: 'assets', element: <Navigate to="/records/merge" replace /> },
+      {
+        path: 'records',
+        children: [
+          { index: true, element: <Navigate to="review" replace /> },
+          { path: 'review', element: <InboxPage /> },
+          { path: 'merge', element: <AssetsPage /> },
+        ],
+      },
       { path: 'graph', element: <KnowledgeGraphPage /> },
       {
         path: 'knowledge',

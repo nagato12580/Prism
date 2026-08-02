@@ -550,7 +550,7 @@ export function ChatPage() {
             ),
           }, sessionId, assistantMessageId)
           if (toolName === 'capture_thought' && safeString(msg.data?.status) !== 'error') {
-            setLastCapture({ summary: toolSummary || '已记录，等待你在审核台确认入库。' })
+            setLastCapture({ summary: toolSummary || '已记录，等待你在记录审核确认入库。' })
           }
           if (assistantPersistedId) queueAssistantProcessSnapshot(sessionId, assistantPersistedId)
         } else if (msg.type === 'clarify') {
@@ -1053,8 +1053,8 @@ export function ChatPage() {
         {lastCapture ? (
           <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
             <span className="min-w-0 truncate">{lastCapture.summary}</span>
-            <Link to="/review" className="shrink-0 font-semibold text-emerald-700 transition hover:underline">
-              去审核台确认 →
+            <Link to="/records/review" className="shrink-0 font-semibold text-emerald-700 transition hover:underline">
+              去记录审核确认 →
             </Link>
           </div>
         ) : null}
@@ -1064,7 +1064,7 @@ export function ChatPage() {
               onResult={(item) => {
                 setShowVoice(false)
                 setLastCapture({
-                  summary: `语音已记录「${item.title || '新想法'}」，等待你在审核台确认入库。`,
+                  summary: `语音已记录「${item.title || '新想法'}」，等待你在记录审核确认入库。`,
                 })
               }}
               onError={(msg) => {

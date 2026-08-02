@@ -17,15 +17,33 @@ import {
 import { cn } from '@/lib/utils'
 import { memoryApi } from '@/app/api'
 
-const navItems = [
-  { to: '/chat', label: '对话', icon: MessageSquare },
-  { to: '/review', label: '审核台', icon: Inbox },
-  { to: '/assets', label: '资产', icon: BookOpen },
-  { to: '/knowledge', label: '知识库', icon: BookOpen },
-  { to: '/graph', label: '图谱', icon: Network },
-  { to: '/memory/inbox', label: '记忆审核', icon: Inbox },
-  { to: '/memory/profile', label: '用户画像', icon: Fingerprint },
-  { to: '/memory/graph', label: '记忆图谱', icon: Waypoints },
+const navSections = [
+  {
+    label: '对话',
+    items: [{ to: '/chat', label: '对话', icon: MessageSquare }],
+  },
+  {
+    label: '记录',
+    items: [
+      { to: '/records/review', label: '记录审核', icon: Inbox },
+      { to: '/records/merge', label: '记录合并', icon: BookOpen },
+    ],
+  },
+  {
+    label: '工作台',
+    items: [
+      { to: '/knowledge', label: '知识库', icon: BookOpen },
+      { to: '/graph', label: '图谱', icon: Network },
+    ],
+  },
+  {
+    label: '用户记忆',
+    items: [
+      { to: '/memory/inbox', label: '记忆审核', icon: Inbox },
+      { to: '/memory/profile', label: '用户画像', icon: Fingerprint },
+      { to: '/memory/graph', label: '记忆图谱', icon: Waypoints },
+    ],
+  },
 ]
 
 const mobileNavId = 'prism-mobile-navigation'
@@ -68,24 +86,38 @@ function NavList({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: 
         />
       </div>
 
-      <div className="px-2 text-[11px] font-medium text-slate-500">工作台</div>
+      <div className="px-2 text-[11px] font-medium text-slate-500">记录</div>
       <div className="space-y-1">
         <NavItem
-          to="/review"
-          label="审核台"
+          to="/records/review"
+          label="记录审核"
           icon={Inbox}
-          active={location.pathname === '/review' || location.pathname.startsWith('/review/')}
+          active={
+            location.pathname === '/records/review' ||
+            location.pathname.startsWith('/records/review/') ||
+            location.pathname === '/review' ||
+            location.pathname.startsWith('/review/')
+          }
           isDark={isDark}
           onNavigate={onNavigate}
         />
         <NavItem
-          to="/assets"
-          label="资产"
+          to="/records/merge"
+          label="记录合并"
           icon={BookOpen}
-          active={location.pathname === '/assets' || location.pathname.startsWith('/assets/')}
+          active={
+            location.pathname === '/records/merge' ||
+            location.pathname.startsWith('/records/merge/') ||
+            location.pathname === '/assets' ||
+            location.pathname.startsWith('/assets/')
+          }
           isDark={isDark}
           onNavigate={onNavigate}
         />
+      </div>
+
+      <div className="px-2 text-[11px] font-medium text-slate-500">工作台</div>
+      <div className="space-y-1">
         <NavItem
           to="/knowledge"
           label="知识库"
@@ -182,39 +214,46 @@ function CompactNav({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate
   const location = useLocation()
 
   return (
-    <nav className="mt-5 space-y-1 px-2">
-      {navItems.map((item) => {
-        const Icon = item.icon
-        const active =
-          location.pathname === item.to ||
-          location.pathname.startsWith(`${item.to}/`) ||
-          (item.to === '/chat' && location.pathname === '/')
+    <nav className="mt-5 space-y-6 px-2">
+      {navSections.map((section) => (
+        <div key={section.label}>
+          <div className="px-2 text-[11px] font-medium text-slate-500">{section.label}</div>
+          <div className="mt-2 space-y-1">
+            {section.items.map((item) => {
+              const Icon = item.icon
+              const active =
+                location.pathname === item.to ||
+                location.pathname.startsWith(`${item.to}/`) ||
+                (item.to === '/chat' && location.pathname === '/')
 
-        return (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            aria-current={active ? 'page' : undefined}
-            onClick={onNavigate}
-            className={cn(
-              'group flex h-10 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80',
-              active
-                ? 'bg-[var(--prism-blue)] text-white'
-                : isDark
-                  ? 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950',
-            )}
-          >
-            <Icon size={18} className="shrink-0" />
-            <span>{item.label}</span>
-            {item.to === '/memory/inbox' && draftCount > 0 ? (
-              <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
-                {draftCount > 99 ? '99+' : draftCount}
-              </span>
-            ) : null}
-          </NavLink>
-        )
-      })}
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  aria-current={active ? 'page' : undefined}
+                  onClick={onNavigate}
+                  className={cn(
+                    'group flex h-10 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80',
+                    active
+                      ? 'bg-[var(--prism-blue)] text-white'
+                      : isDark
+                        ? 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
+                        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950',
+                  )}
+                >
+                  <Icon size={18} className="shrink-0" />
+                  <span>{item.label}</span>
+                  {item.to === '/memory/inbox' && draftCount > 0 ? (
+                    <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                      {draftCount > 99 ? '99+' : draftCount}
+                    </span>
+                  ) : null}
+                </NavLink>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   )
 }
