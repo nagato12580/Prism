@@ -2,6 +2,7 @@ import json
 from copy import deepcopy
 from hashlib import sha256
 from math import isfinite
+from typing import Literal
 import redis
 
 from fastapi import APIRouter, Depends, Header, Query, Response
@@ -42,9 +43,15 @@ def _redis_client():
     return redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
-def _topic_or_problem(db: Session, actor: ActorContext, kb_uid: str):
+def _topic_or_problem(db: Session, actor: ActorContext, kb_uid: str, *, capability: Literal["read", "contribute", "edit"] = "read"):
     try:
-        return KnowledgeAccessPolicy(db).require_manage(actor, kb_uid)
+        policy = KnowledgeAccessPolicy(db)
+        if capability == "read":
+            return policy.require_read(actor, kb_uid)
+        elif capability == "contribute":
+            return policy.require_contribute(actor, kb_uid)
+        else:
+            return policy.require_edit(actor, kb_uid)
     except KnowledgeNotFound:
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
@@ -121,7 +128,7 @@ def _stream_dataset_export(session_factory, dataset_id: str, tenant_id: str, kb_
 
 @router.post("/{kb_uid}/evaluation-datasets/import", status_code=201)
 def import_evaluation_dataset(kb_uid: str, body: EvaluationDatasetImport, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    _topic_or_problem(db, actor, kb_uid)
+    _topic_or_problem(db, actor, kb_uid, capability="contribute")
     items: list[EvaluationItemInput] = []
     for line_number, line in enumerate(body.jsonl.splitlines(), 1):
         if not line.strip():
@@ -142,7 +149,7 @@ def import_evaluation_dataset(kb_uid: str, body: EvaluationDatasetImport, actor:
 
 @router.post("/{kb_uid}/evaluation-datasets/generated", status_code=201)
 def create_generated_evaluation_dataset(kb_uid: str, body: EvaluationDatasetGenerate, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    _topic_or_problem(db, actor, kb_uid)
+    _topic_or_problem(db, actor, kb_uid, capability="contribute")
     dataset = _create_dataset(db, actor, kb_uid, body.name, "generated", body.items)
     return {"id": dataset.id, "dataset_uid": dataset.dataset_uid, "name": dataset.name, "item_count": len(body.items)}
 
@@ -186,7 +193,7 @@ def create_evaluation_run(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    _topic_or_problem(db, actor, kb_uid)
+    _topic_or_problem(db, actor, kb_uid, capability="contribute")
     topic = (
         db.query(KnowledgeTopic)
         .filter_by(tenant_id=actor.tenant_id, kb_uid=kb_uid)
@@ -304,7 +311,7 @@ def get_evaluation_run(
 
 @router.post("/{kb_uid}/evaluation-runs/{run_uid}/cancel")
 def cancel_evaluation_run(kb_uid: str, run_uid: str, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    _topic_or_problem(db, actor, kb_uid)
+    _topic_or_problem(db, actor, kb_uid, capability="edit")
     run = _run_or_problem(db, actor, kb_uid, run_uid)
     run.cancel_requested_at = local_now()
     if run.status in ACTIVE_RUN_STATUSES:
@@ -316,7 +323,7 @@ def cancel_evaluation_run(kb_uid: str, run_uid: str, actor: ActorContext = Depen
 
 @router.delete("/{kb_uid}/evaluation-runs/{run_uid}", status_code=204)
 def delete_evaluation_run(kb_uid: str, run_uid: str, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    _topic_or_problem(db, actor, kb_uid)
+    _topic_or_problem(db, actor, kb_uid, capability="edit")
     run = (
         db.query(EvaluationRun)
         .filter_by(run_uid=run_uid, tenant_id=actor.tenant_id, kb_uid=kb_uid)

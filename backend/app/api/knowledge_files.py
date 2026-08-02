@@ -1,4 +1,6 @@
 # backend/app/api/knowledge_files.py
+from typing import Literal
+
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +13,7 @@ from backend.app.models import KnowledgeFile
 from backend.app.security.actor import ActorContext, get_actor_context
 from backend.app.services.knowledge_access import (
     KnowledgeAccessDenied,
+    KnowledgeAccessPolicy,
     KnowledgeNotFound,
 )
 from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
@@ -80,11 +83,15 @@ def _public_file(file_row: KnowledgeFile) -> dict:
     }
 
 
-def _require_file(db: Session, actor: ActorContext, kb_uid: str, file_uid: str, *, manage: bool) -> KnowledgeFile:
-    from backend.app.services.knowledge_access import KnowledgeAccessPolicy
+def _require_file(db: Session, actor: ActorContext, kb_uid: str, file_uid: str, *, capability: Literal["read", "contribute", "edit"]) -> KnowledgeFile:
     try:
         policy = KnowledgeAccessPolicy(db)
-        (policy.require_manage if manage else policy.require_read)(actor, kb_uid)
+        if capability == "read":
+            policy.require_read(actor, kb_uid)
+        elif capability == "contribute":
+            policy.require_contribute(actor, kb_uid)
+        else:
+            policy.require_edit(actor, kb_uid)
     except KnowledgeNotFound:
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
@@ -139,6 +146,13 @@ def upload_file(
     relative_path: str = Form(""),
     auto_index: str = Form("false"),
 ):
+    try:
+        KnowledgeAccessPolicy(db).require_contribute(actor, kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+
     storage = _get_storage()
     svc = KnowledgeUploadService(db, storage, _get_publisher())
     try:
@@ -253,7 +267,7 @@ def update_file_metadata(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    file_row = _require_file(db, actor, kb_uid, file_uid, manage=True)
+    file_row = _require_file(db, actor, kb_uid, file_uid, capability="edit")
     from engine.app.knowledge.enrichment import (
         mark_enrichment_stale,
         safe_display_name,
@@ -284,7 +298,7 @@ def preview_file(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    file_row = _require_file(db, actor, kb_uid, file_uid, manage=False)
+    file_row = _require_file(db, actor, kb_uid, file_uid, capability="read")
     if file_row.content_text:
         return {"file_uid": file_uid, "content": file_row.content_text}
     if not _can_preview_original_as_text(file_row):
@@ -300,7 +314,7 @@ def download_file(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    file_row = _require_file(db, actor, kb_uid, file_uid, manage=False)
+    file_row = _require_file(db, actor, kb_uid, file_uid, capability="read")
     content = _get_storage().read_bytes(file_row.storage_uri)
     safe_name = file_row.original_filename.replace('"', "")
     return Response(
@@ -310,8 +324,8 @@ def download_file(
     )
 
 
-def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: str, job_type: str):
-    file_row = _require_file(db, actor, kb_uid, file_uid, manage=True)
+def _create_file_job(db: Session, actor: ActorContext, kb_uid: str, file_uid: str, job_type: str, *, capability: Literal["contribute", "edit"] = "contribute"):
+    file_row = _require_file(db, actor, kb_uid, file_uid, capability=capability)
     version = file_row.parsed_content_version or 0
     base_key = f"{kb_uid}:{file_uid}:{job_type}:v{version}"
     from backend.app.models import KnowledgeJob
@@ -420,7 +434,7 @@ def graph_file(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    return _create_file_job(db, actor, kb_uid, file_uid, "graph")
+    return _create_file_job(db, actor, kb_uid, file_uid, "graph", capability="edit")
 
 
 @router.delete("/{file_uid}", status_code=202)
@@ -431,7 +445,7 @@ def delete_file(
     db: Session = Depends(get_db),
 ):
     from backend.app.utils.time import local_now
-    file_row = _require_file(db, actor, kb_uid, file_uid, manage=True)
+    file_row = _require_file(db, actor, kb_uid, file_uid, capability="edit")
     if is_personal_inbox_asset_unit_file(file_row):
         job = delete_personal_inbox_file_cascade(
             db,
