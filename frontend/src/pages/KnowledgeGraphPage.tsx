@@ -687,6 +687,8 @@ export function KnowledgeGraphPage({
 }: KnowledgeGraphPageProps) {
   const initialView = initialGraphView(initialPayload)
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const graphContainerRef = useRef<HTMLDivElement | null>(null)
+  const [graphContainerWidth, setGraphContainerWidth] = useState(graphWidth)
   const didDragRef = useRef(false)
   const justDraggedRef = useRef(false)
   const justDraggedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -707,6 +709,10 @@ export function KnowledgeGraphPage({
   const [view, setView] = useState<UnifiedGraphView>(() => initialPayload?.focus?.view ?? initialPayload?.view ?? 'entity')
   const [graphZoom, setGraphZoom] = useState(1)
   const [dragging, setDragging] = useState<DragState>(null)
+  const [typeFilter, setTypeFilter] = useState<Set<UnifiedGraphNodeType>>(
+    () => new Set<UnifiedGraphNodeType>(['entity', 'document_chunk', 'personal_asset_unit']),
+  )
+  const [showFilterMenu, setShowFilterMenu] = useState(false)
 
   useEffect(() => {
     pinnedRef.current = pinned
@@ -718,6 +724,16 @@ export function KnowledgeGraphPage({
         clearTimeout(justDraggedTimerRef.current)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const el = graphContainerRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setGraphContainerWidth(entry.contentRect.width)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [])
 
   const loadGraph = async (nextView: UnifiedGraphView = view, nextQuery: string = query) => {
