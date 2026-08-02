@@ -229,7 +229,13 @@ export function KnowledgeFilesPage() {
           <Button variant="secondary" size="sm" onClick={load}>
             <RefreshCw size={14} /> 刷新
           </Button>
-          <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setUploadOpen(true)}
+            disabled={!kb?.can_contribute}
+            title={!kb?.can_contribute ? '需要贡献者以上权限' : '上传文件'}
+          >
             <Upload size={14} /> 上传文件
           </Button>
         </div>
@@ -254,7 +260,13 @@ export function KnowledgeFilesPage() {
           title="还没有文件"
           description="上传 PDF、DOCX、XLSX、PPTX、MD、TXT 等文件，开始构建索引"
           action={
-            <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setUploadOpen(true)}
+              disabled={!kb?.can_contribute}
+              title={!kb?.can_contribute ? '需要贡献者以上权限' : '上传文件'}
+            >
               <Upload size={14} /> 上传文件
             </Button>
           }
@@ -279,6 +291,8 @@ export function KnowledgeFilesPage() {
                   <FileRow
                     key={file.file_uid}
                     file={file}
+                    canContribute={!!kb?.can_contribute}
+                    canEdit={!!kb?.can_edit}
                     onPreview={() => setDrawerFile(file)}
                     onDownload={() => downloadFile(file)}
                     onParse={() => triggerParse(file)}
@@ -319,6 +333,8 @@ function isPersonalInboxDerivedFile(file: KnowledgeFile) {
 
 function FileRow({
   file,
+  canContribute,
+  canEdit,
   onPreview,
   onDownload,
   onParse,
@@ -327,6 +343,8 @@ function FileRow({
   onDelete,
 }: {
   file: KnowledgeFile
+  canContribute: boolean
+  canEdit: boolean
   onPreview: () => void
   onDownload: () => void
   onParse: () => void
@@ -377,16 +395,16 @@ function FileRow({
           <IconBtn label="下载" onClick={onDownload}>
             <Download size={14} />
           </IconBtn>
-          <IconBtn label="解析" onClick={onParse} disabled={!canParse}>
+          <IconBtn label="解析" onClick={onParse} disabled={!canContribute || !canParse}>
             <Loader2 size={14} />
           </IconBtn>
-          <IconBtn label="索引" onClick={onIndex} disabled={!canIndex}>
+          <IconBtn label="索引" onClick={onIndex} disabled={!canContribute || !canIndex}>
             <Zap size={14} />
           </IconBtn>
-          <IconBtn label="图谱" onClick={onGraph} disabled={!canGraph}>
+          <IconBtn label="图谱" onClick={onGraph} disabled={!canEdit || !canGraph}>
             <Network size={14} />
           </IconBtn>
-          <IconBtn label="删除" danger onClick={onDelete}>
+          <IconBtn label="删除" danger onClick={onDelete} disabled={!canContribute}>
             <Trash2 size={14} />
           </IconBtn>
         </div>

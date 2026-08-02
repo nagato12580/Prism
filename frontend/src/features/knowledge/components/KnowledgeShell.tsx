@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen } from 'lucide-react'
+import { ArrowLeft, BookOpen, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { knowledgeBasesApi, type KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { ApiProblem } from '@/features/knowledge/api/client'
 import { LoadingState, ErrorState, NotFoundState } from '@/components/ui/StateView'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { KnowledgeMembersPanel } from '@/features/knowledge/components/KnowledgeMembersPanel'
 
 interface TabDef {
   key: string
@@ -31,6 +34,7 @@ export function KnowledgeShell() {
   const [kb, setKb] = useState<KnowledgeBase | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
+  const [membersOpen, setMembersOpen] = useState(false)
 
   const load = () => {
     if (!kbUid) return
@@ -83,11 +87,21 @@ export function KnowledgeShell() {
           >
             <ArrowLeft size={12} /> 返回知识库
           </button>
-          <div className="truncate text-base font-semibold text-slate-900">{kb?.name}</div>
+          <div className="flex items-center gap-2">
+            <div className="truncate text-base font-semibold text-slate-900">{kb?.name}</div>
+            {kb?.my_role ? (
+              <Badge tone={roleBadgeTone(kb.my_role)}>{ROLE_LABELS[kb.my_role] ?? kb.my_role}</Badge>
+            ) : null}
+          </div>
           <div className="truncate text-xs text-slate-500">
             {kb?.description || '暂无描述'} · 状态：{kb?.status}
           </div>
         </div>
+        {kb?.can_manage_members ? (
+          <Button variant="secondary" size="sm" onClick={() => setMembersOpen(true)}>
+            <Users size={14} /> 成员管理
+          </Button>
+        ) : null}
       </header>
 
       <nav className="mb-3 flex flex-wrap items-center gap-1">
@@ -112,6 +126,42 @@ export function KnowledgeShell() {
       <div className="min-h-0 flex-1">
         <Outlet context={{ kb: kb ?? undefined, reload: load }} />
       </div>
+
+      <KnowledgeMembersPanel
+        kbUid={kbUid}
+        open={membersOpen}
+        onClose={() => setMembersOpen(false)}
+      />
     </div>
   )
+}
+
+// Role badge helpers. Roles come verbatim from the Backend `my_role` field
+// ('admin' | 'owner' | viewer/contributor/editor/manager). The frontend only
+// renders what the Backend reports; it never derives permissions itself.
+const ROLE_LABELS: Record<string, string> = {
+  admin: '管理员',
+  owner: '所有者',
+  manager: '管理者',
+  editor: '编辑者',
+  contributor: '贡献者',
+  viewer: '查看者',
+}
+
+function roleBadgeTone(role: string): 'blue' | 'violet' | 'cyan' | 'green' | 'amber' | 'neutral' {
+  switch (role) {
+    case 'admin':
+    case 'owner':
+      return 'violet'
+    case 'manager':
+      return 'blue'
+    case 'editor':
+      return 'cyan'
+    case 'contributor':
+      return 'green'
+    case 'viewer':
+      return 'amber'
+    default:
+      return 'neutral'
+  }
 }

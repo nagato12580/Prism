@@ -19,3 +19,9 @@ assert.match(indexPage, /团队库/, 'Knowledge index should show managed team l
 assert.match(indexPage, /can_delete/, 'Delete affordance should be capability-driven.')
 assert.match(indexPage, /requestTransfer/, 'Personal libraries should expose transfer request action.')
 assert.match(indexPage, /withdrawTransfer/, 'Pending transfer libraries should expose withdraw action.')
+
+const shell = readFileSync(resolve(root, 'src/features/knowledge/components/KnowledgeShell.tsx'), 'utf8')
+
+assert.match(shell, /can_manage_members/, 'Knowledge shell should expose member management by capability.')
+assert.match(shell, /KnowledgeMembersPanel/, 'Knowledge shell should render a members panel.')
+assert.match(shell, /my_role/, 'Knowledge shell should display or use the current user role.')
