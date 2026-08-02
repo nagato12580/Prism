@@ -175,6 +175,73 @@ def test_answer_stream_delegates_to_agent_runner(monkeypatch):
     assert captured["deep_search_depth"] == "standard"
 
 
+def test_answer_stream_classifies_with_recent_five_turns(monkeypatch):
+    classified = {}
+    history = [
+        {"role": "user", "content": "user-1"},
+        {"role": "assistant", "content": "assistant-1"},
+        {"role": "user", "content": "user-2"},
+        {"role": "assistant", "content": "assistant-2"},
+        {"role": "user", "content": "user-3"},
+        {"role": "assistant", "content": "assistant-3"},
+        {"role": "user", "content": "user-4"},
+        {"role": "assistant", "content": "assistant-4"},
+        {"role": "user", "content": "user-5"},
+        {"role": "assistant", "content": "assistant-5"},
+        {"role": "user", "content": "user-6"},
+        {"role": "assistant", "content": "assistant-6"},
+    ]
+
+    def classify(query, intent_history=None):
+        classified["query"] = query
+        classified["history"] = intent_history
+        return {"groups": [], "kb_specs": [], "reasoning": "普通聊天"}
+
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(answer, "classify_intent", classify)
+
+    list(answer.answer_stream("hello", history))
+
+    assert classified == {
+        "query": "hello",
+        "history": history[2:],
+    }
+
+
+def test_answer_stream_keeps_runner_full_history_when_intent_uses_recent_history(monkeypatch):
+    captured = {}
+    history = [
+        {"role": "user", "content": "user-1"},
+        {"role": "assistant", "content": "assistant-1"},
+        {"role": "user", "content": "user-2"},
+        {"role": "assistant", "content": "assistant-2"},
+        {"role": "user", "content": "user-3"},
+        {"role": "assistant", "content": "assistant-3"},
+        {"role": "user", "content": "user-4"},
+        {"role": "assistant", "content": "assistant-4"},
+        {"role": "user", "content": "user-5"},
+        {"role": "assistant", "content": "assistant-5"},
+        {"role": "user", "content": "user-6"},
+        {"role": "assistant", "content": "assistant-6"},
+    ]
+
+    class HistoryCapturingRunner:
+        def stream(self, query, runner_history, trace_recorder=None):
+            captured["history"] = runner_history
+            yield json.dumps({"type": "done"}) + "\n"
+
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: HistoryCapturingRunner())
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, intent_history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
+
+    list(answer.answer_stream("hello", history))
+
+    assert captured["history"] is history
+
+
 def test_answer_stream_forwards_deep_search_options(monkeypatch):
     captured = {}
 

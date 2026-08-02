@@ -56,6 +56,7 @@ _INTENT_CLASSIFY_PROMPT = """你是一个意图分类器。分析用户的输入
 4. 需要查资料、文档、知识库内容 → knowledge
 5. 知识库相关的问题如果也涉及用户个人偏好，可以同时启用 knowledge 和 memory
 6. 如果用户明确提到了具体的知识库名称，在 kb_specs 中列出
+7. 工具分组可以组合给出，比如 ["knowledge", "memory"]，表示同时启用知识库和记忆工具组
 
 返回纯 JSON（不要 markdown 代码块）：
 {"groups": ["knowledge", "memory"], "kb_specs": [], "reasoning": "简短中文说明"}
@@ -643,6 +644,29 @@ def build_agent_runner(
     )
 
 
+def _recent_turn_history(history: list[dict[str, Any]], turns: int) -> list[dict[str, Any]]:
+    if turns <= 0:
+        return []
+
+    selected: list[dict[str, Any]] = []
+    user_turns = 0
+    for item in reversed(history):
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        content = item.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        selected.append(item)
+        if role == "user":
+            user_turns += 1
+            if user_turns >= turns:
+                break
+    return list(reversed(selected))
+
+
 def answer_stream(
     query: str,
     history: list[dict] | None = None,
@@ -667,7 +691,8 @@ def answer_stream(
         if msg.get("role") == "assistant" and msg.get("clarify")
     )
     # --- Intent classification → dynamic tool groups -------------------------
-    intent = classify_intent(query, history)
+    intent_history = _recent_turn_history(history, settings.INTENT_RECENT_TURNS)
+    intent = classify_intent(query, intent_history)
     tool_groups = intent.get("groups", [])
     kb_specs = intent.get("kb_specs", [])
     # If knowledge group is active but no scope was pre-signed by the backend
