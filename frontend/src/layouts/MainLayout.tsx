@@ -10,6 +10,7 @@ import {
   Moon,
   Network,
   Search,
+  ShieldCheck,
   Sun,
   Waypoints,
   X,
@@ -43,6 +44,10 @@ const navSections = [
       { to: '/memory/profile', label: '用户画像', icon: Fingerprint },
       { to: '/memory/graph', label: '记忆图谱', icon: Waypoints },
     ],
+  },
+  {
+    label: '管理',
+    items: [{ to: '/team/admin', label: '团队管理', icon: ShieldCheck }],
   },
 ]
 
@@ -160,6 +165,18 @@ function NavList({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: 
           label="记忆图谱"
           icon={Waypoints}
           active={location.pathname === '/memory/graph'}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+      </div>
+
+      <div className="px-2 text-[11px] font-medium text-slate-500">管理</div>
+      <div className="space-y-1">
+        <NavItem
+          to="/team/admin"
+          label="团队管理"
+          icon={ShieldCheck}
+          active={location.pathname === '/team/admin' || location.pathname.startsWith('/team/admin/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />
