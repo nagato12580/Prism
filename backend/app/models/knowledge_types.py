@@ -27,3 +27,21 @@ class JobStatus(str, enum.Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
+
+
+class TeamRole(str, enum.Enum):
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
+class KnowledgeGovernanceStatus(str, enum.Enum):
+    PERSONAL = "personal"
+    PENDING_TRANSFER = "pending_transfer"
+    MANAGED = "managed"
+
+
+class KnowledgeBaseRole(str, enum.Enum):
+    VIEWER = "viewer"
+    CONTRIBUTOR = "contributor"
+    EDITOR = "editor"
+    MANAGER = "manager"

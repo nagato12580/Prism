@@ -2,7 +2,16 @@
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
 from .knowledge_job import KnowledgeJob
 from .knowledge_citation import KnowledgeCitation
-from .knowledge_types import JobStatus, ResourceStatus, StageStatus, uuid4_str
+from .knowledge_access import KnowledgeAccessAuditLog, KnowledgeBaseMembership, TeamMember
+from .knowledge_types import (
+    JobStatus,
+    KnowledgeBaseRole,
+    KnowledgeGovernanceStatus,
+    ResourceStatus,
+    StageStatus,
+    TeamRole,
+    uuid4_str,
+)
 from .chat import ChatSession, ChatMessage
 from .agent_trace import AgentTrace, AgentTraceEvidence, AgentTraceStep
 from .wiki import WikiDocument, WikiConcept, WikiKnowledgePoint, WikiKnowledgeRelation, WikiImage, WikiExtractionLog
@@ -92,4 +101,10 @@ __all__ = [
     "EvaluationDatasetItem",
     "EvaluationRun",
     "EvaluationRunItem",
+    "KnowledgeAccessAuditLog",
+    "KnowledgeBaseMembership",
+    "KnowledgeBaseRole",
+    "KnowledgeGovernanceStatus",
+    "TeamMember",
+    "TeamRole",
 ]

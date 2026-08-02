@@ -93,3 +93,57 @@ def test_require_manage_same_as_read_for_phase_one(db_session):
     actor = ActorContext(actor_id="owner", tenant_id="tenant-a", roles=())
     result = KnowledgeAccessPolicy(db_session).require_manage(actor, topic.kb_uid)
     assert result.kb_uid == topic.kb_uid
+
+
+def test_rbac_models_round_trip(db_session):
+    from backend.app.models import (
+        KnowledgeAccessAuditLog,
+        KnowledgeBaseMembership,
+        KnowledgeBaseRole,
+        KnowledgeGovernanceStatus,
+        KnowledgeTopic,
+        TeamMember,
+        TeamRole,
+    )
+
+    topic = KnowledgeTopic(
+        tenant_id="tenant-a",
+        owner_user_id="owner",
+        name="Private KB",
+    )
+    member = TeamMember(
+        tenant_id="tenant-a",
+        user_id="owner",
+        role=TeamRole.MEMBER.value,
+        status="active",
+    )
+    db_session.add_all([topic, member])
+    db_session.commit()
+
+    assert topic.governance_status == KnowledgeGovernanceStatus.PERSONAL.value
+
+    membership = KnowledgeBaseMembership(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        user_id="owner",
+        role=KnowledgeBaseRole.EDITOR.value,
+        granted_by="admin",
+    )
+    audit = KnowledgeAccessAuditLog(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        actor_id="admin",
+        action="membership.grant",
+        target_user_id="owner",
+        before=None,
+        after={"role": KnowledgeBaseRole.EDITOR.value},
+    )
+    db_session.add_all([membership, audit])
+    db_session.commit()
+
+    stored = db_session.query(KnowledgeBaseMembership).filter_by(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        user_id="owner",
+    ).one()
+    assert stored.role == "editor"
