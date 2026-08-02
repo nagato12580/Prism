@@ -42,22 +42,24 @@ _DEPTH_CONTROLS = {
 # Intent classification for dynamic tool-group injection
 # ---------------------------------------------------------------------------
 
-_INTENT_CLASSIFY_PROMPT = """你是一个意图分类器。分析用户的输入，判断需要启用哪些工具组来进行后续对话。
+_INTENT_CLASSIFY_PROMPT = """你是意图分类器。根据用户当前问题和 recent_history 中提供的近期对话记录，判断后续对话需要启用哪些工具组。必须结合当前问题与近期对话记录理解上下文；若近期记录为空，只根据当前问题分类。
 
 工具组定义：
-- record（记录工具）: 用户明确要求记录/收藏想法、观点、心得、待办、资源。关键词包括"帮我记"、"记下来"、"收藏"、"记录："、"保存"。
-- memory（记忆工具）: 用户需要查询自己的偏好、目标、长期记忆、个人背景、历史设置。当用户问"我设置过什么"、"我的偏好"、"我之前说过"时触发。
-- knowledge（知识库工具）: 用户需要检索知识库、查询上传的文档/资料、读取文件内容。当用户问"资料里"、"文档中"、"知识库"、"上传的"、"总结XX内容"时触发。
+- record（记录工具）：用户明确要求记录、收藏想法、观点、心得、待办或资源。
+- memory（记忆工具）：用户需要查询自己的偏好、目标、长期记忆、个人背景或历史设置。
+- knowledge（知识库工具）：用户需要检索知识库、查询上传的文档或资料、读取文件内容。
 
 分类规则：
-1. 闲聊、打招呼、简单问答（如"你好"、"今天天气怎么样"、"1+1等于几"）→ 不需要任何工具组
-2. 明确说"帮我记"、"收藏"、"记录" → record
-3. 涉及用户偏好、历史、个人设定、之前说过什么 → memory
-4. 需要查资料、文档、知识库内容 → knowledge
-5. 知识库相关的问题如果也涉及用户个人偏好，可以同时启用 knowledge 和 memory
-6. 如果用户明确提到了具体的知识库名称，在 kb_specs 中列出
+1. 闲聊、打招呼、简单问答不需要任何工具组。
+2. 明确要求记录、收藏或保存时启用 record。
+3. 涉及用户偏好、历史、个人设定或之前说过的内容时启用 memory。
+4. 需要查询资料、文档或知识库内容时启用 knowledge。
+5. 知识库问题也涉及用户个人偏好时，可以同时启用 knowledge 和 memory。
+6. 用户明确提到具体知识库名称时，在 kb_specs 中列出。
 
-返回纯 JSON（不要 markdown 代码块）：
+输入是 JSON 对象，包含 query（当前问题）和 recent_history（近期对话记录）。
+
+返回纯 JSON（不要 markdown 代码块），且必须保持以下结构：
 {"groups": ["knowledge", "memory"], "kb_specs": [], "reasoning": "简短中文说明"}
 
 如果不需要任何工具组，groups 为空数组。"""
@@ -72,7 +74,10 @@ def classify_intent(query: str, history: list[dict] | None = None) -> dict[str, 
     """
     messages: list[dict[str, str]] = [
         {"role": "system", "content": _INTENT_CLASSIFY_PROMPT},
-        {"role": "user", "content": query},
+        {"role": "user", "content": json.dumps({
+            "query": query,
+            "recent_history": _intent_history_payload(history),
+        }, ensure_ascii=False)},
     ]
     try:
         raw = chat(messages, timeout_seconds=5, max_retries=0)
@@ -641,6 +646,20 @@ def build_agent_runner(
         max_iterations=rag_max_iterations,
         clarify_depth=clarify_depth,
     )
+
+
+def _intent_history_payload(history: list[dict] | None) -> list[dict[str, str]]:
+    if not history:
+        return []
+
+    return [
+        {"role": item["role"], "content": item["content"]}
+        for item in history
+        if isinstance(item, dict)
+        and item.get("role") in {"user", "assistant"}
+        and isinstance(item.get("content"), str)
+        and item["content"].strip()
+    ]
 
 
 def _recent_turn_history(history: list[dict[str, Any]], turns: int) -> list[dict[str, Any]]:

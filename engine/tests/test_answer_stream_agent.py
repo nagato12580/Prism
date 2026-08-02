@@ -149,6 +149,33 @@ class FakeTraceRecorder:
         return None
 
 
+def test_classify_intent_sends_recent_history_to_llm(monkeypatch):
+    captured = {}
+    history = [
+        {"role": "user", "content": "我喜欢简洁的回答"},
+        {"role": "assistant", "content": "我会保持简洁"},
+        {"role": "tool", "content": "ignored"},
+        {"role": "user", "content": "   "},
+        {"role": "assistant", "content": None},
+    ]
+
+    def fake_chat(messages, **kwargs):
+        captured["messages"] = messages
+        return '{"groups": [], "kb_specs": [], "reasoning": "普通聊天"}'
+
+    monkeypatch.setattr(answer, "chat", fake_chat)
+
+    answer.classify_intent("根据刚才的偏好推荐", history)
+
+    assert json.loads(captured["messages"][1]["content"]) == {
+        "query": "根据刚才的偏好推荐",
+        "recent_history": [
+            {"role": "user", "content": "我喜欢简洁的回答"},
+            {"role": "assistant", "content": "我会保持简洁"},
+        ],
+    }
+
+
 def test_answer_stream_delegates_to_agent_runner(monkeypatch):
     captured = {}
 
