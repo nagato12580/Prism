@@ -199,6 +199,7 @@ def test_answer_stream_classifies_with_recent_five_turns(monkeypatch):
 
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
     monkeypatch.setattr(answer, "classify_intent", classify)
+    monkeypatch.setattr(answer.settings, "INTENT_RECENT_TURNS", 5)
 
     list(answer.answer_stream("hello", history))
 
