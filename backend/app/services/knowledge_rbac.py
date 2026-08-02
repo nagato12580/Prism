@@ -65,6 +65,17 @@ def _load_topic_for_update(db: Session, kb_uid: str) -> KnowledgeTopic:
     return topic
 
 
+def _ensure_same_tenant(topic: KnowledgeTopic, actor: ActorContext) -> None:
+    """Raise ``KnowledgeAccessDenied`` when actor and topic tenants differ.
+
+    Mirrors ``KnowledgeAccessPolicy._ensure_same_tenant`` so the transfer
+    services enforce the tenant boundary even when they mutate without going
+    through a policy guard.
+    """
+    if topic.tenant_id != actor.tenant_id:
+        raise KnowledgeAccessDenied(topic.kb_uid)
+
+
 _VALID_ROLES = frozenset(
     [
         KnowledgeBaseRole.VIEWER.value,
@@ -138,6 +149,7 @@ def withdraw_transfer(
     Only the owner may withdraw.
     """
     topic = _load_topic_for_update(db, kb_uid)
+    _ensure_same_tenant(topic, actor)
 
     if topic.owner_user_id != actor.actor_id:
         raise KnowledgeAccessDenied(kb_uid)
@@ -152,7 +164,7 @@ def withdraw_transfer(
 
     _audit(
         db,
-        tenant_id=actor.tenant_id,
+        tenant_id=topic.tenant_id,
         kb_uid=kb_uid,
         actor_id=actor.actor_id,
         action="transfer.withdraw",
@@ -178,6 +190,7 @@ def accept_transfer(
         raise KnowledgeAccessDenied(kb_uid)
 
     topic = _load_topic_for_update(db, kb_uid)
+    _ensure_same_tenant(topic, actor)
 
     if topic.governance_status != KnowledgeGovernanceStatus.PENDING_TRANSFER.value:
         raise KnowledgeAccessDenied(kb_uid)
@@ -189,7 +202,7 @@ def accept_transfer(
 
     _audit(
         db,
-        tenant_id=actor.tenant_id,
+        tenant_id=topic.tenant_id,
         kb_uid=kb_uid,
         actor_id=actor.actor_id,
         action="transfer.accept",
@@ -198,7 +211,7 @@ def accept_transfer(
     # Grant the original owner editor role
     _upsert_membership_row(
         db,
-        tenant_id=actor.tenant_id,
+        tenant_id=topic.tenant_id,
         kb_uid=kb_uid,
         user_id=topic.owner_user_id,
         role=KnowledgeBaseRole.EDITOR.value,
@@ -207,7 +220,7 @@ def accept_transfer(
 
     _audit(
         db,
-        tenant_id=actor.tenant_id,
+        tenant_id=topic.tenant_id,
         kb_uid=kb_uid,
         actor_id=actor.actor_id,
         action="membership.grant",
@@ -235,6 +248,7 @@ def reject_transfer(
         raise KnowledgeAccessDenied(kb_uid)
 
     topic = _load_topic_for_update(db, kb_uid)
+    _ensure_same_tenant(topic, actor)
 
     if topic.governance_status != KnowledgeGovernanceStatus.PENDING_TRANSFER.value:
         raise KnowledgeAccessDenied(kb_uid)
@@ -247,7 +261,7 @@ def reject_transfer(
 
     _audit(
         db,
-        tenant_id=actor.tenant_id,
+        tenant_id=topic.tenant_id,
         kb_uid=kb_uid,
         actor_id=actor.actor_id,
         action="transfer.reject",

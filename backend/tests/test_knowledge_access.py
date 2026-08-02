@@ -335,3 +335,59 @@ def test_manager_can_grant_editor_but_not_manager(db_session):
             "charlie",
             KnowledgeBaseRole.MANAGER.value,
         )
+
+
+def test_transfer_operations_are_denied_across_tenants(db_session):
+    """An actor in a different tenant cannot withdraw/accept/reject a transfer.
+
+    Regression for a tenant-isolation gap where ``accept_transfer`` could
+    insert the owner's editor membership under the acting admin's tenant.
+    """
+    from backend.app.services.knowledge_access import KnowledgeAccessDenied
+    from backend.app.services.knowledge_rbac import (
+        accept_transfer,
+        reject_transfer,
+        request_transfer,
+        withdraw_transfer,
+    )
+
+    topic = kb(db_session, owner="alice")
+    request_transfer(db_session, actor("alice"), topic.kb_uid, None)
+
+    # A team-admin role in another tenant must not be able to accept or reject.
+    foreign_admin = actor("admin-b", tenant_id="tenant-b", roles=(TeamRole.ADMIN.value,))
+    with pytest.raises(KnowledgeAccessDenied):
+        accept_transfer(db_session, foreign_admin, topic.kb_uid)
+    with pytest.raises(KnowledgeAccessDenied):
+        reject_transfer(db_session, foreign_admin, topic.kb_uid, "nope")
+
+    # The same user id in another tenant must not be able to withdraw.
+    with pytest.raises(KnowledgeAccessDenied):
+        withdraw_transfer(db_session, actor("alice", tenant_id="tenant-b"), topic.kb_uid)
+
+    # The transfer state must be untouched by all denied attempts.
+    still_pending = db_session.query(KnowledgeTopic).filter_by(kb_uid=topic.kb_uid).one()
+    assert still_pending.governance_status == KnowledgeGovernanceStatus.PENDING_TRANSFER.value
+
+
+def test_accept_transfer_uses_topic_tenant_for_membership_and_audit(db_session):
+    """accept_transfer writes membership and audit rows under the topic tenant."""
+    from backend.app.services.knowledge_rbac import accept_transfer, request_transfer
+
+    team_member(db_session, "admin", TeamRole.ADMIN.value)
+    topic = kb(db_session, owner="alice", status=KnowledgeGovernanceStatus.PERSONAL.value)
+
+    request_transfer(db_session, actor("alice"), topic.kb_uid, None)
+    accept_transfer(db_session, actor("admin"), topic.kb_uid)
+
+    membership = db_session.query(KnowledgeBaseMembership).filter_by(
+        tenant_id="tenant-a",
+        kb_uid=topic.kb_uid,
+        user_id="alice",
+    ).one()
+    assert membership.role == KnowledgeBaseRole.EDITOR.value
+
+    audit_tenant_ids = {
+        row.tenant_id for row in db_session.query(KnowledgeAccessAuditLog).all()
+    }
+    assert audit_tenant_ids == {"tenant-a"}

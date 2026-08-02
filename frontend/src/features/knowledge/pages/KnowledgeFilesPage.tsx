@@ -404,7 +404,7 @@ function FileRow({
           <IconBtn label="图谱" onClick={onGraph} disabled={!canEdit || !canGraph}>
             <Network size={14} />
           </IconBtn>
-          <IconBtn label="删除" danger onClick={onDelete} disabled={!canContribute}>
+          <IconBtn label="删除" danger onClick={onDelete} disabled={!canEdit}>
             <Trash2 size={14} />
           </IconBtn>
         </div>
