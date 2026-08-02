@@ -1,5 +1,6 @@
 # backend/app/api/knowledge_bases.py
 from collections import Counter
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -7,14 +8,28 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.models import EvaluationRun, KnowledgeJob, KnowledgeTopic
-from backend.app.models.knowledge_types import ResourceStatus
+from backend.app.models import (
+    EvaluationRun,
+    KnowledgeBaseMembership,
+    KnowledgeJob,
+    KnowledgeTopic,
+)
+from backend.app.models.knowledge_types import KnowledgeGovernanceStatus, ResourceStatus
 from backend.app.security.actor import ActorContext, get_actor_context
 from backend.app.services.graph_client import GraphClient
 from backend.app.services.knowledge_access import (
     KnowledgeAccessDenied,
     KnowledgeAccessPolicy,
     KnowledgeNotFound,
+)
+from backend.app.services.knowledge_rbac import (
+    accept_transfer,
+    list_memberships,
+    reject_transfer,
+    remove_membership,
+    request_transfer,
+    upsert_membership,
+    withdraw_transfer,
 )
 from backend.app.services.personal_inbox import ensure_personal_inbox_kb
 from backend.app.api.errors import ApiProblem
@@ -47,6 +62,19 @@ class KnowledgeBaseResponse(BaseModel):
     version: int
     active_index_generation: str | None = None
     active_graph_generation: str | None = None
+    governance_status: str = KnowledgeGovernanceStatus.PERSONAL.value
+    transfer_requested_by: str | None = None
+    transfer_requested_at: datetime | None = None
+    transfer_message: str | None = None
+    transfer_reviewed_by: str | None = None
+    transfer_reviewed_at: datetime | None = None
+    transfer_rejection_reason: str | None = None
+    my_role: str | None = None
+    can_read: bool = False
+    can_contribute: bool = False
+    can_edit: bool = False
+    can_manage_members: bool = False
+    can_delete: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -63,6 +91,39 @@ class KnowledgeBaseGraphResponse(BaseModel):
     edges: list[dict]
     stats: dict
     focus: dict
+
+
+# ---------------------------------------------------------------------------
+# RBAC DTOs
+# ---------------------------------------------------------------------------
+
+
+class TransferRequestCreate(BaseModel):
+    message: str | None = None
+
+
+class TransferRejectRequest(BaseModel):
+    reason: str | None = None
+
+
+class MembershipUpdate(BaseModel):
+    role: str
+
+
+class MembershipResponse(BaseModel):
+    user_id: str
+    role: str
+    granted_by: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+def _kb_response(topic: KnowledgeTopic, actor: ActorContext, policy: KnowledgeAccessPolicy) -> dict:
+    payload = KnowledgeBaseResponse.model_validate(topic).model_dump()
+    payload.update(policy.capabilities(actor, topic))
+    return payload
 
 
 def _empty_graph_payload(*, kb_uid: str, view: str, file_uids: tuple[str, ...]) -> dict:
@@ -110,11 +171,13 @@ def create_knowledge_base(
         owner_user_id=actor.actor_id,
         name=body.name,
         description=body.description,
+        governance_status=KnowledgeGovernanceStatus.PERSONAL.value,
     )
     db.add(topic)
     db.commit()
     db.refresh(topic)
-    return topic
+    policy = KnowledgeAccessPolicy(db)
+    return _kb_response(topic, actor, policy)
 
 
 @router.get("", response_model=KnowledgeBaseListResponse)
@@ -134,27 +197,20 @@ def list_knowledge_bases(
     except Exception:
         db.rollback()
         raise
-    query = (
-        db.query(KnowledgeTopic)
-        .filter_by(tenant_id=actor.tenant_id, owner_user_id=actor.actor_id, deleted_at=None)
-        .order_by(KnowledgeTopic.created_at.desc(), KnowledgeTopic.kb_uid.desc())
-    )
+    policy = KnowledgeAccessPolicy(db)
+    all_topics = policy.list_visible_topics(actor)
+    all_topics.sort(key=lambda t: (t.created_at, t.kb_uid), reverse=True)
+
     if cursor:
-        cursor_topic = db.query(KnowledgeTopic).filter_by(kb_uid=cursor).one_or_none()
-        if cursor_topic:
-            query = query.filter(
-                (KnowledgeTopic.created_at < cursor_topic.created_at)
-                | (
-                    (KnowledgeTopic.created_at == cursor_topic.created_at)
-                    & (KnowledgeTopic.kb_uid < cursor_topic.kb_uid)
-                )
-            )
-    topics = query.limit(limit + 1).all()
-    has_more = len(topics) > limit
-    items = topics[:limit]
+        cursor_idx = next((i for i, t in enumerate(all_topics) if t.kb_uid == cursor), -1)
+        if cursor_idx >= 0:
+            all_topics = all_topics[cursor_idx + 1:]
+
+    has_more = len(all_topics) > limit
+    items = all_topics[:limit]
     next_cursor = items[-1].kb_uid if has_more and items else None
     return KnowledgeBaseListResponse(
-        items=items,
+        items=[_kb_response(t, actor, policy) for t in items],
         total=len(items),
         cursor=next_cursor,
     )
@@ -170,18 +226,82 @@ def get_parser_capabilities():
         raise ApiProblem(503, "PARSER_UNAVAILABLE", "Parser registry cannot be loaded")
 
 
+# ---------------------------------------------------------------------------
+# Admin transfer-request routes (registered before /{kb_uid} to avoid
+# FastAPI treating "admin" as a kb_uid value).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/transfer-requests")
+def list_transfer_requests(
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    policy = KnowledgeAccessPolicy(db)
+    if not policy.is_team_admin(actor):
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", "Admin access required")
+    topics = (
+        db.query(KnowledgeTopic)
+        .filter_by(
+            tenant_id=actor.tenant_id,
+            governance_status=KnowledgeGovernanceStatus.PENDING_TRANSFER.value,
+            deleted_at=None,
+        )
+        .all()
+    )
+    return {
+        "items": [_kb_response(t, actor, policy) for t in topics],
+        "total": len(topics),
+    }
+
+
+@router.post("/admin/transfer-requests/{kb_uid}/accept", response_model=KnowledgeBaseResponse)
+def accept_transfer_request(
+    kb_uid: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        topic = accept_transfer(db, actor, kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    policy = KnowledgeAccessPolicy(db)
+    return _kb_response(topic, actor, policy)
+
+
+@router.post("/admin/transfer-requests/{kb_uid}/reject", response_model=KnowledgeBaseResponse)
+def reject_transfer_request(
+    kb_uid: str,
+    body: TransferRejectRequest | None = None,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        topic = reject_transfer(db, actor, kb_uid, reason=body.reason if body else None)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    policy = KnowledgeAccessPolicy(db)
+    return _kb_response(topic, actor, policy)
+
+
 @router.get("/{kb_uid}", response_model=KnowledgeBaseResponse)
 def get_knowledge_base(
     kb_uid: str,
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
+    policy = KnowledgeAccessPolicy(db)
     try:
-        return KnowledgeAccessPolicy(db).require_read(actor, kb_uid)
+        topic = policy.require_read(actor, kb_uid)
     except KnowledgeNotFound:
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
         raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    return _kb_response(topic, actor, policy)
 
 
 @router.get("/{kb_uid}/graph", response_model=KnowledgeBaseGraphResponse)
@@ -237,8 +357,9 @@ def update_knowledge_base(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
+    policy = KnowledgeAccessPolicy(db)
     try:
-        topic = KnowledgeAccessPolicy(db).require_manage(actor, kb_uid)
+        topic = policy.require_edit(actor, kb_uid)
     except KnowledgeNotFound:
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
@@ -264,7 +385,7 @@ def update_knowledge_base(
     if rowcount != 1:
         raise ApiProblem(409, "VERSION_CONFLICT", f"Expected version {expected}, got current")
     db.refresh(topic)
-    return topic
+    return _kb_response(topic, actor, policy)
 
 
 @router.delete("/{kb_uid}", status_code=200, response_model=KnowledgeBaseResponse)
@@ -273,8 +394,9 @@ def delete_knowledge_base(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
+    policy = KnowledgeAccessPolicy(db)
     try:
-        topic = KnowledgeAccessPolicy(db).require_manage(actor, kb_uid)
+        policy.require_delete(actor, kb_uid)
     except KnowledgeNotFound:
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
@@ -312,4 +434,103 @@ def delete_knowledge_base(
     topic.deleted_at = local_now()
     db.commit()
     db.refresh(topic)
-    return topic
+    return _kb_response(topic, actor, policy)
+
+
+# ---------------------------------------------------------------------------
+# Transfer-request routes (owner-initiated)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{kb_uid}/transfer-request", response_model=KnowledgeBaseResponse)
+def create_transfer_request(
+    kb_uid: str,
+    body: TransferRequestCreate | None = None,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        topic = request_transfer(
+            db, actor, kb_uid,
+            message=body.message if body else None,
+        )
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    policy = KnowledgeAccessPolicy(db)
+    return _kb_response(topic, actor, policy)
+
+
+@router.delete("/{kb_uid}/transfer-request", response_model=KnowledgeBaseResponse)
+def withdraw_transfer_request(
+    kb_uid: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        topic = withdraw_transfer(db, actor, kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    policy = KnowledgeAccessPolicy(db)
+    return _kb_response(topic, actor, policy)
+
+
+# ---------------------------------------------------------------------------
+# Membership management routes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{kb_uid}/members")
+def list_kb_members(
+    kb_uid: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        memberships = list_memberships(db, actor, kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    return {
+        "items": [MembershipResponse.model_validate(m).model_dump() for m in memberships],
+        "total": len(memberships),
+    }
+
+
+@router.put("/{kb_uid}/members/{user_id}", response_model=MembershipResponse)
+def upsert_kb_member(
+    kb_uid: str,
+    user_id: str,
+    body: MembershipUpdate,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        membership = upsert_membership(db, actor, kb_uid, user_id, body.role)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    except ValueError as exc:
+        raise ApiProblem(400, "INVALID_ROLE", str(exc))
+    return membership
+
+
+@router.delete("/{kb_uid}/members/{user_id}")
+def remove_kb_member(
+    kb_uid: str,
+    user_id: str,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        remove_membership(db, actor, kb_uid, user_id)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", f"Access denied to {kb_uid}")
+    return {"detail": "deleted"}

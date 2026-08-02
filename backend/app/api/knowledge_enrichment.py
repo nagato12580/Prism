@@ -79,10 +79,13 @@ class SampleQuestionsResponse(_StrictDto):
     sample_questions: dict[str, Any]
 
 
-def _topic_or_problem(db: Session, actor: ActorContext, kb_uid: str, *, manage: bool):
+def _topic_or_problem(db: Session, actor: ActorContext, kb_uid: str, *, capability: Literal["read", "edit"]):
     try:
         policy = KnowledgeAccessPolicy(db)
-        return (policy.require_manage if manage else policy.require_read)(actor, kb_uid)
+        if capability == "read":
+            return policy.require_read(actor, kb_uid)
+        else:
+            return policy.require_edit(actor, kb_uid)
     except KnowledgeNotFound:
         raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", f"Knowledge base {kb_uid} not found")
     except KnowledgeAccessDenied:
@@ -211,7 +214,7 @@ def _enqueue_generation(
 
 @router.get("/{kb_uid}/mindmap", response_model=MindmapResponse)
 def get_mindmap(kb_uid: str, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    topic = _topic_or_problem(db, actor, kb_uid, manage=False)
+    topic = _topic_or_problem(db, actor, kb_uid, capability="read")
     value = deepcopy(topic.mindmap) if isinstance(topic.mindmap, dict) else {
         "status": "stale", "version": topic.mindmap_version or 0, "input_revision": 0, "nodes": [],
     }
@@ -226,7 +229,7 @@ def generate_mindmap(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    topic = _topic_or_problem(db, actor, kb_uid, manage=True)
+    topic = _topic_or_problem(db, actor, kb_uid, capability="edit")
     from backend.app.config import settings
     job = _enqueue_generation(
         db, topic, job_type="mindmap_generation", model=body.model or settings.LLM_MODEL,
@@ -236,7 +239,7 @@ def generate_mindmap(
 
 
 def _update_mindmap_impl(kb_uid: str, body: MindmapDiffRequest, actor: ActorContext, db: Session, if_match: str | None = None):
-    _topic_or_problem(db, actor, kb_uid, manage=True)
+    _topic_or_problem(db, actor, kb_uid, capability="edit")
     topic = db.query(KnowledgeTopic).filter_by(
         tenant_id=actor.tenant_id, kb_uid=kb_uid, deleted_at=None,
     ).with_for_update().one()
@@ -312,7 +315,7 @@ def replace_mindmap_diff(
 
 @router.get("/{kb_uid}/sample-questions", response_model=SampleQuestionsResponse)
 def get_sample_questions(kb_uid: str, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    topic = _topic_or_problem(db, actor, kb_uid, manage=False)
+    topic = _topic_or_problem(db, actor, kb_uid, capability="read")
     value = deepcopy(topic.sample_questions) if isinstance(topic.sample_questions, dict) else {
         "status": "stale", "version": topic.sample_questions_version or 0, "input_revision": 0, "questions": [],
     }
@@ -327,7 +330,7 @@ def generate_sample_questions(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    topic = _topic_or_problem(db, actor, kb_uid, manage=True)
+    topic = _topic_or_problem(db, actor, kb_uid, capability="edit")
     from backend.app.config import settings
     job = _enqueue_generation(
         db, topic, job_type="sample_questions_generation", model=body.model or settings.LLM_MODEL,
@@ -343,7 +346,7 @@ def cancel_enrichment_job(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
-    _topic_or_problem(db, actor, kb_uid, manage=True)
+    _topic_or_problem(db, actor, kb_uid, capability="edit")
     topic = _lock_topic_for_cancel(db, actor.tenant_id, kb_uid)
     job = _lock_job_for_cancel(db, job_id, actor.tenant_id, kb_uid)
     if job is None or job.job_type not in {"mindmap_generation", "sample_questions_generation"}:
@@ -367,7 +370,7 @@ def cancel_enrichment_job(
 
 @router.get("/{kb_uid}/export")
 def export_knowledge(kb_uid: str, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
-    topic = _topic_or_problem(db, actor, kb_uid, manage=False)
+    topic = _topic_or_problem(db, actor, kb_uid, capability="read")
     try:
         archive = build_knowledge_export(db, topic)
     except ValueError as exc:

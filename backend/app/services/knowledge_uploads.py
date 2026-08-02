@@ -66,7 +66,7 @@ class KnowledgeUploadService:
         actor: ActorContext,
         request: UploadRequest,
     ):
-        topic = self.policy.require_manage(actor, request.kb_uid)
+        topic = self.policy.require_contribute(actor, request.kb_uid)
         file_uid = uuid4_str()
         staged = self.storage.stage(
             actor.tenant_id, topic.kb_uid, file_uid,

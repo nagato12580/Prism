@@ -52,6 +52,7 @@ def test_public_query_distinguishes_no_hits_from_unavailable(client, db_session,
     from backend.app.api import knowledge_retrieval
 
     kb_uid, headers = _create_kb(client, db_session)
+    monkeypatch.setattr(knowledge_retrieval.settings, "KNOWLEDGE_SCOPE_SECRET", "test-secret")
     monkeypatch.setattr(knowledge_retrieval, "call_engine_retrieval", lambda request: _engine_payload("no_hits"))
     no_hits = client.post(f"/api/v1/knowledge-bases/{kb_uid}/retrieval/query", headers=headers, json={"query": "missing"})
     assert no_hits.status_code == 200
@@ -89,6 +90,7 @@ def test_degraded_maps_to_206_and_strips_internal_fields(client, db_session, mon
     from backend.app.api import knowledge_retrieval
 
     kb_uid, headers = _create_kb(client, db_session)
+    monkeypatch.setattr(knowledge_retrieval.settings, "KNOWLEDGE_SCOPE_SECRET", "test-secret")
     captured = {}
 
     def fake_call(request):

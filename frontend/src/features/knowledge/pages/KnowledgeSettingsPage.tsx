@@ -75,7 +75,14 @@ export function KnowledgeSettingsPage() {
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </label>
           <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!name.trim()}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={save}
+              loading={saving}
+              disabled={!name.trim() || !kb?.can_edit}
+              title={!kb?.can_edit ? '需要编辑者以上权限' : '保存'}
+            >
               <Save size={14} /> 保存
             </Button>
             {error ? <span className="text-xs text-red-500">{(error as ApiProblem).message}</span> : null}
@@ -110,8 +117,8 @@ export function KnowledgeSettingsPage() {
           variant="danger"
           size="sm"
           onClick={() => setConfirmDelete(true)}
-          disabled={deleteDisabled}
-          title={deleteDisabled ? '系统知识库不能删除' : '删除知识库'}
+          disabled={deleteDisabled || !kb?.can_delete}
+          title={deleteDisabled ? '系统知识库不能删除' : !kb?.can_delete ? '需要删除权限' : '删除知识库'}
         >
           <Trash2 size={14} /> 删除知识库
         </Button>

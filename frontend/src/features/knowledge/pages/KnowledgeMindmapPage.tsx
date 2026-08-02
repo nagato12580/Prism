@@ -21,6 +21,7 @@ interface MindmapNode {
 export function KnowledgeMindmapPage() {
   const { kb } = useOutletContext<Ctx>()
   const kbUid = kb?.kb_uid ?? ''
+  const canEdit = !!kb?.can_edit
   const [data, setData] = useState<MindmapResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
@@ -60,7 +61,14 @@ export function KnowledgeMindmapPage() {
         <h2 className="text-base font-semibold text-slate-900">知识导图</h2>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="secondary" onClick={load}><RefreshCw size={14} /> 刷新</Button>
-          <Button size="sm" variant="primary" onClick={generate} loading={generating}>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={generate}
+            loading={generating}
+            disabled={!canEdit}
+            title={!canEdit ? '需要编辑者以上权限' : '生成导图'}
+          >
             <Sparkles size={14} /> 生成导图
           </Button>
         </div>

@@ -16,7 +16,7 @@ from sqlalchemy.orm import relationship, synonym
 
 from ..database import Base
 from ..utils.time import local_now
-from .knowledge_types import ResourceStatus, StageStatus, uuid4_str
+from .knowledge_types import KnowledgeGovernanceStatus, ResourceStatus, StageStatus, uuid4_str
 
 
 DocumentText = Text().with_variant(MEDIUMTEXT, "mysql")
@@ -58,6 +58,19 @@ class KnowledgeTopic(Base):
     system_type = Column(String(64), nullable=True, index=True)
     is_system = Column(Boolean, nullable=False, default=False, server_default="0")
     delete_disabled = Column(Boolean, nullable=False, default=False, server_default="0")
+    governance_status = Column(
+        String(32),
+        nullable=False,
+        default=KnowledgeGovernanceStatus.PERSONAL.value,
+        server_default=KnowledgeGovernanceStatus.PERSONAL.value,
+        index=True,
+    )
+    transfer_requested_by = Column(CHAR(36), nullable=True)
+    transfer_requested_at = Column(DateTime, nullable=True)
+    transfer_message = Column(Text, nullable=True)
+    transfer_reviewed_by = Column(CHAR(36), nullable=True)
+    transfer_reviewed_at = Column(DateTime, nullable=True)
+    transfer_rejection_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=local_now)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
