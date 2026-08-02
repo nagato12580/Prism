@@ -170,7 +170,9 @@ class MilvusGenerationIndex:
         return result
 
 
-def _connect(host: str = "127.0.0.1", port: int = 19530):
+def _connect(host: str | None = None, port: int | None = None):
+    host = host or settings.MILVUS_HOST
+    port = port or settings.MILVUS_PORT
     try:
         if not connections.has_connection("default"):
             connections.connect("default", host=host, port=port)
@@ -181,10 +183,12 @@ def _connect(host: str = "127.0.0.1", port: int = 19530):
 def ensure_collection(
     profile: EmbeddingProfile | None = None,
     *,
-    host: str = "127.0.0.1",
-    port: int = 19530,
+    host: str | None = None,
+    port: int | None = None,
     load_timeout: float = 30,
 ):
+    host = host or settings.MILVUS_HOST
+    port = port or settings.MILVUS_PORT
     profile = profile or DEFAULT_PROFILE
     _connect(host, port)
     if utility.has_collection(profile.collection_name):

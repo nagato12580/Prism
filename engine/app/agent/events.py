@@ -55,6 +55,17 @@ def clarify_event(question: str, options: list[dict[str, str]]) -> str:
     return ndjson_event("clarify", {"question": question, "options": options})
 
 
+def needs_kb_selection_event(query: str, reasoning: str = "") -> str:
+    return ndjson_event(
+        "needs_kb_selection",
+        {
+            "message": "这个问题需要访问资料，但当前还没有选择知识库。请选择知识库后我再继续回答。",
+            "pending_query": query,
+            "reasoning": reasoning,
+        },
+    )
+
+
 def continuation_event(state: Any) -> str:
     """Serialize only the safe, client-persistable continuation cursor."""
     return ndjson_event(

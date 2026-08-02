@@ -138,7 +138,17 @@ async def chat_answer_proxy(
             allowed_kb_uids.append(personal_inbox.kb_uid)
         db.commit()
     if not allowed_kb_uids:
-        raise HTTPException(status_code=400, detail="no authorized knowledge base for this answer")
+        # No KB authorized — forward to engine without a knowledge scope.
+        # The engine will classify intent and mount only non-knowledge tools.
+        payload = _public_payload(req)
+
+        async def stream() -> AsyncIterator[bytes]:
+            async for chunk in stream_engine_answer("", payload):
+                if await request.is_disconnected():
+                    break
+                yield chunk
+
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
 
     scope = AuthorizedKnowledgeScope(
         actor_id=actor.actor_id,

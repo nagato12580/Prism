@@ -1,15 +1,17 @@
-"""Knowledge Skill: model-facing instructions for the six authorized tools.
+"""Skill prompts for intent-based tool groups.
 
-The Skill is bound to the agent run only when the verified
-``AuthorizedKnowledgeScope`` carries a non-empty ``allowed_kb_uids`` (Task 4
-runner wiring). It instructs the model to use exactly the six read-only tools,
-to cite the ``evidence_id`` values returned in the current run, and to treat
-attachments as a separate channel.
+Each skill is appended to the system prompt only when the corresponding tool
+group is active.  The Knowledge Skill is also kept for backward compatibility
+with the six-tool authorized scope path.
 """
 from __future__ import annotations
 
 from engine.app.agent.tools.knowledge_base import KNOWLEDGE_TOOL_NAMES  # noqa: F401  (re-exported)
 
+
+# ---------------------------------------------------------------------------
+# Knowledge skill (six-tool authorized scope)
+# ---------------------------------------------------------------------------
 
 _SKILL_TEMPLATE = """\
 # Knowledge tools (read-only)
@@ -38,9 +40,71 @@ Policy:
 """
 
 
+# ---------------------------------------------------------------------------
+# Record skill (capture + personal assets)
+# ---------------------------------------------------------------------------
+
+_RECORD_SKILL_TEMPLATE = """\
+# Record tools (capture & personal assets)
+
+You have tools for recording thoughts and managing personal knowledge assets:
+
+- capture_thought: record a thought, idea, opinion, snippet, to-do, or resource. Use when the user explicitly asks to save ("帮我记一下", "记下来", "收藏这个", "记录：…"). Creates a pending item that the user confirms later in the review station.
+- asset_search: search confirmed personal knowledge assets by multi-term weighted matching (title, tags, category, summary, body).
+- asset_overview: summarize and group confirmed personal assets by category and tags. Use for questions about what the user has saved, recent collection themes, or asset distribution.
+- asset_related: find confirmed assets related to an idea, topic, or existing asset.
+
+Policy:
+- capture_thought is a write tool — only call it when the user explicitly asks to save something. Never call it speculatively.
+- asset_search / asset_overview / asset_related are read-only tools for browsing the user's confirmed personal asset library.
+- Personal assets are the user's curated knowledge fragments, distinct from long-term memory and knowledge-base documents.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Memory skill
+# ---------------------------------------------------------------------------
+
+_MEMORY_SKILL_TEMPLATE = """\
+# Memory tool (long-term user context)
+
+You have access to the user's long-term memory:
+
+- memory_search: search confirmed long-term memory and user profile context, including preferences, goals, constraints, current projects, and stable personal context. Covers both asset-settled memories and conversation-extracted confirmed statements.
+
+Policy:
+- Use memory_search when the user's own preferences, remembered context, or personal background is needed to interpret or answer the question.
+- memory_search complements but does not replace knowledge-base tools. Knowledge facts must come from query_kb/open_kb_document; memory context may guide interpretation.
+- Do not call memory_search for general knowledge or document retrieval — those belong to the knowledge tools.
+"""
+
+
+# ---------------------------------------------------------------------------
+# No-tools reminder
+# ---------------------------------------------------------------------------
+
+_NO_TOOLS_REMINDER = """\
+当前没有启用任何专用工具组。对于闲聊、打招呼或简单问答，直接以自然语言回复即可，不需要调用工具。如果用户的问题需要特定工具支持而你当前没有这些工具，请如实告知用户。"""
+
+
+# ---------------------------------------------------------------------------
+# Render helpers
+# ---------------------------------------------------------------------------
+
+
 def render_knowledge_skill() -> str:
     """Return the canonical Knowledge Skill instructions text."""
     return _SKILL_TEMPLATE
+
+
+def render_record_skill() -> str:
+    """Return the Record Skill instructions text."""
+    return _RECORD_SKILL_TEMPLATE
+
+
+def render_memory_skill() -> str:
+    """Return the Memory Skill instructions text."""
+    return _MEMORY_SKILL_TEMPLATE
 
 
 def knowledge_skill_section() -> str:
@@ -61,3 +125,25 @@ def compose_system_prompt_with_knowledge_skill(
     if not has_knowledge_scope:
         return base_prompt
     return f"{base_prompt.rstrip()}\n\n{render_knowledge_skill()}"
+
+
+def compose_system_prompt_with_groups(
+    base_prompt: str,
+    groups: list[str],
+) -> str:
+    """Append one skill section per active *group* to the system prompt.
+
+    *groups* is a list of group keys (``"record"``, ``"memory"``,
+    ``"knowledge"``).  When empty, a short no-tools reminder is appended
+    instead.
+    """
+    prompt = base_prompt.rstrip()
+    if "knowledge" in groups:
+        prompt += "\n\n" + render_knowledge_skill()
+    if "memory" in groups:
+        prompt += "\n\n" + render_memory_skill()
+    if "record" in groups:
+        prompt += "\n\n" + render_record_skill()
+    if not groups:
+        prompt += "\n\n" + _NO_TOOLS_REMINDER
+    return prompt

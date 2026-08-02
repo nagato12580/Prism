@@ -1,16 +1,24 @@
 import json
+import uuid
 from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from ..agent.events import error_event, trace_event
-from ..agent.knowledge_skill import compose_system_prompt_with_knowledge_skill
+from ..agent.events import error_event, needs_kb_selection_event, trace_event
+from ..agent.knowledge_skill import compose_system_prompt_with_groups, compose_system_prompt_with_knowledge_skill
 from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult, RagRunConfig
 from ..agent.prompts import AGENT_SYSTEM_PROMPT
 from ..agent.runner import LangChainAgentRunner, create_chat_model
 from ..agent.trace import AgentTraceRecorder
-from ..agent.tools import BUILTIN_REGISTRY, ToolContext, build_enabled_tools
+from ..agent.tools import (
+    BUILTIN_REGISTRY,
+    COMMON_TOOLS,
+    TOOL_GROUPS,
+    ToolContext,
+    build_enabled_tools,
+    build_tools_by_groups,
+)
 from ..agent.tools.knowledge_base import build_tools as build_knowledge_tools
 from ..config import settings
 from ..llm.client import chat
@@ -29,6 +37,78 @@ _DEPTH_CONTROLS = {
     "standard": (2, 3),
     "deep": (3, 5),
 }
+
+# ---------------------------------------------------------------------------
+# Intent classification for dynamic tool-group injection
+# ---------------------------------------------------------------------------
+
+_INTENT_CLASSIFY_PROMPT = """你是一个意图分类器。分析用户的输入，判断需要启用哪些工具组来进行后续对话。
+
+工具组定义：
+- record（记录工具）: 用户明确要求记录/收藏想法、观点、心得、待办、资源。关键词包括"帮我记"、"记下来"、"收藏"、"记录："、"保存"。
+- memory（记忆工具）: 用户需要查询自己的偏好、目标、长期记忆、个人背景、历史设置。当用户问"我设置过什么"、"我的偏好"、"我之前说过"时触发。
+- knowledge（知识库工具）: 用户需要检索知识库、查询上传的文档/资料、读取文件内容。当用户问"资料里"、"文档中"、"知识库"、"上传的"、"总结XX内容"时触发。
+
+分类规则：
+1. 闲聊、打招呼、简单问答（如"你好"、"今天天气怎么样"、"1+1等于几"）→ 不需要任何工具组
+2. 明确说"帮我记"、"收藏"、"记录" → record
+3. 涉及用户偏好、历史、个人设定、之前说过什么 → memory
+4. 需要查资料、文档、知识库内容 → knowledge
+5. 知识库相关的问题如果也涉及用户个人偏好，可以同时启用 knowledge 和 memory
+6. 如果用户明确提到了具体的知识库名称，在 kb_specs 中列出
+
+返回纯 JSON（不要 markdown 代码块）：
+{"groups": ["knowledge", "memory"], "kb_specs": [], "reasoning": "简短中文说明"}
+
+如果不需要任何工具组，groups 为空数组。"""
+
+
+def classify_intent(query: str, history: list[dict] | None = None) -> dict[str, Any]:
+    """Classify user intent into tool groups using a fast LLM call.
+
+    Returns a dict with keys ``groups`` (list of group keys), ``kb_specs``
+    (list of explicitly mentioned KB names), and ``reasoning`` (short
+    explanation).  On failure, defaults to enabling all groups for safety.
+    """
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": _INTENT_CLASSIFY_PROMPT},
+        {"role": "user", "content": query},
+    ]
+    try:
+        raw = chat(messages, timeout_seconds=5, max_retries=0)
+        # Strip markdown fences if present
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.lstrip("`").strip()
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+            if raw.endswith("```"):
+                raw = raw[:-3].strip()
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError("classification result is not a dict")
+        groups = result.get("groups")
+        if not isinstance(groups, list):
+            groups = []
+        # Normalise to known group keys only
+        valid_groups = [g for g in groups if g in TOOL_GROUPS]
+        kb_specs = result.get("kb_specs")
+        if not isinstance(kb_specs, list):
+            kb_specs = []
+        logger.info(
+            "[chat] intent_classified groups=%s kb_specs=%s reasoning=%s",
+            valid_groups,
+            kb_specs,
+            result.get("reasoning", ""),
+        )
+        return {"groups": valid_groups, "kb_specs": kb_specs, "reasoning": result.get("reasoning", "")}
+    except Exception as exc:
+        logger.warning("[chat] intent_classification_failed fallback=all error=%s", quoted(str(exc), limit=200))
+        return {
+            "groups": list(TOOL_GROUPS.keys()),
+            "kb_specs": [],
+            "reasoning": "classification failed, fallback to all",
+        }
 
 
 class _KnowledgeRetrievalService:
@@ -421,6 +501,34 @@ def _resolve_search_scope(topic_id: str | None, source_types: list[str] | None =
         db.close()
 
 
+def _resolve_scope_for_topic(topic_id: str) -> Any | None:
+    """Resolve an AuthorizedKnowledgeScope for a single *topic_id*.
+
+    Used as a backward-compatible fallback when the knowledge group is active
+    but no scope was pre-signed by the backend proxy.
+    """
+    from backend.app.models.knowledge_item import KnowledgeTopic
+    from ..security.knowledge_scope import AuthorizedKnowledgeScope
+
+    db = _Session()
+    try:
+        topic = db.query(KnowledgeTopic).filter(
+            KnowledgeTopic.kb_uid == topic_id,
+            KnowledgeTopic.deleted_at.is_(None),
+        ).first()
+        if topic is None:
+            return None
+        return AuthorizedKnowledgeScope(
+            actor_id="default-user",
+            tenant_id=topic.tenant_id,
+            allowed_kb_uids=(topic.kb_uid,),
+            run_id=f"legacy:{uuid.uuid4().hex[:12]}",
+            expires_at=int(__import__("time").time()) + 600,
+        )
+    finally:
+        db.close()
+
+
 def build_agent_runner(
     topic_id: str | None = None,
     source_types: list[str] | None = None,
@@ -434,52 +542,47 @@ def build_agent_runner(
     retrieval_service: Any | None = None,
     db_session: Any | None = None,
     trace_id: str | None = None,
+    tool_groups: list[str] | None = None,
 ) -> LangChainAgentRunner:
-    """构造 Agent Runner，注入带过滤的搜索闭包。
+    """Construct an Agent Runner with dynamically selected tool groups.
 
-    搜索闭包会捕获 topic_id / source_types / allowed_item_ids，
-    RAG runner 调用 search(query, top_k) 时自动限定检索范围。
+    When *tool_groups* is provided, tools are built only from the selected
+    groups plus common tools.  When the ``knowledge`` group is active, a
+    valid *knowledge_scope* gates access to KB tools; without it the legacy
+    ``knowledge_search`` / ``deep_knowledge_search`` path is used instead.
 
-    当传入已验证的 ``knowledge_scope``（非空 allowed_kb_uids）时，切换到授权
-    六工具路径：绑定 list_kbs/query_kb/.../get_mindmap + 通用 clarify/datetime，
-    并将 Knowledge Skill 追加到系统提示词。retrieval_service / db_session 由
-    Task 6 的代理在验签后注入；在此之前默认走旧链路，行为不变。
+    When *tool_groups* is ``None`` or empty, the behaviour is backward
+    compatible: the full default-enabled toolset is used.
     """
-    scope = _resolve_search_scope(topic_id, source_types)
-    topic_ids = [topic_id] if topic_id else None
-
+    tool_groups = tool_groups or []
+    has_knowledge = "knowledge" in tool_groups
     model = create_chat_model(settings)
 
+    # --- Build ToolContext ---------------------------------------------------
+    ctx_kwargs: dict[str, Any] = dict(
+        citations=[],
+        stats_holder={},
+        clarify_holder={},
+        deep_search_enabled=deep_search_enabled,
+        deep_search_depth=deep_search_depth,
+        deep_search_top_k=deep_search_top_k,
+        graph_hops=graph_hops,
+        rag_max_iterations=rag_max_iterations,
+    )
+
+    # --- Path A: Knowledge group + authorized scope (six-tool KB path) ------
     allowed_kb_uids = getattr(knowledge_scope, "allowed_kb_uids", None)
-    if knowledge_scope is not None and allowed_kb_uids:
-        run_scope = scope  # SearchScope for the legacy rag_runner if ever needed
-        _ = run_scope
+    if has_knowledge and knowledge_scope is not None and allowed_kb_uids:
         ctx = ToolContext(
             db=db_session,
             trace_id=trace_id or getattr(knowledge_scope, "run_id", None),
             run_id=getattr(knowledge_scope, "run_id", None),
             knowledge_scope=knowledge_scope,
             retrieval_service=retrieval_service,
-            citations=[],
-            stats_holder={},
-            clarify_holder={},
-            deep_search_enabled=deep_search_enabled,
-            deep_search_depth=deep_search_depth,
-            deep_search_top_k=deep_search_top_k,
-            graph_hops=graph_hops,
-            rag_max_iterations=rag_max_iterations,
+            **ctx_kwargs,
         )
-        knowledge_tools = list(build_knowledge_tools(ctx).values())
-        general_keys = ("clarify_user", "datetime", "memory_search", "capture_thought")
-        general_tools = [
-            BUILTIN_REGISTRY[key].builder(ctx)
-            for key in general_keys
-            if key in BUILTIN_REGISTRY
-        ]
-        tools = knowledge_tools + general_tools
-        system_prompt = compose_system_prompt_with_knowledge_skill(
-            AGENT_SYSTEM_PROMPT, has_knowledge_scope=True
-        )
+        tools = build_tools_by_groups(ctx, tool_groups, deep_search_enabled=deep_search_enabled)
+        system_prompt = compose_system_prompt_with_groups(AGENT_SYSTEM_PROMPT, tool_groups)
         return LangChainAgentRunner(
             model=model,
             tools=tools,
@@ -488,44 +591,56 @@ def build_agent_runner(
             clarify_depth=clarify_depth,
         )
 
-    mode = "deep" if deep_search_enabled else "fast"
-    _scoped_search = make_unified_search(
-        mode=mode,
-        topic_ids=topic_ids,
-        source_types=source_types,
-        scope=scope,
-    )
-
-    rag_runner = AgenticRagRunner(
-        search=_scoped_search,
-        load_chunks=lambda chunk_ids: _load_chunks(chunk_ids, scope=scope),
-        judge=_judge_rag,
-        config=RagRunConfig(
+    # --- Path B: Knowledge group WITHOUT authorized scope (legacy rag_runner) -
+    if has_knowledge:
+        scope = _resolve_search_scope(topic_id, source_types)
+        topic_ids = [topic_id] if topic_id else None
+        mode = "deep" if deep_search_enabled else "fast"
+        _scoped_search = make_unified_search(
             mode=mode,
-            top_k=deep_search_top_k,
-            graph_hops=graph_hops,
-            max_iterations=rag_max_iterations,
-        ),
-    )
-    ctx = ToolContext(
-        rag_runner=rag_runner,
-        citations=[],
-        stats_holder={},
-        clarify_holder={},
-    )
-    tool_overrides = {"deep_knowledge_search": True} if deep_search_enabled else None
-    tools = build_enabled_tools(ctx, overrides=tool_overrides)
-    system_prompt = AGENT_SYSTEM_PROMPT
-    if not deep_search_enabled:
-        system_prompt = _strip_tool_guidance(system_prompt, {"deep_knowledge_search"})
-    if deep_search_enabled:
-        system_prompt = (
-            AGENT_SYSTEM_PROMPT
-            + "\n\n# 深度搜索已开启\n"
-            + f"本轮用户开启了深度搜索，最大深度为 `{deep_search_depth}`。"
-            + "当问题涉及个人知识库、统一图谱检索、证据完整性、实体关系核实或跨资料综合时，优先调用 deep_knowledge_search。"
+            topic_ids=topic_ids,
+            source_types=source_types,
+            scope=scope,
         )
-    return LangChainAgentRunner(model=model, tools=tools, system_prompt=system_prompt, clarify_depth=clarify_depth)
+        rag_runner = AgenticRagRunner(
+            search=_scoped_search,
+            load_chunks=lambda chunk_ids: _load_chunks(chunk_ids, scope=scope),
+            judge=_judge_rag,
+            config=RagRunConfig(
+                mode=mode,
+                top_k=deep_search_top_k,
+                graph_hops=graph_hops,
+                max_iterations=rag_max_iterations,
+            ),
+        )
+        ctx = ToolContext(rag_runner=rag_runner, **ctx_kwargs)
+        tools = build_tools_by_groups(ctx, tool_groups, deep_search_enabled=deep_search_enabled)
+        system_prompt = compose_system_prompt_with_groups(AGENT_SYSTEM_PROMPT, tool_groups)
+        if deep_search_enabled:
+            system_prompt += (
+                "\n\n# 深度搜索已开启\n"
+                + f"本轮用户开启了深度搜索，最大深度为 `{deep_search_depth}`。"
+                + "当问题涉及个人知识库、统一图谱检索、证据完整性、实体关系核实或跨资料综合时，优先调用 deep_knowledge_search。"
+            )
+        return LangChainAgentRunner(
+            model=model,
+            tools=tools,
+            system_prompt=system_prompt,
+            max_iterations=rag_max_iterations,
+            clarify_depth=clarify_depth,
+        )
+
+    # --- Path C: No knowledge group (record / memory / common only) ----------
+    ctx = ToolContext(**ctx_kwargs)
+    tools = build_tools_by_groups(ctx, tool_groups, deep_search_enabled=deep_search_enabled)
+    system_prompt = compose_system_prompt_with_groups(AGENT_SYSTEM_PROMPT, tool_groups)
+    return LangChainAgentRunner(
+        model=model,
+        tools=tools,
+        system_prompt=system_prompt,
+        max_iterations=rag_max_iterations,
+        clarify_depth=clarify_depth,
+    )
 
 
 def answer_stream(
@@ -551,8 +666,29 @@ def answer_stream(
         1 for msg in history
         if msg.get("role") == "assistant" and msg.get("clarify")
     )
+    # --- Intent classification → dynamic tool groups -------------------------
+    intent = classify_intent(query, history)
+    tool_groups = intent.get("groups", [])
+    kb_specs = intent.get("kb_specs", [])
+    # If knowledge group is active but no scope was pre-signed by the backend
+    # proxy, try to resolve scope from topic_id for backward compatibility.
+    has_knowledge = "knowledge" in tool_groups
+    # Preflight: knowledge intent with no authorized scope and no legacy topic
+    # cannot reach KB tools. Surface a structured prompt instead of exposing
+    # internal "knowledge scope not configured" errors. The signed-scope and
+    # `_require_scope()` checks in the tools remain the final safety boundary.
+    if has_knowledge and knowledge_scope is None and not topic_id:
+        yield needs_kb_selection_event(query, intent.get("reasoning", ""))
+        return
+    if has_knowledge and knowledge_scope is None and topic_id:
+        knowledge_scope = _resolve_scope_for_topic(topic_id)
+        if knowledge_scope is not None and db_session is None:
+            db_session = _Session()
+            retrieval_service = _KnowledgeRetrievalService(db_session)
     logger.info(
-        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s clarify_depth=%s deep_search_enabled=%s deep_search_depth=%s",
+        "[chat] request_start query=%s history_messages=%s topic_id=%s source_types=%s "
+        "clarify_depth=%s deep_search_enabled=%s deep_search_depth=%s "
+        "tool_groups=%s kb_specs=%s has_knowledge=%s has_scope=%s",
         quoted(query),
         len(history),
         topic_id,
@@ -560,6 +696,10 @@ def answer_stream(
         clarify_depth,
         deep_search_enabled,
         deep_search_depth,
+        tool_groups,
+        kb_specs,
+        has_knowledge,
+        knowledge_scope is not None,
     )
     try:
         runner = build_agent_runner(
@@ -574,6 +714,7 @@ def answer_stream(
             knowledge_scope=knowledge_scope,
             db_session=db_session,
             retrieval_service=retrieval_service,
+            tool_groups=tool_groups,
         )
         logger.info("[chat] runner_ready")
         trace_recorder = None

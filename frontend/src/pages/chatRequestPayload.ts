@@ -1,6 +1,6 @@
 export interface BuildChatRequestPayloadArgs {
   query: string
-  effectiveTopicId: string
+  effectiveTopicIds: string[]
   history: unknown[]
   sessionId: string
   engineUserMessageId: string
@@ -11,7 +11,7 @@ export interface BuildChatRequestPayloadArgs {
 
 export function buildChatRequestPayload({
   query,
-  effectiveTopicId,
+  effectiveTopicIds,
   history,
   sessionId,
   engineUserMessageId,
@@ -21,7 +21,7 @@ export function buildChatRequestPayload({
 }: BuildChatRequestPayloadArgs) {
   return {
     query,
-    kb_uids: [effectiveTopicId],
+    kb_uids: effectiveTopicIds,
     history,
     session_id: sessionId,
     user_message_id: engineUserMessageId,

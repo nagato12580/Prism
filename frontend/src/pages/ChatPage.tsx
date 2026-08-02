@@ -193,6 +193,26 @@ function buildAssistantProcess(message: Message) {
   }
 }
 
+// Light client-side precheck for obvious document/knowledge queries. Only
+// consulted when no KB is selected and the personal inbox is not included.
+function mayNeedKnowledge(query: string) {
+  const q = query.trim().toLowerCase()
+  return [
+    '上传资料',
+    '上传的资料',
+    '文档',
+    '知识库',
+    '资料里',
+    '根据资料',
+    '总结资料',
+    '总结上传',
+    'pdf',
+    '论文',
+    '这篇',
+    '这份',
+  ].some((kw) => q.includes(kw))
+}
+
 export function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -203,8 +223,8 @@ export function ChatPage() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingSessionTitle, setEditingSessionTitle] = useState('')
   const messages = useChatStore((s) => s.messages)
-  const selectedTopicId = useChatStore((s) => s.selectedTopicId)
-  const selectedTopicName = useChatStore((s) => s.selectedTopicName)
+  const selectedTopicIds = useChatStore((s) => s.selectedTopicIds)
+  const selectedTopicNames = useChatStore((s) => s.selectedTopicNames)
   const deepSearchEnabled = useChatStore((s) => s.deepSearchEnabled)
   const deepSearchDepth = useChatStore((s) => s.deepSearchDepth)
   const currentSessionId = useChatStore((s) => s.currentSessionId)
@@ -221,8 +241,9 @@ export function ChatPage() {
   const setLastContinuation = useChatStore((s) => s.setLastContinuation)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
-  const setSelectedTopic = useChatStore((s) => s.setSelectedTopic)
-  const clearSelectedTopic = useChatStore((s) => s.clearSelectedTopic)
+  const setSelectedTopics = useChatStore((s) => s.setSelectedTopics)
+  const toggleTopic = useChatStore((s) => s.toggleTopic)
+  const clearSelectedTopics = useChatStore((s) => s.clearSelectedTopics)
   const clearSelectedSourceTypes = useChatStore((s) => s.clearSelectedSourceTypes)
   const setDeepSearchEnabled = useChatStore((s) => s.setDeepSearchEnabled)
   const setDeepSearchDepth = useChatStore((s) => s.setDeepSearchDepth)
@@ -236,6 +257,9 @@ export function ChatPage() {
   const getSessionMessages = useChatStore((s) => s.getSessionMessages)
   const restoreFromSession = useChatStore((s) => s.restoreFromSession)
   const [showTopicPicker, setShowTopicPicker] = useState(false)
+  const [kbSelectorOpen, setKbSelectorOpen] = useState(false)
+  const [pendingKbQuery, setPendingKbQuery] = useState<string | null>(null)
+  const [kbDraftUids, setKbDraftUids] = useState<string[]>([])
   const [topics, setTopics] = useState<KnowledgeBase[]>([])
   const [loadingTopics, setLoadingTopics] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
@@ -277,7 +301,7 @@ export function ChatPage() {
               const topics = (await knowledgeBasesApi.list({ limit: 100 })).items
               if (!cancelled) {
                 const matched = topics.find((t) => t.kb_uid === latest.topic_id)
-                if (matched) setSelectedTopic(matched.kb_uid, matched.name)
+                if (matched) setSelectedTopics([matched.kb_uid], [matched.name])
               }
             } catch { /* topic name restore best-effort */ }
           }
@@ -305,14 +329,20 @@ export function ChatPage() {
     }
   }, [showTopicPicker])
 
+  // Opening the KB-selection prompt seeds the draft with the current
+  // selection (usually empty) and ensures the topic list is loaded.
+  useEffect(() => {
+    if (!kbSelectorOpen) return
+    setKbDraftUids(selectedTopicIds)
+    if (topics.length === 0) loadTopics()
+  }, [kbSelectorOpen])
+
   const loadTopics = async () => {
     setLoadingTopics(true)
     try {
       const items = (await knowledgeBasesApi.list({ limit: 100 })).items
       setTopics(items)
-      if (!selectedTopicId && items.length === 1) {
-        setSelectedTopic(items[0].kb_uid, items[0].name)
-      }
+      // No longer auto-select — KBs are optional
     } catch {
       // 静默失败
     } finally {
@@ -333,43 +363,37 @@ export function ChatPage() {
     }
   }
 
-  const handleSelectTopic = (topic: KnowledgeBase) => {
-    setSelectedTopic(topic.kb_uid, topic.name)
-    setShowTopicPicker(false)
+  const handleToggleTopic = (topic: KnowledgeBase) => {
+    toggleTopic(topic.kb_uid, topic.name)
   }
 
   const stopStreaming = () => {
     activeStreamRef.current?.stop()
   }
 
-  const send = async (value = input) => {
-    if (!value.trim() || sending) return
+  async function sendMessage(
+    content: string = input,
+    options?: { overrideKbUids?: string[] }
+  ) {
+    if (!content.trim() || sending) return
 
-    setSending(true)
-    const query = value.trim()
+    const query = content.trim()
 
-    let effectiveTopicId = selectedTopicId
-    if (!effectiveTopicId) {
-      let availableTopics = topics
-      if (availableTopics.length === 0) {
-        try {
-          availableTopics = (await knowledgeBasesApi.list({ limit: 100 })).items
-          setTopics(availableTopics)
-        } catch {
-          availableTopics = []
-        }
-      }
-      if (availableTopics.length === 1) {
-        const topic = availableTopics[0]
-        effectiveTopicId = topic.kb_uid
-        setSelectedTopic(topic.kb_uid, topic.name)
-      }
-    }
-    if (!effectiveTopicId) {
-      window.alert('请先创建或选择知识库')
-      setSending(false)
+    // Light client-side precheck: obvious document/knowledge queries sent with
+    // no KB selected (and no personal-inbox search) open the selector up front
+    // instead of surfacing an internal scope error from the engine.
+    const hasOverride = !!options?.overrideKbUids?.length
+    if (!hasOverride && selectedTopicIds.length === 0 && !includePersonalInbox && mayNeedKnowledge(query)) {
+      setPendingKbQuery(query)
+      setKbSelectorOpen(true)
       return
     }
+
+    setSending(true)
+
+    // KBs are optional — use whatever is currently selected (can be empty), or
+    // the explicit override for an automatic rerun after KB selection.
+    const effectiveTopicIds = options?.overrideKbUids ?? selectedTopicIds
 
     setInput('')
 
@@ -378,7 +402,7 @@ export function ChatPage() {
     if (!sessionId) {
       try {
         const session = await chatApi.createSession({
-          topic_id: effectiveTopicId,
+          topic_id: effectiveTopicIds[0] || undefined,
         })
         sessionId = session.id
         setCurrentSessionId(sessionId)
@@ -544,6 +568,22 @@ export function ChatPage() {
             persistedId ? () => queueAssistantProcessSnapshot(sessionId, persistedId) : undefined,
           )
         }
+        else if (msg.type === 'needs_kb_selection') {
+          await flushTypewriterText()
+
+          const data = (msg.data || {}) as Record<string, unknown>
+          const nextPendingQuery = safeString(data.pending_query) || query
+          const message =
+            safeString(data.message) ||
+            '这个问题需要访问资料，但当前还没有选择知识库。请选择知识库后我再继续回答。'
+
+          setPendingKbQuery(nextPendingQuery)
+          setKbSelectorOpen(true)
+
+          appendToLast(message, sessionId, assistantMessageId)
+          finishLast(sessionId, assistantMessageId, 'success')
+          return
+        }
         else if (msg.type === 'done') {
           clearStreamTimeout()
           await flushTypewriterText()
@@ -576,7 +616,7 @@ export function ChatPage() {
         signal: streamAbortController.signal,
         body: JSON.stringify(buildChatRequestPayload({
           query,
-          effectiveTopicId,
+          effectiveTopicIds,
           history,
           sessionId,
           engineUserMessageId,
@@ -752,27 +792,49 @@ export function ChatPage() {
       pendingClarifyRef.current = value
       return
     }
-    send(value)
+    sendMessage(value)
   }
 
   useEffect(() => {
     if (sending || !pendingClarifyRef.current) return
     const value = pendingClarifyRef.current
     pendingClarifyRef.current = null
-    send(value)
+    sendMessage(value)
   }, [sending])
+
+  const handleConfirmKbSelection = () => {
+    const names = topics
+      .filter((topic) => kbDraftUids.includes(topic.kb_uid))
+      .map((topic) => topic.name)
+    handleKnowledgeSelectionForPendingQuery(kbDraftUids, names)
+  }
+
+  async function handleKnowledgeSelectionForPendingQuery(kbUids: string[], names: string[]) {
+    setSelectedTopics(kbUids, names)
+    setKbSelectorOpen(false)
+
+    if (!pendingKbQuery) return
+    const queryToResume = pendingKbQuery
+    setPendingKbQuery(null)
+    await sendMessage(queryToResume, { overrideKbUids: kbUids })
+  }
+
+  function cancelKbSelection() {
+    setKbSelectorOpen(false)
+    setPendingKbQuery(null)
+  }
 
   const startNewConversation = () => {
     setCurrentSessionId(null)
     setExpandedSources({})
     clear()
-    clearSelectedTopic()
+    clearSelectedTopics()
     clearSelectedSourceTypes()
   }
 
   const switchSession = async (sessionId: string) => {
     if (sessionId === currentSessionId) return
-    clearSelectedTopic()
+    clearSelectedTopics()
     clearSelectedSourceTypes()
     setExpandedSources({})
     setCurrentSessionId(sessionId)
@@ -785,7 +847,7 @@ export function ChatPage() {
           const topics = (await knowledgeBasesApi.list({ limit: 100 })).items
           setTopics(topics)
           const matched = topics.find((t) => t.kb_uid === session.topic_id)
-          if (matched) setSelectedTopic(matched.kb_uid, matched.name)
+          if (matched) setSelectedTopics([matched.kb_uid], [matched.name])
         } catch { /* best effort */ }
       }
     }
@@ -965,7 +1027,7 @@ export function ChatPage() {
           className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8"
         >
           {messages.length === 0 ? (
-            <EmptyState onStarterPrompt={send} disabled={sending} />
+            <EmptyState onStarterPrompt={sendMessage} disabled={sending} />
           ) : (
             <div className="space-y-5">
               {messages.map((msg) => (
@@ -1018,7 +1080,7 @@ export function ChatPage() {
           className="shrink-0 bg-white/90 p-3 sm:p-4"
           onSubmit={(e) => {
             e.preventDefault()
-            send()
+            sendMessage()
           }}
         >
           <div className="flex flex-col rounded-xl border border-[var(--prism-line)] bg-white shadow-[0_14px_34px_-28px_rgba(16,24,40,0.6)] focus-within:border-blue-200 focus-within:ring-2 focus-within:ring-cyan-100">
@@ -1028,7 +1090,7 @@ export function ChatPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  send()
+                  sendMessage()
                 }
               }}
               placeholder="输入问题，Prism 会检索知识库后回答"
@@ -1037,25 +1099,27 @@ export function ChatPage() {
               className="max-h-36 min-h-[3rem] resize-none border-0 bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
             />
             <div className="flex items-center gap-2 border-t border-slate-100 px-2 py-1.5">
-              {/* 知识库选择 */}
+              {/* 知识库选择（可选多选） */}
               <div className="relative" ref={topicPickerRef}>
                 <button
                   type="button"
                   onClick={handleOpenTopicPicker}
                   className={cn(
                     'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
-                    selectedTopicId
+                    selectedTopicIds.length > 0
                       ? 'border-blue-200 bg-blue-50 text-[var(--prism-blue)]'
                       : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-[var(--prism-blue)]',
                   )}
                 >
                   <Library size={12} />
-                  {selectedTopicId ? selectedTopicName : '知识库'}
+                  {selectedTopicIds.length > 0
+                    ? selectedTopicNames.join(', ')
+                    : '知识库（可选）'}
                   <ChevronDown size={10} className={cn('transition', showTopicPicker && 'rotate-180')} />
                 </button>
 
                 {showTopicPicker && (
-                  <div className="absolute bottom-full left-0 z-30 mb-1 w-44 rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)]">
+                  <div className="absolute bottom-full left-0 z-30 mb-1 w-52 rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)]">
                     {loadingTopics ? (
                       <div className="flex items-center gap-2 px-2 py-3 text-[11px] text-slate-400">
                         <Loader2 size={12} className="animate-spin" />
@@ -1065,23 +1129,34 @@ export function ChatPage() {
                       <p className="px-2 py-3 text-[11px] text-slate-400">暂无知识库</p>
                     ) : (
                       <div className="max-h-44 overflow-y-auto">
-                        {topics.map((topic) => (
-                          <button
-                            key={topic.kb_uid}
-                            type="button"
-                            onClick={() => handleSelectTopic(topic)}
-                            className={cn(
-                              'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition',
-                              selectedTopicId === topic.kb_uid
-                                ? 'bg-blue-50 text-[var(--prism-blue)]'
-                                : 'text-slate-600 hover:bg-slate-50',
-                            )}
-                          >
-                            <BookOpen size={12} className="shrink-0 text-slate-400" />
-                            <span className="min-w-0 flex-1 truncate">{topic.name}</span>
-                            <span className="shrink-0 text-[10px] text-slate-400">{topic.status}</span>
-                          </button>
-                        ))}
+                        {topics.map((topic) => {
+                          const checked = selectedTopicIds.includes(topic.kb_uid)
+                          return (
+                            <button
+                              key={topic.kb_uid}
+                              type="button"
+                              onClick={() => handleToggleTopic(topic)}
+                              className={cn(
+                                'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition',
+                                checked
+                                  ? 'bg-blue-50 text-[var(--prism-blue)]'
+                                  : 'text-slate-600 hover:bg-slate-50',
+                              )}
+                            >
+                              <span className={cn(
+                                'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition',
+                                checked
+                                  ? 'border-[var(--prism-blue)] bg-[var(--prism-blue)] text-white'
+                                  : 'border-slate-300',
+                              )}>
+                                {checked && <Check size={10} />}
+                              </span>
+                              <BookOpen size={12} className="shrink-0 text-slate-400" />
+                              <span className="min-w-0 flex-1 truncate">{topic.name}</span>
+                              <span className="shrink-0 text-[10px] text-slate-400">{topic.status}</span>
+                            </button>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -1148,10 +1223,10 @@ export function ChatPage() {
               </label>
 
               <div className="flex-1" />
-              {selectedTopicId && (
+              {selectedTopicIds.length > 0 && (
                 <button
                   type="button"
-                  onClick={clearSelectedTopic}
+                  onClick={clearSelectedTopics}
                   className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:text-slate-600"
                 >
                   清除筛选
@@ -1192,6 +1267,100 @@ export function ChatPage() {
           </div>
         </form>
       </section>
+
+      {/* 知识库选择弹窗：知识问答但未选择知识库时，提示用户先选择 */}
+      {kbSelectorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--prism-line)] bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-slate-950">需要选择知识库</h3>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {pendingKbQuery
+                    ? `「${pendingKbQuery}」需要访问资料，请选择知识库后我再继续回答。`
+                    : '这个问题需要访问资料，请选择知识库后再试。'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={cancelKbSelection}
+                aria-label="关闭知识库选择"
+                className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-[var(--prism-line)] p-1.5">
+              {loadingTopics ? (
+                <div className="flex items-center gap-2 px-2 py-3 text-[11px] text-slate-400">
+                  <Loader2 size={12} className="animate-spin" /> 加载中...
+                </div>
+              ) : topics.length === 0 ? (
+                <div className="px-2 py-4 text-center text-xs text-slate-400">
+                  暂无知识库，请先到「知识库」页面上传资料。
+                </div>
+              ) : (
+                topics.map((topic) => {
+                  const checked = kbDraftUids.includes(topic.kb_uid)
+                  return (
+                    <button
+                      key={topic.kb_uid}
+                      type="button"
+                      onClick={() =>
+                        setKbDraftUids((current) =>
+                          checked
+                            ? current.filter((uid) => uid !== topic.kb_uid)
+                            : [...current, topic.kb_uid],
+                        )
+                      }
+                      className={cn(
+                        'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition',
+                        checked
+                          ? 'bg-blue-50 text-[var(--prism-blue)]'
+                          : 'text-slate-600 hover:bg-slate-50',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition',
+                          checked
+                            ? 'border-[var(--prism-blue)] bg-[var(--prism-blue)] text-white'
+                            : 'border-slate-300',
+                        )}
+                      >
+                        {checked && <Check size={10} />}
+                      </span>
+                      <BookOpen size={12} className="shrink-0 text-slate-400" />
+                      <span className="min-w-0 flex-1 truncate">{topic.name}</span>
+                      <span className="shrink-0 text-[10px] text-slate-400">{topic.status}</span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={cancelKbSelection}
+                className="rounded-lg border border-[var(--prism-line)] bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmKbSelection}
+                disabled={kbDraftUids.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--prism-blue)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300"
+              >
+                <Send size={13} />
+                开始回答
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -115,8 +115,8 @@ export interface Message {
 interface ChatState {
   messages: Message[]
   sessionMessages: Record<string, Message[]>
-  selectedTopicId: string | null
-  selectedTopicName: string | null
+  selectedTopicIds: string[]
+  selectedTopicNames: string[]
   selectedSourceTypes: ResourceMediaType[]
   deepSearchEnabled: boolean
   deepSearchDepth: DeepSearchDepth
@@ -139,8 +139,9 @@ interface ChatState {
   clear: () => void
   getSessionMessages: (sessionId: string) => Message[]
   // Topic/source actions
-  setSelectedTopic: (topicId: string, topicName: string) => void
-  clearSelectedTopic: () => void
+  setSelectedTopics: (topicIds: string[], topicNames: string[]) => void
+  toggleTopic: (topicId: string, topicName: string) => void
+  clearSelectedTopics: () => void
   toggleSourceType: (type: ResourceMediaType) => void
   setSelectedSourceTypes: (types: ResourceMediaType[]) => void
   clearSelectedSourceTypes: () => void
@@ -363,8 +364,8 @@ function updateMessagesForSession(
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   sessionMessages: {},
-  selectedTopicId: null,
-  selectedTopicName: null,
+  selectedTopicIds: [],
+  selectedTopicNames: [],
   selectedSourceTypes: [],
   deepSearchEnabled: false,
   deepSearchDepth: 'standard',
@@ -526,8 +527,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     ),
   clear: () => set({ messages: [] }),
   getSessionMessages: (sessionId) => get().sessionMessages[sessionId] ?? [],
-  setSelectedTopic: (topicId, topicName) => set({ selectedTopicId: topicId, selectedTopicName: topicName }),
-  clearSelectedTopic: () => set({ selectedTopicId: null, selectedTopicName: null }),
+  setSelectedTopics: (topicIds, topicNames) => set({ selectedTopicIds: topicIds, selectedTopicNames: topicNames }),
+  toggleTopic: (topicId, topicName) =>
+    set((s) => {
+      const idx = s.selectedTopicIds.indexOf(topicId)
+      if (idx >= 0) {
+        return {
+          selectedTopicIds: s.selectedTopicIds.filter((id) => id !== topicId),
+          selectedTopicNames: s.selectedTopicNames.filter((_, i) => i !== idx),
+        }
+      }
+      return {
+        selectedTopicIds: [...s.selectedTopicIds, topicId],
+        selectedTopicNames: [...s.selectedTopicNames, topicName],
+      }
+    }),
+  clearSelectedTopics: () => set({ selectedTopicIds: [], selectedTopicNames: [] }),
   toggleSourceType: (type) =>
     set((s) => {
       const exists = s.selectedSourceTypes.includes(type)
@@ -567,8 +582,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         currentSessionId: isCurrent ? null : s.currentSessionId,
         messages: isCurrent ? [] : s.messages,
         sessionMessages: Object.fromEntries(Object.entries(s.sessionMessages).filter(([sessionId]) => sessionId !== id)),
-        selectedTopicId: isCurrent ? null : s.selectedTopicId,
-        selectedTopicName: isCurrent ? null : s.selectedTopicName,
+        selectedTopicIds: isCurrent ? [] : s.selectedTopicIds,
+        selectedTopicNames: isCurrent ? [] : s.selectedTopicNames,
         selectedSourceTypes: isCurrent ? [] : s.selectedSourceTypes,
       }
     }),
@@ -585,7 +600,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }),
   restoreFromSession: (session) =>
     set({
-      selectedTopicId: session.topic_id || null,
+      selectedTopicIds: session.topic_id ? [session.topic_id] : [],
       selectedSourceTypes: (session.source_types as ResourceMediaType[]) || [],
     }),
 }))

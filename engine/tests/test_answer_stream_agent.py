@@ -157,6 +157,11 @@ def test_answer_stream_delegates_to_agent_runner(monkeypatch):
         return FakeRunner()
 
     monkeypatch.setattr(answer, "build_agent_runner", build)
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     lines = list(answer.answer_stream("hello", [{"role": "user", "content": "old"}]))
 
@@ -178,6 +183,11 @@ def test_answer_stream_forwards_deep_search_options(monkeypatch):
         return FakeRunner()
 
     monkeypatch.setattr(answer, "build_agent_runner", build)
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     list(
         answer.answer_stream(
@@ -228,6 +238,11 @@ def test_answer_stream_forwards_explicit_rag_controls(monkeypatch):
         "build_agent_runner",
         lambda **kwargs: captured.update(kwargs) or FakeRunner(),
     )
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     list(
         answer.answer_stream(
@@ -250,6 +265,11 @@ def test_answer_stream_continues_when_trace_start_returns_none(monkeypatch):
     runner = CapturingRunner()
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: runner)
     monkeypatch.setattr(answer, "AgentTraceRecorder", FakeTraceRecorder)
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     lines = list(
         answer.answer_stream(
@@ -274,11 +294,78 @@ def test_answer_stream_continues_when_trace_start_raises(monkeypatch):
     runner = CapturingRunner()
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: runner)
     monkeypatch.setattr(answer, "AgentTraceRecorder", RaisingTraceRecorder)
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     lines = list(answer.answer_stream("hello", []))
 
     assert [json.loads(line)["type"] for line in lines] == ["agent_status", "done"]
     assert runner.trace_recorder is None
+
+
+def test_answer_stream_returns_needs_kb_selection_for_knowledge_intent_without_scope(monkeypatch):
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {
+            "groups": ["knowledge"],
+            "kb_specs": [],
+            "reasoning": "用户要求总结上传资料，需要知识库。",
+        },
+    )
+
+    def fail_build_agent_runner(**kwargs):
+        raise AssertionError("runner should not be built when KB selection is required")
+
+    monkeypatch.setattr(answer, "build_agent_runner", fail_build_agent_runner)
+
+    events = list(answer.answer_stream("总结上传资料的核心观点", history=[]))
+
+    assert len(events) == 1
+    assert '"type": "needs_kb_selection"' in events[0]
+    assert "总结上传资料的核心观点" in events[0]
+
+
+def test_answer_stream_does_not_request_kb_selection_for_non_knowledge_intent(monkeypatch):
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
+
+    class FakeRunner:
+        def stream(self, query, history, trace_recorder=None):
+            yield '{"type":"delta","data":"你好"}\n'
+
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(answer.AgentTraceRecorder, "start", lambda self: None)
+
+    events = list(answer.answer_stream("你好", history=[]))
+
+    assert not any("needs_kb_selection" in event for event in events)
+
+
+def test_answer_stream_keeps_legacy_topic_fallback_for_knowledge_intent(monkeypatch):
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": ["knowledge"], "kb_specs": [], "reasoning": "知识库问题"},
+    )
+
+    class FakeRunner:
+        def stream(self, query, history, trace_recorder=None):
+            yield '{"type":"delta","data":"ok"}\n'
+
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(answer.AgentTraceRecorder, "start", lambda self: None)
+    monkeypatch.setattr(answer, "_resolve_scope_for_topic", lambda topic_id: None)
+
+    events = list(answer.answer_stream("总结资料", history=[], topic_id="legacy-topic"))
+
+    assert not any("needs_kb_selection" in event for event in events)
 
 
 def test_build_agent_runner_enables_deep_search_tool_when_requested(monkeypatch):
@@ -419,6 +506,11 @@ def test_build_agent_runner_applies_iteration_limit_to_authorized_knowledge_scop
 
 def test_answer_stream_logs_request_lifecycle(monkeypatch, caplog):
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     with caplog.at_level(logging.INFO, logger="uvicorn.error"):
         list(answer.answer_stream("hello", [{"role": "user", "content": "old"}]))
@@ -439,6 +531,11 @@ def test_answer_stream_emits_error_when_runner_build_fails(monkeypatch):
         raise RuntimeError("no model")
 
     monkeypatch.setattr(answer, "build_agent_runner", fail)
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     lines = list(answer.answer_stream("hello", []))
 
@@ -450,6 +547,11 @@ def test_answer_stream_logs_runner_build_error(monkeypatch, caplog):
         raise RuntimeError("no model")
 
     monkeypatch.setattr(answer, "build_agent_runner", fail)
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "普通聊天"},
+    )
 
     with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
         list(answer.answer_stream("hello", []))
