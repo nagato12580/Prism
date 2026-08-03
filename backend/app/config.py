@@ -66,6 +66,12 @@ class Settings:
 
     JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret")
     KNOWLEDGE_SCOPE_SECRET: str = os.getenv("KNOWLEDGE_SCOPE_SECRET", "")
+
+    DEV_AUTH_ENABLED: bool = os.getenv("DEV_AUTH_ENABLED", "1") == "1"
+    HEADER_AUTH_FALLBACK_ENABLED: bool = os.getenv("HEADER_AUTH_FALLBACK_ENABLED", "1") == "1"
+    SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "prism_session")
+    SESSION_TTL_HOURS: int = int(os.getenv("SESSION_TTL_HOURS", "72"))
+    SESSION_COOKIE_SECURE: bool = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
     MEMORY_EXTRACTION_AUTO_ENABLED: bool = os.getenv("MEMORY_EXTRACTION_AUTO_ENABLED", "0") == "1"
     MEMORY_SCHEDULED_ENABLED: bool = os.getenv("MEMORY_SCHEDULED_ENABLED", "1") == "1"
     MEMORY_SCHEDULED_INTERVAL_MINUTES: int = int(os.getenv("MEMORY_SCHEDULED_INTERVAL_MINUTES", "30"))

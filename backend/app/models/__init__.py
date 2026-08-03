@@ -1,4 +1,5 @@
 # prism/backend/app/models/__init__.py
+from .auth import AuthSession, User
 from .knowledge_item import KnowledgeTopic, KnowledgeItem, KnowledgeChunk, KnowledgeFile
 from .knowledge_job import KnowledgeJob
 from .knowledge_citation import KnowledgeCitation
@@ -46,6 +47,8 @@ from .graph_outbox import (
 from .knowledge_evaluation import EvaluationDataset, EvaluationDatasetItem, EvaluationRun, EvaluationRunItem
 
 __all__ = [
+    "User",
+    "AuthSession",
     "KnowledgeTopic",
     "KnowledgeItem",
     "KnowledgeChunk",
