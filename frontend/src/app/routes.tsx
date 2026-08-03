@@ -1,4 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { RequireAuth } from '@/features/auth/components/RequireAuth'
+import { LoginPage } from '@/features/auth/pages/LoginPage'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ChatPage } from '@/pages/ChatPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
@@ -26,51 +28,58 @@ import { KnowledgeSettingsPage } from '@/features/knowledge/pages/KnowledgeSetti
 import { TeamAdminPage } from '@/features/team/pages/TeamAdminPage'
 
 export const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/',
-    element: <MainLayout />,
+    element: <RequireAuth />,
     children: [
-      { index: true, element: <ChatPage /> },
-      { path: 'chat', element: <ChatPage /> },
-      { path: 'review', element: <Navigate to="/records/review" replace /> },
-      { path: 'assets', element: <Navigate to="/records/merge" replace /> },
       {
-        path: 'records',
+        path: '/',
+        element: <MainLayout />,
         children: [
-          { index: true, element: <Navigate to="review" replace /> },
-          { path: 'review', element: <InboxPage /> },
-          { path: 'merge', element: <AssetsPage /> },
-        ],
-      },
-      { path: 'graph', element: <KnowledgeGraphPage /> },
-      {
-        path: 'knowledge',
-        children: [
-          { index: true, element: <KnowledgeIndexPage /> },
+          { index: true, element: <ChatPage /> },
+          { path: 'chat', element: <ChatPage /> },
+          { path: 'review', element: <Navigate to="/records/review" replace /> },
+          { path: 'assets', element: <Navigate to="/records/merge" replace /> },
           {
-            path: ':kbUid',
-            element: <KnowledgeShell />,
+            path: 'records',
             children: [
-              { index: true, element: <Navigate to="files" replace /> },
-              { path: 'files', element: <KnowledgeFilesPage /> },
-              { path: 'retrieval', element: <KnowledgeRetrievalPage /> },
-              { path: 'graph', element: <ScopedKnowledgeGraphPage /> },
-              { path: 'governance', element: <KnowledgeGovernancePage /> },
-              { path: 'mindmap', element: <KnowledgeMindmapPage /> },
-              { path: 'evaluation', element: <KnowledgeEvaluationPage /> },
-              { path: 'settings', element: <KnowledgeSettingsPage /> },
+              { index: true, element: <Navigate to="review" replace /> },
+              { path: 'review', element: <InboxPage /> },
+              { path: 'merge', element: <AssetsPage /> },
             ],
           },
+          { path: 'graph', element: <KnowledgeGraphPage /> },
+          {
+            path: 'knowledge',
+            children: [
+              { index: true, element: <KnowledgeIndexPage /> },
+              {
+                path: ':kbUid',
+                element: <KnowledgeShell />,
+                children: [
+                  { index: true, element: <Navigate to="files" replace /> },
+                  { path: 'files', element: <KnowledgeFilesPage /> },
+                  { path: 'retrieval', element: <KnowledgeRetrievalPage /> },
+                  { path: 'graph', element: <ScopedKnowledgeGraphPage /> },
+                  { path: 'governance', element: <KnowledgeGovernancePage /> },
+                  { path: 'mindmap', element: <KnowledgeMindmapPage /> },
+                  { path: 'evaluation', element: <KnowledgeEvaluationPage /> },
+                  { path: 'settings', element: <KnowledgeSettingsPage /> },
+                ],
+              },
+            ],
+          },
+          { path: 'wiki', element: <WikiPage /> },
+          { path: 'team/admin', element: <TeamAdminPage /> },
+          { path: 'memory/inbox', element: <MemoryInboxPage /> },
+          { path: 'memory/profile', element: <UserProfilePage /> },
+          { path: 'memory/graph', element: <MemoryGraphPage /> },
+          { path: 'wiki/upload', element: <WikiUploadPage /> },
+          { path: 'wiki/documents/:id', element: <WikiDocDetail /> },
+          { path: 'wiki/points/:id', element: <WikiPointDetail /> },
         ],
       },
-      { path: 'wiki', element: <WikiPage /> },
-      { path: 'team/admin', element: <TeamAdminPage /> },
-      { path: 'memory/inbox', element: <MemoryInboxPage /> },
-      { path: 'memory/profile', element: <UserProfilePage /> },
-      { path: 'memory/graph', element: <MemoryGraphPage /> },
-      { path: 'wiki/upload', element: <WikiUploadPage /> },
-      { path: 'wiki/documents/:id', element: <WikiDocDetail /> },
-      { path: 'wiki/points/:id', element: <WikiPointDetail /> },
     ],
   },
 ])
