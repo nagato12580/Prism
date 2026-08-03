@@ -13,3 +13,7 @@ assert.match(routes, /RequireAuth/, 'protected app shell should use RequireAuth'
 assert.match(main, /refreshMe|bootstrapAuth/, 'main entry should bootstrap auth state')
 assert.match(store, /create\s*<AuthState>\(/, 'auth store should be implemented with Zustand')
 assert.match(store, /refreshMe/, 'auth store should expose refreshMe')
+
+const loginPage = readFileSync(resolve(root, 'src/features/auth/pages/LoginPage.tsx'), 'utf8')
+assert.match(loginPage, /authApi\.loginDev/, 'Login page should call the dev login endpoint.')
+assert.match(loginPage, /navigate\('\/'/, 'Login page should return to the main app on success.')

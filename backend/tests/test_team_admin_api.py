@@ -256,3 +256,14 @@ def test_put_member_invalid_role_returns_422(client, db_session):
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "INVALID_MEMBER_FIELD"
+
+
+def test_team_admin_members_list_works_with_dev_session(client, db_session):
+    login = client.post("/api/v1/auth/login/dev", json={"username": "admin"})
+    assert login.status_code == 200
+    db_session.add(TeamMember(tenant_id="admin", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+
+    response = client.get("/api/v1/team/admin/members")
+    assert response.status_code == 200
+    assert response.json()["total"] == 1

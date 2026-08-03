@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from backend.app.models import AuthSession, User
+from backend.app.utils.time import local_now
 
 
 def test_auth_models_round_trip(db_session):
@@ -53,3 +56,33 @@ def test_logout_clears_current_session(client):
     assert response.status_code == 200
     me = client.get("/api/v1/auth/me")
     assert me.status_code == 401
+
+
+def test_me_rejects_expired_session(client, db_session):
+    user = User(username="expired-user", display_name="Expired", status="active")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    row = AuthSession(user_id=user.id, expires_at=local_now() - timedelta(hours=1), created_by_mode="dev_login")
+    db_session.add(row)
+    db_session.commit()
+
+    client.cookies.set("prism_session", row.id)
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+
+
+def test_me_rejects_disabled_session_user(client, db_session):
+    user = User(username="disabled-user", display_name="Disabled", status="disabled")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    row = AuthSession(user_id=user.id, expires_at=local_now() + timedelta(hours=1), created_by_mode="dev_login")
+    db_session.add(row)
+    db_session.commit()
+
+    client.cookies.set("prism_session", row.id)
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 403
