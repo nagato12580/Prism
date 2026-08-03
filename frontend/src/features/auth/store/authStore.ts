@@ -7,6 +7,7 @@ interface AuthState {
   loading: boolean
   bootstrapped: boolean
   refreshMe: () => Promise<void>
+  logout: () => Promise<void>
   clear: () => void
 }
 
@@ -26,6 +27,15 @@ export const useAuthStore = create<AuthState>((set) => ({
         return
       }
       throw error
+    }
+  },
+  async logout() {
+    try {
+      await authApi.logout()
+    } catch {
+      // Local logout must still succeed so account switching is never blocked.
+    } finally {
+      set({ me: null, loading: false, bootstrapped: true })
     }
   },
   clear() {

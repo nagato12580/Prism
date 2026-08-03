@@ -17,3 +17,7 @@ assert.match(store, /refreshMe/, 'auth store should expose refreshMe')
 const loginPage = readFileSync(resolve(root, 'src/features/auth/pages/LoginPage.tsx'), 'utf8')
 assert.match(loginPage, /authApi\.loginDev/, 'Login page should call the dev login endpoint.')
 assert.match(loginPage, /navigate\('\/'/, 'Login page should return to the main app on success.')
+
+assert.match(store, /logout:\s*\(\)\s*=>\s*Promise<void>|async\s+logout\(/, 'auth store should expose a logout action.')
+assert.match(store, /authApi\.logout\(/, 'auth store logout should call authApi.logout.')
+assert.match(store, /set\(\{\s*me:\s*null/, 'auth store logout should clear the current user state.')
