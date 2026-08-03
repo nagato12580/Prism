@@ -85,7 +85,7 @@ export function TeamAdminPage() {
       <div className="min-h-0 flex-1 overflow-auto">
         {tab === 'transfers' ? <TransfersReviewTab onForbidden={() => setForbidden(true)} /> : null}
         {tab === 'kbs' ? <TeamKbsTab onForbidden={() => setForbidden(true)} /> : null}
-        {tab === 'members' ? <TeamMembersTab currentUserId="admin" /> : null}
+        {tab === 'members' ? <TeamMembersTab /> : null}
       </div>
     </div>
   )

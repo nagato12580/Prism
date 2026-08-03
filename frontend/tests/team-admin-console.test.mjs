@@ -33,3 +33,5 @@ assert.match(membersTab, /teamAdminApi\.listMembers/, 'Members tab should list t
 assert.match(membersTab, /teamAdminApi\.addMember/, 'Members tab should add members.')
 assert.match(membersTab, /teamAdminApi\.updateMember/, 'Members tab should update members.')
 assert.match(membersTab, /teamAdminApi\.removeMember/, 'Members tab should remove members.')
+assert.doesNotMatch(page, /currentUserId="admin"/, 'Team admin page must not hardcode the current user id.')
+assert.match(membersTab, /useAuthStore/, 'Members tab should read the current user from auth state.')

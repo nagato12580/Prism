@@ -7,6 +7,7 @@ import {
   type TeamRole,
 } from '@/features/team/api/teamAdmin'
 import { ApiProblem } from '@/features/knowledge/api/client'
+import { useAuthStore } from '@/features/auth/store/authStore'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
@@ -19,7 +20,8 @@ const STATUS_OPTIONS: TeamMemberStatus[] = ['active', 'disabled']
 const STATUS_LABELS: Record<TeamMemberStatus, string> = { active: '启用', disabled: '停用' }
 const STATUS_TONES: Record<TeamMemberStatus, 'green' | 'amber'> = { active: 'green', disabled: 'amber' }
 
-export function TeamMembersTab({ currentUserId }: { currentUserId?: string }) {
+export function TeamMembersTab() {
+  const currentUserId = useAuthStore((s) => s.me?.username ?? '')
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
