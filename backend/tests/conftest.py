@@ -37,7 +37,11 @@ def client(db_session):
     """FastAPI 测试客户端，db 依赖注入替换为内存 session。"""
     import os
     prev_skip_engine = os.environ.get("SKIP_ENGINE")
+    prev_dev_auth = os.environ.get("DEV_AUTH_ENABLED")
+    prev_header_fallback = os.environ.get("HEADER_AUTH_FALLBACK_ENABLED")
     os.environ["SKIP_ENGINE"] = "1"
+    os.environ["DEV_AUTH_ENABLED"] = "1"
+    os.environ["HEADER_AUTH_FALLBACK_ENABLED"] = "1"
     try:
         from backend.app.main import create_app
         app = create_app()
@@ -57,3 +61,11 @@ def client(db_session):
             os.environ.pop("SKIP_ENGINE", None)
         else:
             os.environ["SKIP_ENGINE"] = prev_skip_engine
+        if prev_dev_auth is None:
+            os.environ.pop("DEV_AUTH_ENABLED", None)
+        else:
+            os.environ["DEV_AUTH_ENABLED"] = prev_dev_auth
+        if prev_header_fallback is None:
+            os.environ.pop("HEADER_AUTH_FALLBACK_ENABLED", None)
+        else:
+            os.environ["HEADER_AUTH_FALLBACK_ENABLED"] = prev_header_fallback
