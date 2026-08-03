@@ -89,6 +89,32 @@ def test_ensure_personal_inbox_kb_integrity_error_preserves_pending_work(db_sess
     assert db_session.get(PersonalAssetUnit, "pending-work") is not None
 
 
+def test_ensure_personal_inbox_kb_allows_same_owner_across_tenants(db_session):
+    from backend.app.services import personal_inbox
+
+    first = personal_inbox.ensure_personal_inbox_kb(
+        db_session,
+        tenant_id="user-a",
+        owner_user_id="user-a",
+    )
+    db_session.commit()
+
+    second = personal_inbox.ensure_personal_inbox_kb(
+        db_session,
+        tenant_id="team-a",
+        owner_user_id="user-a",
+    )
+    db_session.commit()
+
+    assert first.kb_uid != second.kb_uid
+    assert first.owner_user_id == second.owner_user_id == "user-a"
+    assert first.user_id == "user-a"
+    assert second.user_id == "team-a"
+    assert second.system_type == "personal_inbox"
+    assert second.is_system is True
+    assert second.delete_disabled is True
+
+
 def test_sync_confirmed_unit_creates_single_markdown_file(db_session, tmp_path, monkeypatch):
     from backend.app.models import KnowledgeFile, PersonalAssetUnit
     from backend.app.services import personal_inbox

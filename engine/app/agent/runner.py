@@ -91,6 +91,65 @@ def _history_token_estimate(history: list[dict[str, Any]]) -> int:
     return sum(_estimate_text_tokens(_message_dict_text(item)) for item in history)
 
 
+def _summary_budget_chars() -> int:
+    max_summary_tokens = int(getattr(settings, "MAX_SUMMARY_TOKENS", 1200) or 1200)
+    return max(max_summary_tokens, 1) * 3
+
+
+def _summary_input_budget_chars() -> int:
+    max_summary_tokens = int(getattr(settings, "MAX_SUMMARY_TOKENS", 1200) or 1200)
+    return max(max_summary_tokens, 1) * 12
+
+
+def _summary_transcript(older_history: list[dict[str, Any]]) -> str:
+    if not older_history:
+        return ""
+    budget_chars = _summary_input_budget_chars()
+    selected: list[str] = []
+    used_chars = 0
+    for item in reversed(older_history):
+        message_text = _message_dict_text(item)
+        if not message_text:
+            continue
+        line_cost = len(message_text) + (1 if selected else 0)
+        if selected and used_chars + line_cost > budget_chars:
+            break
+        if not selected and len(message_text) > budget_chars:
+            return message_text[-budget_chars:]
+        selected.append(message_text)
+        used_chars += line_cost
+    return "\n".join(reversed(selected))
+
+
+def _summarize_older_history(older_history: list[dict[str, Any]]) -> str:
+    if not older_history:
+        return ""
+    transcript = _summary_transcript(older_history).strip()
+    if not transcript:
+        return ""
+    prompt = (
+        "请将下面较早的会话历史压缩成简洁中文摘要，只保留会影响后续回答的信息。\n"
+        "摘要必须覆盖：用户当前主要任务、已经确认的对象或文档范围、"
+        "已经给出的关键结论或列表、尚未解决的问题、以及用户明确提出的约束。\n"
+        "不要保留寒暄、重复追问、无关闲聊或大段原文。\n\n"
+        f"{transcript}"
+    )
+    summary = chat(
+        [{"role": "user", "content": prompt}],
+        timeout_seconds=10,
+        max_retries=0,
+    ).strip()
+    if not summary:
+        return ""
+    if not summary.startswith(CONTEXT_SUMMARY_HEADER):
+        summary = f"{CONTEXT_SUMMARY_HEADER}\n{summary}"
+    return summary[:_summary_budget_chars()]
+
+
+def _estimate_fixed_context_tokens(*parts: str) -> int:
+    return sum(_estimate_text_tokens(part) for part in parts if part)
+
+
 FORCED_PARTIAL_DOCUMENT_ANSWER = (
     "我已经连续读取了这篇文档的 5 个窗口，但目前还没读取完整篇文档。"
     "我会先基于已经读取到的内容回答；是否继续读取后续部分，请回复“继续”。"
@@ -1482,35 +1541,70 @@ class LangChainAgentRunner:
     ) -> list[Any]:
         messages: list[Any] = [SystemMessage(content=self.system_prompt)]
         context_query = effective_query or query
+        recall_block = ""
+        insights_block = ""
         try:
             recall_block = recall_memory_context(context_query)
-            if recall_block:
-                messages.append(SystemMessage(content=recall_block))
-                logger.info("[agent] active_recall injected chars=%s", len(recall_block))
         except Exception as exc:
             logger.warning("[agent] active_recall failed (ignored): %s", quoted(str(exc), limit=200))
         try:
             insights_block = graph_insights_context(context_query)
-            if insights_block:
-                messages.append(SystemMessage(content=insights_block))
-                logger.info("[agent] graph_insights injected chars=%s", len(insights_block))
         except Exception as exc:
             logger.warning("[agent] graph_insights failed (ignored): %s", quoted(str(exc), limit=200))
+        continuation_block = ""
         if active_continuation is not None:
-            messages.append(
-                SystemMessage(
-                    content=(
-                        "Resume the prior document-reading objective from its saved cursor. "
-                        f"Effective objective: {effective_query or query}\n"
-                        f"kb_uid: {active_continuation.kb_uid}\n"
-                        f"file_uid: {active_continuation.file_uid}\n"
-                        f"next_offset: {active_continuation.next_offset}\n"
-                        "Do not restart the document from the beginning. Continue from this cursor "
-                        "unless a later explicit location is required by the visible conversation."
-                    )
-                )
+            continuation_block = (
+                "Resume the prior document-reading objective from its saved cursor. "
+                f"Effective objective: {effective_query or query}\n"
+                f"kb_uid: {active_continuation.kb_uid}\n"
+                f"file_uid: {active_continuation.file_uid}\n"
+                f"next_offset: {active_continuation.next_offset}\n"
+                "Do not restart the document from the beginning. Continue from this cursor "
+                "unless a later explicit location is required by the visible conversation."
             )
-        for item in history:
+        fixed_context_tokens = _estimate_fixed_context_tokens(
+            self.system_prompt,
+            recall_block,
+            insights_block,
+            continuation_block,
+            effective_query or "",
+            query,
+        )
+        max_context_tokens = int(getattr(settings, "DEFAULT_MAX_CONTEXT_TOKENS", 32000) or 32000)
+        threshold = float(getattr(settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8) or 0.8)
+        compression_limit = int(max_context_tokens * threshold)
+        total_estimate = fixed_context_tokens + _history_token_estimate(history)
+        loop_history = history
+        older_summary = ""
+        if total_estimate >= compression_limit:
+            recent_turns = int(getattr(settings, "LOOP_RECENT_TURNS", 10) or 10)
+            loop_history = _recent_turn_history(history, recent_turns)
+            recent_ids = {id(item) for item in loop_history}
+            older_history = [item for item in history if id(item) not in recent_ids]
+            try:
+                older_summary = _summarize_older_history(older_history)
+            except Exception as exc:
+                logger.warning("[agent] history_summary_failed error=%s", quoted(str(exc), limit=200))
+                older_summary = ""
+            compressed_estimate = (
+                fixed_context_tokens
+                + _estimate_text_tokens(older_summary)
+                + _history_token_estimate(loop_history)
+            )
+            if compressed_estimate >= compression_limit:
+                min_turns = int(getattr(settings, "MIN_LOOP_RECENT_TURNS", 6) or 6)
+                loop_history = _recent_turn_history(history, min_turns)
+        if older_summary:
+            messages.append(SystemMessage(content=older_summary))
+        if recall_block:
+            messages.append(SystemMessage(content=recall_block))
+            logger.info("[agent] active_recall injected chars=%s", len(recall_block))
+        if insights_block:
+            messages.append(SystemMessage(content=insights_block))
+            logger.info("[agent] graph_insights injected chars=%s", len(insights_block))
+        if continuation_block:
+            messages.append(SystemMessage(content=continuation_block))
+        for item in loop_history:
             role = item.get("role")
             content = item.get("content", "")
             if role == "assistant":

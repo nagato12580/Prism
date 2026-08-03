@@ -11,9 +11,18 @@ from backend.app.models import (
 
 
 def _seed_unified_entity_graph(db_session):
+    topic = KnowledgeTopic(
+        tenant_id="default-user",
+        owner_user_id="default-user",
+        name="GraphRAG knowledge",
+        active_graph_generation="graph-live",
+    )
+    db_session.add(topic)
+    db_session.flush()
+
     item = KnowledgeItem(
-        tenant_id="legacy-tenant",
-        kb_uid="legacy-kb",
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
         title="GraphRAG design doc",
         content="GraphRAG connects entities to evidence sources.",
         category="RAG",
@@ -33,17 +42,20 @@ def _seed_unified_entity_graph(db_session):
     db_session.flush()
 
     chunk = KnowledgeChunk(
-        tenant_id="legacy-tenant",
-        kb_uid="legacy-kb",
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
         file_uid="legacy-file",
         item_id=item.id,
         chunk_uid="legacy-chunk",
-        generation="1",
+        generation=topic.active_graph_generation,
         chunk_text="GraphRAG links the same entity across multiple source types.",
         chunk_index=0,
         chunk_type="parent",
     )
     graph_rag = KnowledgeEntity(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation=topic.active_graph_generation,
         user_id="default-user",
         entity_type="concept",
         canonical_name="GraphRAG",
@@ -53,6 +65,9 @@ def _seed_unified_entity_graph(db_session):
         status="active",
     )
     neo4j = KnowledgeEntity(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation=topic.active_graph_generation,
         user_id="default-user",
         entity_type="tool",
         canonical_name="Neo4j",
@@ -62,6 +77,9 @@ def _seed_unified_entity_graph(db_session):
         status="active",
     )
     deprecated = KnowledgeEntity(
+        tenant_id=topic.tenant_id,
+        kb_uid=topic.kb_uid,
+        graph_generation=topic.active_graph_generation,
         user_id="default-user",
         entity_type="concept",
         canonical_name="LegacyGraph",
@@ -76,6 +94,11 @@ def _seed_unified_entity_graph(db_session):
     db_session.add_all(
         [
             EntityMention(
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
+                graph_generation=topic.active_graph_generation,
+                file_uid=chunk.file_uid,
+                chunk_uid=chunk.chunk_uid,
                 entity_id=graph_rag.id,
                 source_kind="document_chunk",
                 source_id=chunk.id,
@@ -88,6 +111,9 @@ def _seed_unified_entity_graph(db_session):
                 extraction_method="test",
             ),
             EntityMention(
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
+                graph_generation=topic.active_graph_generation,
                 entity_id=graph_rag.id,
                 source_kind="personal_asset_unit",
                 source_id=unit.id,
@@ -98,6 +124,9 @@ def _seed_unified_entity_graph(db_session):
                 extraction_method="test",
             ),
             EntityMention(
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
+                graph_generation=topic.active_graph_generation,
                 entity_id=neo4j.id,
                 source_kind="personal_asset_unit",
                 source_id=unit.id,
@@ -108,6 +137,9 @@ def _seed_unified_entity_graph(db_session):
                 extraction_method="test",
             ),
             EntityMention(
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
+                graph_generation=topic.active_graph_generation,
                 entity_id=deprecated.id,
                 source_kind="personal_asset_unit",
                 source_id=unit.id,
@@ -118,6 +150,9 @@ def _seed_unified_entity_graph(db_session):
                 extraction_method="test",
             ),
             EntityRelation(
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
+                graph_generation=topic.active_graph_generation,
                 subject_entity_id=graph_rag.id,
                 predicate="uses",
                 object_entity_id=neo4j.id,
@@ -349,7 +384,10 @@ def test_unified_graph_includes_active_scoped_knowledge_base_entities(client, db
     ])
     db_session.commit()
 
-    response = client.get("/api/v1/unified-graph?q=Multi-view&limit=20")
+    response = client.get(
+        "/api/v1/unified-graph?q=Multi-view&limit=20",
+        headers={"X-Prism-Actor": "alice", "X-Prism-Tenant": "tenant-a"},
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -361,3 +399,85 @@ def test_unified_graph_includes_active_scoped_knowledge_base_entities(client, db
     assert source["label"] == "multi-view.pdf"
     assert source["knowledge_base"] == "多视图知识库"
     assert any(edge["type"] == "related_to" and edge["label"] == "uses" for edge in payload["edges"])
+
+
+def test_unified_graph_excludes_hidden_active_graph_scopes(client, db_session):
+    hidden_topic = KnowledgeTopic(
+        tenant_id="legacy-personal",
+        owner_user_id="default-user",
+        name="Hidden Graph Smoke",
+        governance_status="",
+        active_graph_generation="graph-hidden",
+    )
+    db_session.add(hidden_topic)
+    db_session.flush()
+
+    item = KnowledgeItem(
+        tenant_id=hidden_topic.tenant_id,
+        kb_uid=hidden_topic.kb_uid,
+        title="Hidden paper",
+        content="Hidden graph data should not leak into unified graph.",
+    )
+    db_session.add(item)
+    db_session.flush()
+
+    file_row = KnowledgeFile(
+        tenant_id=hidden_topic.tenant_id,
+        kb_uid=hidden_topic.kb_uid,
+        topic_id=hidden_topic.id,
+        item_id=item.id,
+        file_uid="file-hidden",
+        original_filename="hidden.pdf",
+        parse_status="succeeded",
+        graph_status="succeeded",
+        parsed_content_version=1,
+    )
+    chunk = KnowledgeChunk(
+        tenant_id=hidden_topic.tenant_id,
+        kb_uid=hidden_topic.kb_uid,
+        file_uid=file_row.file_uid,
+        item_id=item.id,
+        generation="1",
+        chunk_uid="chunk-hidden",
+        chunk_text="Hidden graph data should not leak into unified graph.",
+        chunk_type="child",
+    )
+    entity = KnowledgeEntity(
+        tenant_id=hidden_topic.tenant_id,
+        kb_uid=hidden_topic.kb_uid,
+        graph_generation=hidden_topic.active_graph_generation,
+        user_id="default-user",
+        entity_type="concept",
+        canonical_name="Hidden Entity",
+        normalized_key="hidden entity",
+        status="active",
+    )
+    db_session.add_all([file_row, chunk, entity])
+    db_session.flush()
+    db_session.add(
+        EntityMention(
+            tenant_id=hidden_topic.tenant_id,
+            kb_uid=hidden_topic.kb_uid,
+            graph_generation=hidden_topic.active_graph_generation,
+            file_uid=file_row.file_uid,
+            chunk_uid=chunk.chunk_uid,
+            entity_id=entity.id,
+            source_kind="document_chunk",
+            source_id=chunk.chunk_uid,
+            item_id=item.id,
+            chunk_id=chunk.chunk_uid,
+            surface_text="Hidden Entity",
+            normalized_key="hidden entity",
+            evidence_span="Hidden graph data should not leak into unified graph.",
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/api/v1/unified-graph",
+        headers={"X-Prism-Actor": "default-user", "X-Prism-Tenant": "legacy-personal"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["nodes"] == []
+    assert response.json()["edges"] == []

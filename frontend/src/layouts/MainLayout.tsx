@@ -379,7 +379,7 @@ export function MainLayout() {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn('flex h-14 shrink-0 items-center gap-3 border-b px-4 backdrop-blur transition-colors lg:px-5', isDark ? 'border-white/[0.07] bg-[#0a0d1c]/95' : 'border-slate-200 bg-white/92')}>
+        <header className={cn('relative z-30 flex h-14 shrink-0 items-center gap-3 border-b px-4 backdrop-blur transition-colors lg:px-5', isDark ? 'border-white/[0.07] bg-[#0a0d1c]/95' : 'border-slate-200 bg-white/92')}>
           <button
             type="button"
             aria-label="打开导航"
@@ -427,10 +427,10 @@ export function MainLayout() {
                 aria-expanded={accountMenuOpen}
                 onClick={() => setAccountMenuOpen((open) => !open)}
                 className={cn(
-                  'hidden items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition sm:flex',
+                  'hidden items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition sm:flex',
                   isDark
-                    ? 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
-                    : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-blue-200',
+                    ? 'text-slate-200 hover:bg-white/[0.06]'
+                    : 'text-slate-700 hover:bg-slate-100',
                 )}
               >
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--prism-blue)] text-[11px] font-semibold text-white">

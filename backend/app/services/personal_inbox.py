@@ -52,6 +52,7 @@ def ensure_personal_inbox_kb(
     tenant_id: str,
     owner_user_id: str,
 ) -> KnowledgeTopic:
+    expected_kb_uid = _personal_inbox_kb_uid(tenant_id, owner_user_id)
     topic = (
         db.query(KnowledgeTopic)
         .filter_by(
@@ -64,13 +65,27 @@ def ensure_personal_inbox_kb(
         .first()
     )
     if topic is not None:
+        _normalize_personal_inbox_topic(topic, tenant_id=tenant_id)
+        return topic
+
+    topic = (
+        db.query(KnowledgeTopic)
+        .filter_by(
+            kb_uid=expected_kb_uid,
+            deleted_at=None,
+        )
+        .order_by(KnowledgeTopic.created_at.asc(), KnowledgeTopic.id.asc())
+        .first()
+    )
+    if topic is not None:
+        _normalize_personal_inbox_topic(topic, tenant_id=tenant_id)
         return topic
 
     topic = KnowledgeTopic(
-        kb_uid=_personal_inbox_kb_uid(tenant_id, owner_user_id),
+        kb_uid=expected_kb_uid,
         tenant_id=tenant_id,
         owner_user_id=owner_user_id,
-        user_id=owner_user_id,
+        user_id=tenant_id,
         name=PERSONAL_INBOX_NAME,
         description="系统自动生成的个人资产知识库。",
         system_type=PERSONAL_INBOX_SYSTEM_TYPE,
@@ -86,15 +101,23 @@ def ensure_personal_inbox_kb(
         existing = (
             db.query(KnowledgeTopic)
             .filter_by(
-                kb_uid=_personal_inbox_kb_uid(tenant_id, owner_user_id),
+                kb_uid=expected_kb_uid,
                 deleted_at=None,
             )
             .order_by(KnowledgeTopic.created_at.asc(), KnowledgeTopic.id.asc())
             .first()
         )
         if existing is not None:
+            _normalize_personal_inbox_topic(existing, tenant_id=tenant_id)
             return existing
         raise
+
+
+def _normalize_personal_inbox_topic(topic: KnowledgeTopic, *, tenant_id: str) -> None:
+    topic.user_id = tenant_id
+    topic.system_type = PERSONAL_INBOX_SYSTEM_TYPE
+    topic.is_system = True
+    topic.delete_disabled = True
 
 
 def render_personal_asset_unit_markdown(db: Session, unit: PersonalAssetUnit) -> str:

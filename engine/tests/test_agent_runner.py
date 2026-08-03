@@ -418,6 +418,202 @@ def test_estimate_tokens_uses_characters_divided_by_three():
     assert runner_mod._estimate_text_tokens("") == 0
 
 
+def test_summary_transcript_limits_input_size(monkeypatch):
+    monkeypatch.setattr(runner_mod.settings, "MAX_SUMMARY_TOKENS", 10, raising=False)
+    history = _history_with_turns(12, content_size=30)
+
+    transcript = runner_mod._summary_transcript(history)
+
+    assert transcript
+    assert len(transcript) <= 120
+    assert "user 12 " in transcript
+    assert "user 1 " not in transcript
+
+
+def _history_with_turns(count, content_size=20):
+    history = []
+    for index in range(1, count + 1):
+        history.append({"role": "user", "content": f"user {index} " + ("u" * content_size)})
+        history.append({"role": "assistant", "content": f"assistant {index} " + ("a" * content_size)})
+    return history
+
+
+def test_build_messages_uses_full_history_below_threshold(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 32000, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+
+    history = _history_with_turns(3, content_size=10)
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+
+    messages = runner._build_messages("current query", history=history)
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert any("user 1" in content for content in contents)
+    assert any("assistant 1" in content for content in contents)
+    assert not any("会话早期摘要" in content for content in contents)
+
+
+def test_build_messages_compresses_history_at_threshold(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "chat", lambda messages, **kwargs: "会话早期摘要：\n- 用户当前主要任务：旧任务")
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 600, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "LOOP_RECENT_TURNS", 10, raising=False)
+
+    history = _history_with_turns(12, content_size=50)
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+
+    messages = runner._build_messages("current query", history=history)
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert any("会话早期摘要" in content for content in contents)
+    assert not any("user 1 " in content for content in contents if not content.startswith("会话早期摘要"))
+    assert any("user 3 " in content for content in contents)
+    assert any("assistant 12 " in content for content in contents)
+
+
+def test_compressed_history_still_injects_active_continuation(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "chat", lambda messages, **kwargs: "会话早期摘要：\n- 用户当前主要任务：读文档")
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 600, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    state = AgentContinuation(
+        version=1,
+        objective="读取论文后续内容",
+        kb_uid="kb-a",
+        file_uid="file-a",
+        next_offset=123,
+        has_more_after=True,
+    )
+    history = _history_with_turns(12, content_size=50)
+    messages = runner._build_messages(
+        "继续",
+        history=history,
+        effective_query="读取论文后续内容",
+        active_continuation=state,
+    )
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert any("file_uid: file-a" in content for content in contents)
+    assert any("next_offset: 123" in content for content in contents)
+
+
+def test_min_recent_history_fallback_still_keeps_active_continuation(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "chat", lambda messages, **kwargs: "会话早期摘要：\n- 用户当前主要任务：读文档")
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 80, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "LOOP_RECENT_TURNS", 10, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "MIN_LOOP_RECENT_TURNS", 6, raising=False)
+
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    state = AgentContinuation(
+        version=1,
+        objective="读取论文后续内容",
+        kb_uid="kb-a",
+        file_uid="file-a",
+        next_offset=456,
+        has_more_after=True,
+    )
+    history = _history_with_turns(12, content_size=50)
+    messages = runner._build_messages(
+        "继续",
+        history=history,
+        effective_query="读取论文后续内容",
+        active_continuation=state,
+    )
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert any("file_uid: file-a" in content for content in contents)
+    assert any("next_offset: 456" in content for content in contents)
+    assert any("user 7 " in content for content in contents)
+
+
+def test_compressed_history_falls_back_to_recent_history_when_summary_fails(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+
+    def fail_chat(*args, **kwargs):
+        raise RuntimeError("summary failed")
+
+    monkeypatch.setattr(runner_mod, "chat", fail_chat)
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 600, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+
+    history = _history_with_turns(12, content_size=50)
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    messages = runner._build_messages("current query", history=history)
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert not any("会话早期摘要" in content for content in contents)
+    assert not any("user 1 " in content for content in contents)
+    assert any("user 3 " in content for content in contents)
+    assert any("assistant 12 " in content for content in contents)
+
+
+def test_summary_failure_still_keeps_active_continuation(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+
+    def fail_chat(*args, **kwargs):
+        raise RuntimeError("summary failed")
+
+    monkeypatch.setattr(runner_mod, "chat", fail_chat)
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 700, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    state = AgentContinuation(
+        version=1,
+        objective="读取论文后续内容",
+        kb_uid="kb-a",
+        file_uid="file-a",
+        next_offset=789,
+        has_more_after=True,
+    )
+    history = _history_with_turns(12, content_size=50)
+    messages = runner._build_messages(
+        "继续",
+        history=history,
+        effective_query="读取论文后续内容",
+        active_continuation=state,
+    )
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert any("file_uid: file-a" in content for content in contents)
+    assert any("next_offset: 789" in content for content in contents)
+    assert not any("user 1 " in content for content in contents)
+    assert any("user 7 " in content for content in contents)
+    assert any("assistant 12 " in content for content in contents)
+
+
+def test_compressed_history_uses_min_recent_history_when_still_over_budget(monkeypatch):
+    monkeypatch.setattr(runner_mod, "recall_memory_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "graph_insights_context", lambda q, **kw: "")
+    monkeypatch.setattr(runner_mod, "chat", lambda messages, **kwargs: "会话早期摘要：\n- 用户当前主要任务：旧任务")
+    monkeypatch.setattr(runner_mod.settings, "DEFAULT_MAX_CONTEXT_TOKENS", 80, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "CONTEXT_COMPRESSION_THRESHOLD", 0.8, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "LOOP_RECENT_TURNS", 10, raising=False)
+    monkeypatch.setattr(runner_mod.settings, "MIN_LOOP_RECENT_TURNS", 6, raising=False)
+
+    history = _history_with_turns(12, content_size=50)
+    runner = LangChainAgentRunner(model=None, tools=[], system_prompt="BASE")
+    messages = runner._build_messages("current query", history=history)
+    contents = [getattr(message, "content", "") for message in messages]
+
+    assert any("会话早期摘要" in content for content in contents)
+    assert not any("user 6 " in content for content in contents if not content.startswith("会话早期摘要"))
+    assert any("user 7 " in content for content in contents)
+    assert any("assistant 12 " in content for content in contents)
+
+
 def test_runner_records_tool_trace_and_streams_evidence_items():
     model = FakeEvidenceModel()
     recorder = FakeTraceRecorder()

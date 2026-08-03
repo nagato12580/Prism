@@ -18,6 +18,8 @@ from ..models import (
     KnowledgeTopic,
     PersonalAssetUnit,
 )
+from ..security.actor import ActorContext, get_actor_context
+from ..services.knowledge_access import KnowledgeAccessPolicy
 from ..services.graph_client import GraphClient
 
 
@@ -26,15 +28,12 @@ DEFAULT_USER_ID = "default-user"
 UnifiedGraphView = Literal["entity", "source"]
 
 
-def _active_graph_scopes(db: Session) -> list[tuple[str, str, str]]:
-    rows = (
-        db.query(KnowledgeTopic.tenant_id, KnowledgeTopic.kb_uid, KnowledgeTopic.active_graph_generation)
-        .filter(
-            KnowledgeTopic.deleted_at.is_(None),
-            KnowledgeTopic.active_graph_generation.isnot(None),
-        )
-        .all()
-    )
+def _active_graph_scopes(db: Session, actor: ActorContext) -> list[tuple[str, str, str]]:
+    rows = [
+        (topic.tenant_id, topic.kb_uid, topic.active_graph_generation)
+        for topic in KnowledgeAccessPolicy(db).list_visible_topics(actor)
+        if topic.active_graph_generation
+    ]
     return [
         (tenant_id, kb_uid, generation)
         for tenant_id, kb_uid, generation in rows
@@ -53,13 +52,6 @@ def _active_scope_filter(model, scopes: list[tuple[str, str, str]]):
             for tenant_id, kb_uid, generation in scopes
         ]
     )
-
-
-def _entity_scope_filter(scopes: list[tuple[str, str, str]]):
-    clauses = [KnowledgeEntity.user_id == DEFAULT_USER_ID]
-    if scopes:
-        clauses.append(_active_scope_filter(KnowledgeEntity, scopes))
-    return or_(*clauses)
 
 
 def _node(node_id: str, node_type: str, label: str, **extra: Any) -> dict[str, Any]:
@@ -261,10 +253,13 @@ def _build_stats(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, An
     }
 
 
-def _focused_entities(db: Session, q: str | None, limit: int) -> list[KnowledgeEntity]:
-    scopes = _active_graph_scopes(db)
+def _focused_entities(db: Session, actor: ActorContext, q: str | None, limit: int) -> list[KnowledgeEntity]:
+    scopes = _active_graph_scopes(db, actor)
+    if not scopes:
+        return []
+
     query = db.query(KnowledgeEntity).filter(
-        _entity_scope_filter(scopes),
+        _active_scope_filter(KnowledgeEntity, scopes),
         KnowledgeEntity.status != "deprecated",
     )
 
@@ -333,10 +328,11 @@ def get_unified_graph(
     view: UnifiedGraphView = Query("entity"),
     q: Optional[str] = Query(None),
     limit: int = Query(120, ge=1, le=1000),
+    actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
     normalized_q = _normalize_query(q)
-    entities = _focused_entities(db, normalized_q, limit)
+    entities = _focused_entities(db, actor, normalized_q, limit)
     if not entities:
         return _empty_payload(view, normalized_q)
 
