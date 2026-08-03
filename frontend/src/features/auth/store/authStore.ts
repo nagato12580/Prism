@@ -11,7 +11,7 @@ interface AuthState {
   clear: () => void
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   me: null,
   loading: false,
   bootstrapped: false,
@@ -32,10 +32,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   async logout() {
     try {
       await authApi.logout()
-    } catch {
+    } catch (error) {
       // Local logout must still succeed so account switching is never blocked.
+      console.warn('logout failed; local session cleared', error)
     } finally {
-      set({ me: null, loading: false, bootstrapped: true })
+      get().clear()
     }
   },
   clear() {

@@ -471,7 +471,7 @@ export function MainLayout() {
                     disabled={loggingOut}
                     className={cn(
                       'flex w-full items-center rounded-lg px-2 py-2 text-left text-sm transition',
-                      isDark ? 'hover:bg-white/8 disabled:opacity-50' : 'hover:bg-slate-100 disabled:opacity-50',
+                      isDark ? 'hover:bg-white/[0.08] disabled:opacity-50' : 'hover:bg-slate-100 disabled:opacity-50',
                     )}
                   >
                     {loggingOut ? 'Signing out...' : '退出登录'}
