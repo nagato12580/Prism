@@ -1,7 +1,8 @@
-﻿import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+﻿import { useEffect, useRef, useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   BookOpen,
+  ChevronDown,
   CircleUserRound,
   Fingerprint,
   Inbox,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { memoryApi } from '@/app/api'
+import { useAuthStore } from '@/features/auth/store/authStore'
 
 const navSections = [
   {
@@ -276,12 +278,54 @@ function CompactNav({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate
 }
 
 export function MainLayout() {
+  const navigate = useNavigate()
+  const me = useAuthStore((s) => s.me)
+  const logout = useAuthStore((s) => s.logout)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [draftCount, setDraftCount] = useState(0)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const isDark = theme === 'dark'
   const location = useLocation()
   const isChatRoute = location.pathname === '/' || location.pathname === '/chat' || location.pathname.startsWith('/chat/')
+
+  const accountName = me?.display_name || me?.username || 'Account'
+  const accountSubline = me?.username || 'Unknown user'
+  const accountInitial = (accountName.trim()[0] || 'U').toUpperCase()
+
+  useEffect(() => {
+    if (!accountMenuOpen) return
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setAccountMenuOpen(false)
+      }
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAccountMenuOpen(false)
+    }
+
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [accountMenuOpen])
+
+  const handleLogout = async () => {
+    setAccountMenuOpen(false)
+    setLoggingOut(true)
+    try {
+      await logout()
+      navigate('/login', { replace: true })
+    } finally {
+      setLoggingOut(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -376,11 +420,65 @@ export function MainLayout() {
               {isDark ? <Sun size={15} /> : <Moon size={15} />}
               <span className="hidden sm:inline">{isDark ? '亮色' : '暗色'}</span>
             </button>
-            <div className={cn('hidden items-center gap-2 text-xs sm:flex', isDark ? 'text-slate-300' : 'text-slate-700')}>
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--prism-blue)] text-[11px] font-semibold text-white">A</span>
-              <span>admin@example.com</span>
+            <div ref={accountMenuRef} className="relative">
+              <button
+                type="button"
+                aria-label="Open account menu"
+                aria-expanded={accountMenuOpen}
+                onClick={() => setAccountMenuOpen((open) => !open)}
+                className={cn(
+                  'hidden items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition sm:flex',
+                  isDark
+                    ? 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
+                    : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-blue-200',
+                )}
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--prism-blue)] text-[11px] font-semibold text-white">
+                  {accountInitial}
+                </span>
+                <span className="min-w-0">
+                  <span className="block max-w-[180px] truncate font-medium">{accountName}</span>
+                  <span className="block max-w-[180px] truncate text-[11px] text-slate-500">{accountSubline}</span>
+                </span>
+                <ChevronDown size={14} className="shrink-0 text-slate-400" />
+              </button>
+
+              <button
+                type="button"
+                aria-label="Open account menu"
+                aria-expanded={accountMenuOpen}
+                onClick={() => setAccountMenuOpen((open) => !open)}
+                className="rounded-md p-1 text-slate-400 sm:hidden"
+              >
+                <CircleUserRound size={20} />
+              </button>
+
+              {accountMenuOpen ? (
+                <div
+                  className={cn(
+                    'absolute right-0 top-[calc(100%+8px)] z-20 min-w-[220px] rounded-xl border p-2 shadow-lg',
+                    isDark ? 'border-white/10 bg-[#0c0f24] text-slate-100' : 'border-slate-200 bg-white text-slate-900',
+                  )}
+                >
+                  <div className="px-2 py-1.5">
+                    <div className="truncate text-sm font-semibold">{accountName}</div>
+                    <div className="truncate text-xs text-slate-500">{accountSubline}</div>
+                  </div>
+                  <div className={cn('my-1 h-px', isDark ? 'bg-white/10' : 'bg-slate-200')} />
+                  <button
+                    type="button"
+                    onClick={() => { void handleLogout() }}
+                    disabled={loggingOut}
+                    className={cn(
+                      'flex w-full items-center rounded-lg px-2 py-2 text-left text-sm transition',
+                      isDark ? 'hover:bg-white/8 disabled:opacity-50' : 'hover:bg-slate-100 disabled:opacity-50',
+                    )}
+                  >
+                    {loggingOut ? 'Signing out...' : '退出登录'}
+                  </button>
+                </div>
+              ) : null}
             </div>
-            <CircleUserRound size={20} className="text-slate-400 sm:hidden" />
           </div>
         </header>
 

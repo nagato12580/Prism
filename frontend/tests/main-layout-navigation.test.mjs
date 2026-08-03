@@ -48,3 +48,21 @@ assert.match(
   /path:\s*['"]review['"][\s\S]*<Navigate to=['"]\/records\/review['"] replace \/>[\s\S]*path:\s*['"]assets['"][\s\S]*<Navigate to=['"]\/records\/merge['"] replace \/>/,
   'Legacy review/assets routes should redirect to the records routes.',
 )
+
+assert.doesNotMatch(
+  mainLayout,
+  /admin@example\.com/,
+  'MainLayout should not hardcode the authenticated account label.',
+)
+
+assert.match(
+  mainLayout,
+  /useAuthStore/,
+  'MainLayout should read the authenticated user from auth state.',
+)
+
+assert.match(
+  mainLayout,
+  /logout|退出登录/,
+  'MainLayout should render a logout action in the account area.',
+)
