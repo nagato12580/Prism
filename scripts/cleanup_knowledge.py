@@ -1,6 +1,7 @@
 """Clean up all knowledge base data: MySQL + Neo4j + Milvus."""
 from __future__ import annotations
 
+import os
 import sys
 import pymysql
 from pymilvus import connections, utility
@@ -9,7 +10,7 @@ MYSQL = {
     "host": "localhost",
     "port": 13306,
     "user": "root",
-    "password": "CHANGE-ME",
+    "password": os.environ.get("MYSQL_ROOT_PASSWORD", "change-me"),
     "database": "prism_db",
 }
 
