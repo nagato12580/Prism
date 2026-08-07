@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..database import get_db
+from ..security.actor import ActorContext, get_actor_context
 from ..models.knowledge_item import KnowledgeFile
 from ..models.wiki import (
     WikiDocument, WikiConcept, WikiKnowledgePoint,
@@ -43,8 +44,11 @@ def _doc_out(doc: WikiDocument) -> WikiDocumentOut:
     )
 
 
-def _get_doc_or_404(doc_id: str, db: Session) -> WikiDocument:
-    doc = db.query(WikiDocument).filter(WikiDocument.id == doc_id).first()
+def _get_doc_or_404(doc_id: str, db: Session, user_id: str | None = None) -> WikiDocument:
+    query = db.query(WikiDocument)
+    if user_id is not None:
+        query = query.filter(WikiDocument.user_id == user_id)
+    doc = query.filter(WikiDocument.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail={"code": "wiki_doc_not_found", "message": "Wiki document not found"})
     return doc
@@ -53,10 +57,14 @@ def _get_doc_or_404(doc_id: str, db: Session) -> WikiDocument:
 # ── Document CRUD ────────────────────────────────────────
 
 @router.get("/documents", response_model=list[WikiDocumentOut])
-def list_documents(db: Session = Depends(get_db)):
+def list_documents(
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     docs = (
         db.query(WikiDocument)
         .options(joinedload(WikiDocument.file))
+        .filter(WikiDocument.user_id == actor.actor_id)
         .order_by(WikiDocument.created_at.desc())
         .all()
     )
@@ -64,11 +72,15 @@ def list_documents(db: Session = Depends(get_db)):
 
 
 @router.get("/documents/{doc_id}", response_model=WikiDocumentDetailOut)
-def get_document(doc_id: str, db: Session = Depends(get_db)):
+def get_document(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     doc = (
         db.query(WikiDocument)
         .options(joinedload(WikiDocument.file), joinedload(WikiDocument.logs))
-        .filter(WikiDocument.id == doc_id)
+        .filter(WikiDocument.id == doc_id, WikiDocument.user_id == actor.actor_id)
         .first()
     )
     if not doc:
@@ -87,8 +99,12 @@ def get_document(doc_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/documents/{doc_id}")
-def delete_document(doc_id: str, db: Session = Depends(get_db)):
-    doc = _get_doc_or_404(doc_id, db)
+def delete_document(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    doc = _get_doc_or_404(doc_id, db, actor.actor_id)
     db.delete(doc)  # CASCADE 删除所有关联数据
     db.commit()
     return {"detail": "已删除"}
@@ -97,8 +113,12 @@ def delete_document(doc_id: str, db: Session = Depends(get_db)):
 # ── Trigger extraction ───────────────────────────────────
 
 @router.post("/extract")
-def trigger_extraction(payload: WikiExtractRequest, db: Session = Depends(get_db)):
-    doc = _get_doc_or_404(payload.doc_id, db)
+def trigger_extraction(
+    payload: WikiExtractRequest,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    doc = _get_doc_or_404(payload.doc_id, db, actor.actor_id)
     if doc.status == "processing":
         raise HTTPException(status_code=409, detail={"code": "already_processing", "message": "Document is already being processed"})
 
@@ -126,25 +146,43 @@ def trigger_extraction(payload: WikiExtractRequest, db: Session = Depends(get_db
 # ── Knowledge Points ────────────────────────────────────
 
 @router.get("/points", response_model=list[WikiKnowledgePointListOut])
-def list_points(doc_id: str = None, db: Session = Depends(get_db)):
-    query = db.query(WikiKnowledgePoint)
+def list_points(
+    doc_id: str = None,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    query = db.query(WikiKnowledgePoint).filter(WikiKnowledgePoint.user_id == actor.actor_id)
     if doc_id:
         query = query.filter(WikiKnowledgePoint.document_id == doc_id)
     return query.order_by(WikiKnowledgePoint.created_at.desc()).all()
 
 
 @router.get("/points/{point_id}", response_model=WikiKnowledgePointOut)
-def get_point(point_id: str, db: Session = Depends(get_db)):
-    point = db.query(WikiKnowledgePoint).filter(WikiKnowledgePoint.id == point_id).first()
+def get_point(
+    point_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    point = db.query(WikiKnowledgePoint).filter(
+        WikiKnowledgePoint.id == point_id,
+        WikiKnowledgePoint.user_id == actor.actor_id,
+    ).first()
     if not point:
         raise HTTPException(status_code=404, detail={"code": "point_not_found", "message": "Knowledge point not found"})
     return point
 
 
 @router.get("/points/{point_id}/relations", response_model=list[WikiKnowledgeRelationOut])
-def get_point_relations(point_id: str, db: Session = Depends(get_db)):
+def get_point_relations(
+    point_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     """获取某知识点的所有关联关系（含 from/to 标题）。"""
-    point = db.query(WikiKnowledgePoint).filter(WikiKnowledgePoint.id == point_id).first()
+    point = db.query(WikiKnowledgePoint).filter(
+        WikiKnowledgePoint.id == point_id,
+        WikiKnowledgePoint.user_id == actor.actor_id,
+    ).first()
     if not point:
         raise HTTPException(status_code=404, detail={"code": "point_not_found", "message": "Knowledge point not found"})
 
@@ -185,8 +223,16 @@ def get_point_relations(point_id: str, db: Session = Depends(get_db)):
 # ── Concepts (for debugging / inspection) ───────────────
 
 @router.get("/concepts", response_model=list[WikiConceptOut])
-def list_concepts(doc_id: str = None, db: Session = Depends(get_db)):
-    query = db.query(WikiConcept)
+def list_concepts(
+    doc_id: str = None,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    query = (
+        db.query(WikiConcept)
+        .join(WikiDocument, WikiDocument.id == WikiConcept.document_id)
+        .filter(WikiDocument.user_id == actor.actor_id)
+    )
     if doc_id:
         query = query.filter(WikiConcept.document_id == doc_id)
     return query.order_by(WikiConcept.created_at.desc()).all()
@@ -195,8 +241,16 @@ def list_concepts(doc_id: str = None, db: Session = Depends(get_db)):
 # ── Images ──────────────────────────────────────────────
 
 @router.get("/images", response_model=list[WikiImageOut])
-def list_images(doc_id: str = None, db: Session = Depends(get_db)):
-    query = db.query(WikiImage)
+def list_images(
+    doc_id: str = None,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    query = (
+        db.query(WikiImage)
+        .join(WikiDocument, WikiDocument.id == WikiImage.document_id)
+        .filter(WikiDocument.user_id == actor.actor_id)
+    )
     if doc_id:
         query = query.filter(WikiImage.document_id == doc_id)
     return query.order_by(WikiImage.image_index).all()

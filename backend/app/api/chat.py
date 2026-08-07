@@ -11,10 +11,27 @@ from ..schemas.chat import (
     ChatMessageOut, ChatMessageCreate, ChatMessageUpdate,
 )
 from ..config import settings
+from ..security.actor import ActorContext, get_actor_context
 from ..services.memory_extraction import extract_session_memories
 from ..utils.time import local_now
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+def _get_owned_session(db: Session, session_id: str, actor: ActorContext) -> ChatSession:
+    """Return the session if it belongs to *actor*, else raise 404.
+
+    Returning 404 (rather than 403) keeps the existence of other users'
+    sessions private.
+    """
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == actor.actor_id)
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return session
 
 
 def _run_memory_extraction_best_effort(session_id: str, limit: int = 20):
@@ -46,10 +63,14 @@ def _maybe_trigger_memory_extraction(session_id: str, role: str, content: str | 
 # ── Session CRUD ──────────────────────────────────────────────
 
 @router.post("/sessions", response_model=ChatSessionOut)
-def create_session(payload: ChatSessionCreate, db: Session = Depends(get_db)):
+def create_session(
+    payload: ChatSessionCreate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     session = ChatSession(
         title=payload.title or "新对话",
-        user_id="default-user",
+        user_id=actor.actor_id,
         topic_id=payload.topic_id,
         source_types=payload.source_types,
     )
@@ -60,15 +81,26 @@ def create_session(payload: ChatSessionCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/sessions", response_model=list[ChatSessionOut])
-def list_sessions(db: Session = Depends(get_db)):
-    return db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
+def list_sessions(
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    return (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == actor.actor_id)
+        .order_by(ChatSession.updated_at.desc())
+        .all()
+    )
 
 
 @router.put("/sessions/{session_id}", response_model=ChatSessionOut)
-def update_session(session_id: str, payload: ChatSessionUpdate, db=Depends(get_db)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
+def update_session(
+    session_id: str,
+    payload: ChatSessionUpdate,
+    db=Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    session = _get_owned_session(db, session_id, actor)
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(session, key, value)
@@ -78,10 +110,12 @@ def update_session(session_id: str, payload: ChatSessionUpdate, db=Depends(get_d
 
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
+def delete_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    session = _get_owned_session(db, session_id, actor)
     db.delete(session)
     db.commit()
     return {"detail": "已删除"}
@@ -90,19 +124,24 @@ def delete_session(session_id: str, db: Session = Depends(get_db)):
 # ── Messages ──────────────────────────────────────────────────
 
 @router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageOut])
-def list_messages(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
+def list_messages(
+    session_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    session = _get_owned_session(db, session_id, actor)
     return db.query(ChatMessage).filter(ChatMessage.session_id == session_id)\
         .order_by(ChatMessage.created_at).all()
 
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageOut)
-def add_message(session_id: str, payload: ChatMessageCreate, db: Session = Depends(get_db)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
+def add_message(
+    session_id: str,
+    payload: ChatMessageCreate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    session = _get_owned_session(db, session_id, actor)
     msg = ChatMessage(
         session_id=session_id, role=payload.role,
         content=payload.content, sources=payload.sources,
@@ -123,10 +162,9 @@ def update_message(
     message_id: str,
     payload: ChatMessageUpdate,
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = _get_owned_session(db, session_id, actor)
 
     msg = (
         db.query(ChatMessage)
@@ -150,10 +188,12 @@ def update_message(
 # ── Title generation ──────────────────────────────────────────
 
 @router.post("/sessions/{session_id}/generate-title", response_model=ChatSessionOut)
-def generate_title(session_id: str, db=Depends(get_db)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
+def generate_title(
+    session_id: str,
+    db=Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    session = _get_owned_session(db, session_id, actor)
 
     messages = (
         db.query(ChatMessage)

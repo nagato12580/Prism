@@ -251,7 +251,7 @@ def get_file(
 
     file_row = (
         db.query(KnowledgeFile)
-        .filter_by(file_uid=file_uid, kb_uid=kb_uid, deleted_at=None)
+        .filter_by(file_uid=file_uid, kb_uid=kb_uid, tenant_id=actor.tenant_id, deleted_at=None)
         .one_or_none()
     )
     if file_row is None:

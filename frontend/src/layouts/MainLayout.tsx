@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { memoryApi } from '@/app/api'
+import { useChatStore } from '@/app/chatStore'
 import { useAuthStore } from '@/features/auth/store/authStore'
 
 const navSections = [
@@ -321,6 +322,8 @@ export function MainLayout() {
     setLoggingOut(true)
     try {
       await logout()
+      // Drop the previous user's chat state so the next login never sees it.
+      useChatStore.getState().clear()
       navigate('/login', { replace: true })
     } finally {
       setLoggingOut(false)

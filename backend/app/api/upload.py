@@ -9,6 +9,7 @@ import httpx
 from ..database import get_db
 from ..config import settings
 from ..models.knowledge_item import KnowledgeItem, KnowledgeFile
+from ..security.actor import ActorContext, get_actor_context
 from ..utils.file_parser import extract_text, extract_url
 from ..schemas.knowledge import KnowledgeItemOut
 
@@ -127,6 +128,7 @@ def _trigger_ingestion(item_id: str):
 async def upload_wiki_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
     """Wiki 独立上传入口：保存文件 → 创建 knowledge_file + wiki_document → 触发提取。"""
     from ..models.wiki import WikiDocument
@@ -160,6 +162,8 @@ async def upload_wiki_file(
             parse_status="completed",
             source_type="wiki",
             content_text=text,
+            user_id=actor.actor_id,
+            tenant_id=actor.tenant_id,
         )
         db.add(kfile)
         db.flush()
@@ -168,7 +172,7 @@ async def upload_wiki_file(
         wiki_doc = WikiDocument(
             file_id=kfile.id,
             status="pending",
-            user_id="default-user",
+            user_id=actor.actor_id,
         )
         db.add(wiki_doc)
         db.commit()

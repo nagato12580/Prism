@@ -241,6 +241,7 @@ export function ChatPage() {
   const setLastContinuation = useChatStore((s) => s.setLastContinuation)
   const finishLast = useChatStore((s) => s.finishLast)
   const clear = useChatStore((s) => s.clear)
+  const resetChat = useChatStore((s) => s.resetChat)
   const setSelectedTopics = useChatStore((s) => s.setSelectedTopics)
   const toggleTopic = useChatStore((s) => s.toggleTopic)
   const clearSelectedTopics = useChatStore((s) => s.clearSelectedTopics)
@@ -292,7 +293,12 @@ export function ChatPage() {
         const list = await chatApi.listSessions()
         if (cancelled) return
         setSessions(list)
-        if (list.length > 0) {
+        if (list.length === 0) {
+          // Current user has no sessions: drop any stale session/messages left
+          // over from a previously logged-in account.
+          setCurrentSessionId(null)
+          clear()
+        } else if (list.length > 0) {
           const latest = list[0]
           setCurrentSessionId(latest.id)
           restoreFromSession(latest)
@@ -825,11 +831,9 @@ export function ChatPage() {
   }
 
   const startNewConversation = () => {
-    setCurrentSessionId(null)
+    // 仅重置当前对话工作状态，保留会话列表（clear 会连 sessions 一起清空，仅供登出使用）
+    resetChat()
     setExpandedSources({})
-    clear()
-    clearSelectedTopics()
-    clearSelectedSourceTypes()
   }
 
   const switchSession = async (sessionId: string) => {

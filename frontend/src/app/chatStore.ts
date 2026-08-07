@@ -137,6 +137,7 @@ interface ChatState {
   finishLast: (sessionId?: string, messageId?: string, remainingToolStatus?: ToolRunStatus) => void
   replaceMessageId: (sessionId: string, fromId: string, toId: string) => void
   clear: () => void
+  resetChat: () => void
   getSessionMessages: (sessionId: string) => Message[]
   // Topic/source actions
   setSelectedTopics: (topicIds: string[], topicNames: string[]) => void
@@ -525,7 +526,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages.map((message) => (message.id === fromId ? { ...message, id: toId } : message)),
       ),
     ),
-  clear: () => set({ messages: [] }),
+  clear: () =>
+    set({
+      messages: [],
+      sessionMessages: {},
+      selectedTopicIds: [],
+      selectedTopicNames: [],
+      selectedSourceTypes: [],
+      deepSearchEnabled: false,
+      deepSearchDepth: 'standard',
+      currentSessionId: null,
+      sessions: [],
+      sessionsLoading: false,
+    }),
+  /** 开始新会话：清空当前对话工作状态，但保留会话列表（clear 仅供登出全量重置）。 */
+  resetChat: () =>
+    set({
+      messages: [],
+      sessionMessages: {},
+      selectedTopicIds: [],
+      selectedTopicNames: [],
+      selectedSourceTypes: [],
+      deepSearchEnabled: false,
+      deepSearchDepth: 'standard',
+      currentSessionId: null,
+    }),
   getSessionMessages: (sessionId) => get().sessionMessages[sessionId] ?? [],
   setSelectedTopics: (topicIds, topicNames) => set({ selectedTopicIds: topicIds, selectedTopicNames: topicNames }),
   toggleTopic: (topicId, topicName) =>

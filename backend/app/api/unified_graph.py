@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -101,6 +101,7 @@ def _entity_node(entity: KnowledgeEntity) -> dict[str, Any]:
 def _source_lookup(
     db: Session,
     mentions: list[EntityMention],
+    user_id: str = DEFAULT_USER_ID,
 ) -> tuple[dict[str, KnowledgeChunk], dict[str, KnowledgeItem], dict[str, KnowledgeFile], dict[str, KnowledgeTopic], dict[str, PersonalAssetUnit]]:
     chunk_ids = {mention.source_id for mention in mentions if mention.source_kind == "document_chunk"}
     unit_ids = {mention.source_id for mention in mentions if mention.source_kind == "personal_asset_unit"}
@@ -148,7 +149,7 @@ def _source_lookup(
         db.query(PersonalAssetUnit)
         .filter(
             PersonalAssetUnit.id.in_(unit_ids),
-            PersonalAssetUnit.user_id == DEFAULT_USER_ID,
+            PersonalAssetUnit.user_id == user_id,
         )
         .all()
         if unit_ids
@@ -350,7 +351,7 @@ def get_unified_graph(
         .all()
     )
 
-    chunk_by_id, item_by_id, file_by_uid, topic_by_uid, unit_by_id = _source_lookup(db, mentions)
+    chunk_by_id, item_by_id, file_by_uid, topic_by_uid, unit_by_id = _source_lookup(db, mentions, user_id=actor.actor_id)
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[str, dict[str, Any]] = {}
 
@@ -434,12 +435,22 @@ def get_unified_graph(
     }
 
 
+def _require_scoped_entity(entity_id: str, actor: ActorContext) -> None:
+    """Scoped graph entity ids are prefixed with ``{tenant}:``; reject any that
+    are not within the actor's tenant so cross-tenant ids cannot be queried."""
+    if not entity_id.startswith(f"{actor.tenant_id}:"):
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+
 @router.get("/path")
 def get_unified_graph_path(
     source_entity_id: str,
     target_entity_id: str,
     limit: int = Query(6, ge=1, le=12),
+    actor: ActorContext = Depends(get_actor_context),
 ):
+    _require_scoped_entity(source_entity_id, actor)
+    _require_scoped_entity(target_entity_id, actor)
     graph = GraphClient()
     try:
         return {
@@ -458,7 +469,9 @@ def get_unified_graph_explain(
     entity_id: str,
     source_kind: str,
     source_id: str,
+    actor: ActorContext = Depends(get_actor_context),
 ):
+    _require_scoped_entity(entity_id, actor)
     graph = GraphClient()
     try:
         return graph.explain_source_link(entity_id, f"{source_kind}:{source_id}") or {}

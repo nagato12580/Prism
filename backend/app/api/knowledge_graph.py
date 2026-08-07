@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..security.actor import ActorContext, get_actor_context
 from ..models.asset import PersonalAssetItem, PersonalAssetUnit
 from ..models.knowledge_governance import (
     CanonicalKnowledgePoint,
@@ -234,9 +235,11 @@ def get_knowledge_graph_workbench(
     q: Optional[str] = Query(None),
     limit: int = Query(40, ge=1, le=100),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
+    user_id = actor.actor_id
     query = db.query(CanonicalKnowledgePoint).filter(
-        CanonicalKnowledgePoint.user_id == DEFAULT_USER_ID,
+        CanonicalKnowledgePoint.user_id == user_id,
         CanonicalKnowledgePoint.status != "deprecated",
     )
     if q and q.strip():
@@ -280,7 +283,7 @@ def get_knowledge_graph_workbench(
     links = (
         db.query(PKUCanonicalLink)
         .filter(
-            PKUCanonicalLink.user_id == DEFAULT_USER_ID,
+            PKUCanonicalLink.user_id == user_id,
             PKUCanonicalLink.canonical_id.in_(canonical_ids),
         )
         .order_by(PKUCanonicalLink.confidence.desc(), PKUCanonicalLink.created_at.desc())
@@ -330,7 +333,7 @@ def get_knowledge_graph_workbench(
         pku_relations = (
             db.query(PKURelation)
             .filter(
-                PKURelation.user_id == DEFAULT_USER_ID,
+                PKURelation.user_id == user_id,
                 PKURelation.source_pku_id.in_(all_pku_ids),
                 PKURelation.target_pku_id.in_(all_pku_ids),
             )
@@ -371,7 +374,7 @@ def get_knowledge_graph_workbench(
     relations = (
         db.query(CanonicalRelation)
         .filter(
-            CanonicalRelation.user_id == DEFAULT_USER_ID,
+            CanonicalRelation.user_id == user_id,
             CanonicalRelation.relation_type == "subtopic_of",
             CanonicalRelation.source_canonical_id.in_(canonical_ids),
         )
@@ -383,7 +386,7 @@ def get_knowledge_graph_workbench(
         row[0]
         for row in db.query(CanonicalRelation.target_canonical_id)
         .filter(
-            CanonicalRelation.user_id == DEFAULT_USER_ID,
+            CanonicalRelation.user_id == user_id,
             CanonicalRelation.relation_type == "subtopic_of",
             CanonicalRelation.target_canonical_id.in_(canonical_ids),
         )
@@ -396,7 +399,7 @@ def get_knowledge_graph_workbench(
             parent.id: parent
             for parent in db.query(CanonicalKnowledgePoint)
             .filter(
-                CanonicalKnowledgePoint.user_id == DEFAULT_USER_ID,
+                CanonicalKnowledgePoint.user_id == user_id,
                 CanonicalKnowledgePoint.id.in_(parent_ids),
                 CanonicalKnowledgePoint.status != "deprecated",
             )

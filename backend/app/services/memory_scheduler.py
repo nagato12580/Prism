@@ -141,8 +141,10 @@ def _scheduled_extraction_round() -> dict:
 
         # Step 3: Persist run log
         duration = int((datetime.now() - start_time).total_seconds() * 1000)
+        run_user_id = sessions[0].user_id if sessions else None
         run = MemoryExtractionRun(
             trigger_type="scheduled",
+            user_id=run_user_id,
             sessions_scanned=stats["sessions_scanned"],
             sessions_extracted=stats["sessions_extracted"],
             candidates_found=stats["candidates_found"],

@@ -252,10 +252,10 @@ def _tokenize(content: str) -> set[str]:
     return tokens
 
 
-def _existing_confirmed_statements(db: Session) -> list[tuple[str, str, str]]:
+def _existing_confirmed_statements(db: Session, user_id: str = DEFAULT_USER_ID) -> list[tuple[str, str, str]]:
     rows = (
         db.query(MemoryStatement.id, MemoryStatement.content, MemoryStatement.statement_type)
-        .filter(MemoryStatement.user_id == DEFAULT_USER_ID, MemoryStatement.status == MemoryStatus.CONFIRMED)
+        .filter(MemoryStatement.user_id == user_id, MemoryStatement.status == MemoryStatus.CONFIRMED)
         .all()
     )
     return [(str(r[0]), str(r[1] or ""), str(r[2] or "")) for r in rows]
@@ -287,11 +287,11 @@ def _detect_conflicts(
     return conflicts
 
 
-def _existing_memory_contents(db: Session) -> set[str]:
+def _existing_memory_contents(db: Session, user_id: str = DEFAULT_USER_ID) -> set[str]:
     contents: set[str] = set()
-    statements = db.query(MemoryStatement.content).filter(MemoryStatement.user_id == DEFAULT_USER_ID).all()
+    statements = db.query(MemoryStatement.content).filter(MemoryStatement.user_id == user_id).all()
     contents.update(_normalize_content(row[0]) for row in statements if row[0])
-    drafts = db.query(MemoryDraft.payload).filter(MemoryDraft.user_id == DEFAULT_USER_ID).all()
+    drafts = db.query(MemoryDraft.payload).filter(MemoryDraft.user_id == user_id).all()
     for row in drafts:
         payload = row[0] or {}
         if isinstance(payload, dict) and isinstance(payload.get("content"), str):
@@ -303,6 +303,7 @@ def _check_semantic_duplicate(
     db: Session,
     content: str,
     existing_exact: set[str] | None = None,
+    user_id: str = DEFAULT_USER_ID,
 ) -> tuple[bool, str]:
     """
     检查 content 是否与已有记忆重复（精确 + 语义）。
@@ -320,11 +321,11 @@ def _check_semantic_duplicate(
         # No cache: load and check exact match
         if not normalized:
             return True, ""
-        if normalized in _existing_memory_contents(db):
+        if normalized in _existing_memory_contents(db, user_id):
             return True, ""
 
     # Slow path: embedding semantic similarity (only if exact miss)
-    similar = _search_similar_statements(content, top_k=5)
+    similar = _search_similar_statements(content, top_k=5, user_id=user_id)
     for hit in similar:
         if hit.get("kind") != "statement":
             continue
@@ -338,12 +339,13 @@ def _check_semantic_duplicate(
 def _search_similar_statements(
     text: str,
     top_k: int = 10,
+    user_id: str = DEFAULT_USER_ID,
 ) -> list[dict[str, Any]]:
     """Search Milvus for semantically similar confirmed statements."""
     try:
         return search_memory_vectors(
             text=text,
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             top_k=top_k,
         )
     except Exception:
@@ -369,6 +371,7 @@ def evaluate_auto_confirm(
     db: Session,
     candidate: MemoryCandidate,
     session_id: str = "",
+    user_id: str = DEFAULT_USER_ID,
 ) -> tuple[float, str, list[str]]:
     """
     Compute the auto_confirm_score and return (score, decision, conflict_ids).
@@ -382,7 +385,7 @@ def evaluate_auto_confirm(
     type_risk = TYPE_RISK_BASELINE.get(candidate.statement_type, 0.80)
 
     # ---- Semantic search for conflict & corroboration ----
-    similar = _search_similar_statements(candidate.content, top_k=10)
+    similar = _search_similar_statements(candidate.content, top_k=10, user_id=user_id)
 
     max_conflict_sim = 0.0
     conflict_ids: list[str] = []
@@ -481,24 +484,27 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
     if not messages:
         return result
 
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    user_id = session.user_id or DEFAULT_USER_ID if session else DEFAULT_USER_ID
+
     prompt_messages = build_memory_extraction_messages(messages)
     raw = _call_memory_extraction_llm(prompt_messages)
     candidates = parse_memory_candidates(raw)
     result.candidates_found = len(candidates)
 
     by_id = {message.id: message for message in messages}
-    existing = _existing_memory_contents(db)
-    confirmed_statements = _existing_confirmed_statements(db)
+    existing = _existing_memory_contents(db, user_id)
+    confirmed_statements = _existing_confirmed_statements(db, user_id)
 
     for candidate in candidates:
-        is_dup, dup_id = _check_semantic_duplicate(db, candidate.content, existing)
+        is_dup, dup_id = _check_semantic_duplicate(db, candidate.content, existing, user_id=user_id)
         if is_dup:
             result.candidates_skipped += 1
             continue
         normalized = _normalize_content(candidate.content)
         evidence = by_id.get(candidate.evidence_message_id) or messages[-1]
         source = MemorySource(
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             source_type="chat_message",
             source_id=evidence.id,
             session_id=session_id,
@@ -508,7 +514,7 @@ def extract_session_memories(db: Session, session_id: str, limit: int = 20) -> M
         )
         conflict_ids = _detect_conflicts(candidate, confirmed_statements)
         draft = MemoryDraft(
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             draft_type="statement",
             payload={
                 "content": candidate.content,
@@ -544,6 +550,7 @@ def extract_session_memories_scheduled(
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
+    user_id = session.user_id or DEFAULT_USER_ID
 
     context_messages, new_messages = load_session_messages_with_watermark(
         db, session_id, last_extracted_message_id, context_window,
@@ -568,11 +575,11 @@ def extract_session_memories_scheduled(
 
     # Step 3: Process each candidate through decision engine
     by_id = {m.id: m for m in new_messages}
-    existing = _existing_memory_contents(db)
+    existing = _existing_memory_contents(db, user_id)
 
     for candidate in candidates:
         # Semantic dedup: exact match + embedding similarity
-        is_dup, dup_id = _check_semantic_duplicate(db, candidate.content, existing)
+        is_dup, dup_id = _check_semantic_duplicate(db, candidate.content, existing, user_id=user_id)
         if is_dup:
             result.candidates_skipped += 1
             continue
@@ -581,12 +588,12 @@ def extract_session_memories_scheduled(
 
         # Run auto-confirm decision engine
         auto_score, decision, conflict_ids = evaluate_auto_confirm(
-            db, candidate, session_id=session_id,
+            db, candidate, session_id=session_id, user_id=user_id,
         )
 
         evidence = by_id.get(candidate.evidence_message_id) or new_messages[-1]
         source = MemorySource(
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             source_type="chat_message",
             source_id=evidence.id,
             session_id=session_id,
@@ -602,7 +609,7 @@ def extract_session_memories_scheduled(
         if decision == "auto_confirm":
             # Create confirmed MemoryStatement directly
             statement = MemoryStatement(
-                user_id=DEFAULT_USER_ID,
+                user_id=user_id,
                 content=candidate.content,
                 statement_type=candidate.statement_type,
                 temporal_type=candidate.temporal_type,
@@ -633,7 +640,7 @@ def extract_session_memories_scheduled(
         else:
             # decision == "review" — create draft for Memory Inbox
             draft = MemoryDraft(
-                user_id=DEFAULT_USER_ID,
+                user_id=user_id,
                 draft_type="statement",
                 payload={
                     "content": candidate.content,

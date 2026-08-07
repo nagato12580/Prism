@@ -188,6 +188,7 @@ def create_asset_item_from_raw(
     raw_tags: list[str] | None = None,
     raw_metadata: dict[str, Any] | None = None,
     parsed: dict[str, Any] | None = None,
+    user_id: str = DEFAULT_USER_ID,
 ) -> PersonalAssetItem:
     raw_text = (raw_text or "").strip()
     if not raw_text:
@@ -204,7 +205,7 @@ def create_asset_item_from_raw(
     raw_tags = _clean_tags(raw_tags or [])
     keywords = _extract_keywords(raw_text, [*raw_tags, *data["tags"]])
     item = PersonalAssetItem(
-        user_id=DEFAULT_USER_ID,
+        user_id=user_id,
         raw_text=raw_text,
         raw_title=(raw_title or "")[:255],
         raw_source_type=(raw_source_type or "manual")[:64],

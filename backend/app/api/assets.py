@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import SessionLocal, get_db
+from ..security.actor import ActorContext, get_actor_context
 from ..prompts.asset_parse import (
     build_asset_parse_messages,
     build_knowledge_synthesis_messages,
@@ -266,14 +267,14 @@ def _ingest_asset_unit_entity_graph(db: Session, unit: PersonalAssetUnit) -> Non
     )
 
 
-def _run_asset_unit_entity_graph_ingestion(unit_id: str) -> None:
+def _run_asset_unit_entity_graph_ingestion(unit_id: str, user_id: str) -> None:
     db = SessionLocal()
     try:
         unit = (
             db.query(PersonalAssetUnit)
             .filter(
                 PersonalAssetUnit.id == unit_id,
-                PersonalAssetUnit.user_id == DEFAULT_USER_ID,
+                PersonalAssetUnit.user_id == user_id,
             )
             .first()
         )
@@ -288,10 +289,10 @@ def _run_asset_unit_entity_graph_ingestion(unit_id: str) -> None:
         db.close()
 
 
-def _schedule_asset_unit_entity_graph_ingestion(unit_id: str) -> None:
+def _schedule_asset_unit_entity_graph_ingestion(unit_id: str, user_id: str) -> None:
     thread = threading.Thread(
         target=_run_asset_unit_entity_graph_ingestion,
-        args=(unit_id,),
+        args=(unit_id, user_id),
         daemon=True,
         name=f"asset-unit-graph-ingest-{unit_id}",
     )
@@ -343,6 +344,7 @@ def _create_asset_item_from_raw(
     raw_author: str = "",
     raw_tags: list[str] | None = None,
     raw_metadata: dict[str, Any] | None = None,
+    user_id: str = DEFAULT_USER_ID,
 ) -> PersonalAssetItem:
     raw_text = (raw_text or "").strip()
     if not raw_text:
@@ -350,7 +352,7 @@ def _create_asset_item_from_raw(
 
     user_preferences = ""
     try:
-        user_preferences = recall_preference_context(db, raw_text)
+        user_preferences = recall_preference_context(db, raw_text, user_id=user_id)
     except Exception:
         user_preferences = ""
 
@@ -373,11 +375,16 @@ def _create_asset_item_from_raw(
         raw_tags=raw_tags,
         raw_metadata=raw_metadata,
         parsed=parsed,
+        user_id=user_id,
     )
 
 
 @router.post("/items", response_model=PersonalAssetItemOut)
-def create_asset_item(payload: PersonalAssetItemCreate, db: Session = Depends(get_db)):
+def create_asset_item(
+    payload: PersonalAssetItemCreate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     return _create_asset_item_from_raw(
         db=db,
         raw_text=payload.raw_text,
@@ -388,6 +395,7 @@ def create_asset_item(payload: PersonalAssetItemCreate, db: Session = Depends(ge
         raw_author=payload.raw_author or "",
         raw_tags=payload.raw_tags,
         raw_metadata=payload.raw_metadata,
+        user_id=actor.actor_id,
     )
 
 
@@ -437,6 +445,7 @@ async def voice_to_asset_item(
     audio_file: UploadFile = File(...),
     source_type: str = Form("recording"),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
     """语音转写并创建资产碎片。
 
@@ -515,20 +524,30 @@ async def voice_to_asset_item(
             "audio_content_type": audio_file.content_type,
             "audio_size_bytes": len(audio_bytes),
         },
+        user_id=actor.actor_id,
     )
 
 
 @router.get("/items", response_model=list[PersonalAssetItemOut])
-def list_asset_items(status: Optional[str] = Query("pending_review"), db: Session = Depends(get_db)):
-    query = db.query(PersonalAssetItem).filter(PersonalAssetItem.user_id == DEFAULT_USER_ID)
+def list_asset_items(
+    status: Optional[str] = Query("pending_review"),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    query = db.query(PersonalAssetItem).filter(PersonalAssetItem.user_id == actor.actor_id)
     if status:
         query = query.filter(PersonalAssetItem.status == status)
     return query.order_by(PersonalAssetItem.updated_at.desc()).all()
 
 
 @router.put("/items/{item_id}", response_model=PersonalAssetItemOut)
-def update_asset_item(item_id: str, payload: PersonalAssetItemUpdate, db: Session = Depends(get_db)):
-    item = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == item_id, PersonalAssetItem.user_id == DEFAULT_USER_ID).first()
+def update_asset_item(
+    item_id: str,
+    payload: PersonalAssetItemUpdate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    item = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == item_id, PersonalAssetItem.user_id == actor.actor_id).first()
     if not item:
         raise HTTPException(status_code=404, detail={"code": "asset_item_not_found", "message": "Personal asset item not found"})
     if item.status not in {"pending_review", "confirmed"}:
@@ -560,22 +579,26 @@ def update_asset_item(item_id: str, payload: PersonalAssetItemUpdate, db: Sessio
 
 
 @router.delete("/items/{item_id}")
-def delete_asset_item(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == item_id, PersonalAssetItem.user_id == DEFAULT_USER_ID).first()
+def delete_asset_item(
+    item_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    item = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == item_id, PersonalAssetItem.user_id == actor.actor_id).first()
     if not item:
         raise HTTPException(status_code=404, detail={"code": "asset_item_not_found", "message": "Personal asset item not found"})
     if item.status != "pending_review":
         raise HTTPException(status_code=409, detail={"code": "asset_item_closed", "message": "Only pending asset items can be deleted"})
     db.query(AssetRelation).filter(
-        AssetRelation.user_id == DEFAULT_USER_ID,
+        AssetRelation.user_id == actor.actor_id,
         or_(AssetRelation.from_asset_id == item.id, AssetRelation.to_asset_id == item.id),
     ).delete(synchronize_session=False)
     db.query(ExtensionPoint).filter(
-        ExtensionPoint.user_id == DEFAULT_USER_ID,
+        ExtensionPoint.user_id == actor.actor_id,
         ExtensionPoint.asset_id == item.id,
     ).delete(synchronize_session=False)
     db.query(AssetUsageEvent).filter(
-        AssetUsageEvent.user_id == DEFAULT_USER_ID,
+        AssetUsageEvent.user_id == actor.actor_id,
         AssetUsageEvent.asset_id == item.id,
     ).delete(synchronize_session=False)
     db.delete(item)
@@ -584,7 +607,12 @@ def delete_asset_item(item_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/items/{item_id}/regenerate", response_model=PersonalAssetItemOut)
-def regenerate_asset_item(item_id: str, payload: AssetRegenerateRequest | None = None, db: Session = Depends(get_db)):
+def regenerate_asset_item(
+    item_id: str,
+    payload: AssetRegenerateRequest | None = None,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     """调用 AI 重新规范化记录的 Markdown 改写内容和摘要。
 
     使用请求体中的 raw_text（未提供则从数据库读取）调用 capture_normalize LLM，
@@ -592,7 +620,7 @@ def regenerate_asset_item(item_id: str, payload: AssetRegenerateRequest | None =
     """
     item = db.query(PersonalAssetItem).filter(
         PersonalAssetItem.id == item_id,
-        PersonalAssetItem.user_id == DEFAULT_USER_ID,
+        PersonalAssetItem.user_id == actor.actor_id,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail={"code": "asset_item_not_found", "message": "Personal asset item not found"})
@@ -659,8 +687,13 @@ def regenerate_asset_item(item_id: str, payload: AssetRegenerateRequest | None =
 
 
 @router.post("/items/{item_id}/confirm", response_model=AssetConfirmResponse)
-def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session = Depends(get_db)):
-    item = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == item_id, PersonalAssetItem.user_id == DEFAULT_USER_ID).first()
+def confirm_asset_item(
+    item_id: str,
+    payload: AssetConfirmRequest,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    item = db.query(PersonalAssetItem).filter(PersonalAssetItem.id == item_id, PersonalAssetItem.user_id == actor.actor_id).first()
     if not item:
         raise HTTPException(status_code=404, detail={"code": "asset_item_not_found", "message": "Personal asset item not found"})
     if item.status != "pending_review":
@@ -671,12 +704,12 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
         target_id = str(relation.get("target_asset_id") or relation.get("to_asset_id") or "")
         if not target_id:
             continue
-        target = db.query(PersonalAssetItem.id).filter(PersonalAssetItem.id == target_id, PersonalAssetItem.user_id == DEFAULT_USER_ID).first()
+        target = db.query(PersonalAssetItem.id).filter(PersonalAssetItem.id == target_id, PersonalAssetItem.user_id == actor.actor_id).first()
         if not target:
             continue
         db.add(
             AssetRelation(
-                user_id=DEFAULT_USER_ID,
+                user_id=actor.actor_id,
                 from_asset_id=item.id,
                 to_asset_id=target_id,
                 relation_type=str(relation.get("relation_type") or "related")[:64],
@@ -697,7 +730,7 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
     memory_entry = None
     if payload.create_memory:
         memory_entry = MemoryEntry(
-            user_id=DEFAULT_USER_ID,
+            user_id=actor.actor_id,
             title=item.title,
             content=item.summary or item.raw_text,
             memory_type=_memory_type_from_kind(item.asset_kind),
@@ -718,7 +751,12 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
     if memory_entry is not None:
         _index_entry_vector(memory_entry)
         try:
-            extract_and_link_entities(db, content=memory_entry.title or memory_entry.content, source_id=memory_entry.id)
+            extract_and_link_entities(
+                db,
+                content=memory_entry.title or memory_entry.content,
+                source_id=memory_entry.id,
+                user_id=actor.actor_id,
+            )
         except Exception:
             pass
 
@@ -737,7 +775,11 @@ def confirm_asset_item(item_id: str, payload: AssetConfirmRequest, db: Session =
 
 
 @router.post("/drafts", response_model=AssetDraftOut)
-def create_draft(payload: AssetDraftCreate, db: Session = Depends(get_db)):
+def create_draft(
+    payload: AssetDraftCreate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     content = (payload.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail={"code": "empty_content", "message": "Content is required"})
@@ -755,32 +797,51 @@ def create_draft(payload: AssetDraftCreate, db: Session = Depends(get_db)):
         raw_source_platform=source_platform,
         raw_source_url=source_url,
         raw_metadata={"entrypoint": "assets_draft"},
+        user_id=actor.actor_id,
     )
 
 
 @router.get("/drafts", response_model=list[AssetDraftOut])
-def list_drafts(status: Optional[str] = Query("pending"), db: Session = Depends(get_db)):
+def list_drafts(
+    status: Optional[str] = Query("pending"),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     mapped_status = "pending_review" if status in {"pending", "pending_review"} else status
-    return list_asset_items(status=mapped_status, db=db)
+    return list_asset_items(status=mapped_status, db=db, actor=actor)
 
 
 @router.put("/drafts/{draft_id}", response_model=AssetDraftOut)
-def update_draft(draft_id: str, payload: AssetDraftUpdate, db: Session = Depends(get_db)):
-    return update_asset_item(draft_id, PersonalAssetItemUpdate(**payload.model_dump(exclude_unset=True)), db)
+def update_draft(
+    draft_id: str,
+    payload: AssetDraftUpdate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    return update_asset_item(draft_id, PersonalAssetItemUpdate(**payload.model_dump(exclude_unset=True)), db, actor)
 
 
 @router.post("/drafts/{draft_id}/confirm", response_model=AssetConfirmResponse)
-def confirm_draft(draft_id: str, payload: AssetConfirmRequest, db: Session = Depends(get_db)):
-    return confirm_asset_item(draft_id, payload, db)
+def confirm_draft(
+    draft_id: str,
+    payload: AssetConfirmRequest,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    return confirm_asset_item(draft_id, payload, db, actor)
 
 
 @router.post("/personal_asset_units", response_model=PersonalAssetUnitOut)
-def create_personal_asset_unit(payload: PersonalAssetUnitCreate, db: Session = Depends(get_db)):
+def create_personal_asset_unit(
+    payload: PersonalAssetUnitCreate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     asset_ids = list(dict.fromkeys(payload.asset_ids))
     assets = (
         db.query(PersonalAssetItem)
         .filter(
-            PersonalAssetItem.user_id == DEFAULT_USER_ID,
+            PersonalAssetItem.user_id == actor.actor_id,
             PersonalAssetItem.status == "confirmed",
             PersonalAssetItem.id.in_(asset_ids),
         )
@@ -806,7 +867,7 @@ def create_personal_asset_unit(payload: PersonalAssetUnitCreate, db: Session = D
         instruction=payload.instruction or "",
     )
     unit = PersonalAssetUnit(
-        user_id=DEFAULT_USER_ID,
+        user_id=actor.actor_id,
         source_asset_ids=asset_ids,
         status="pending_review",
         **data,
@@ -818,18 +879,26 @@ def create_personal_asset_unit(payload: PersonalAssetUnitCreate, db: Session = D
 
 
 @router.get("/personal_asset_units", response_model=list[PersonalAssetUnitOut])
-def list_personal_asset_units(status: Optional[str] = Query(None), db: Session = Depends(get_db)):
-    query = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.user_id == DEFAULT_USER_ID)
+def list_personal_asset_units(
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    query = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.user_id == actor.actor_id)
     if status:
         query = query.filter(PersonalAssetUnit.status == status)
     return query.order_by(PersonalAssetUnit.updated_at.desc()).all()
 
 
 @router.get("/personal_asset_units/{unit_id}", response_model=PersonalAssetUnitOut)
-def get_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
+def get_personal_asset_unit(
+    unit_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     unit = db.query(PersonalAssetUnit).filter(
         PersonalAssetUnit.id == unit_id,
-        PersonalAssetUnit.user_id == DEFAULT_USER_ID,
+        PersonalAssetUnit.user_id == actor.actor_id,
     ).first()
     if not unit:
         raise HTTPException(status_code=404, detail={"code": "personal_asset_unit_not_found", "message": "Personal asset unit not found"})
@@ -837,8 +906,13 @@ def get_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/personal_asset_units/{unit_id}", response_model=PersonalAssetUnitOut)
-def update_personal_asset_unit(unit_id: str, payload: PersonalAssetUnitUpdate, db: Session = Depends(get_db)):
-    unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == unit_id, PersonalAssetUnit.user_id == DEFAULT_USER_ID).first()
+def update_personal_asset_unit(
+    unit_id: str,
+    payload: PersonalAssetUnitUpdate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == unit_id, PersonalAssetUnit.user_id == actor.actor_id).first()
     if not unit:
         raise HTTPException(status_code=404, detail={"code": "personal_asset_unit_not_found", "message": "Personal asset unit not found"})
     if unit.status not in {"pending", "pending_review", "confirmed"}:
@@ -861,8 +935,8 @@ def update_personal_asset_unit(unit_id: str, payload: PersonalAssetUnitUpdate, d
             sync_personal_asset_unit_to_kb(
                 db,
                 unit,
-                tenant_id=DEFAULT_TENANT_ID,
-                owner_user_id=DEFAULT_USER_ID,
+                tenant_id=actor.tenant_id,
+                owner_user_id=actor.actor_id,
             )
         except Exception as exc:
             log.exception("Failed to sync edited personal asset unit to personal inbox", extra={"unit_id": unit.id})
@@ -877,8 +951,12 @@ def update_personal_asset_unit(unit_id: str, payload: PersonalAssetUnitUpdate, d
 
 
 @router.post("/personal_asset_units/{unit_id}/confirm", response_model=PersonalAssetUnitConfirmResponse)
-def confirm_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
-    unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == unit_id, PersonalAssetUnit.user_id == DEFAULT_USER_ID).first()
+def confirm_personal_asset_unit(
+    unit_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    unit = db.query(PersonalAssetUnit).filter(PersonalAssetUnit.id == unit_id, PersonalAssetUnit.user_id == actor.actor_id).first()
     if not unit:
         raise HTTPException(status_code=404, detail={"code": "personal_asset_unit_not_found", "message": "Personal asset unit not found"})
     if unit.status not in {"pending", "pending_review"}:
@@ -891,8 +969,8 @@ def confirm_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
         sync_personal_asset_unit_to_kb(
             db,
             unit,
-            tenant_id=DEFAULT_TENANT_ID,
-            owner_user_id=DEFAULT_USER_ID,
+            tenant_id=actor.tenant_id,
+            owner_user_id=actor.actor_id,
         )
     except Exception as exc:
         log.exception("Failed to sync confirmed personal asset unit to personal inbox", extra={"unit_id": unit.id})
@@ -902,7 +980,7 @@ def confirm_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
         ) from exc
     db.refresh(unit)
     try:
-        _schedule_asset_unit_entity_graph_ingestion(unit.id)
+        _schedule_asset_unit_entity_graph_ingestion(unit.id, actor.actor_id)
     except Exception:
         log.exception("Failed to schedule personal asset unit entity graph ingestion", extra={"unit_id": unit.id})
     return PersonalAssetUnitConfirmResponse(
@@ -915,19 +993,27 @@ def confirm_personal_asset_unit(unit_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[PersonalAssetOut])
-def list_assets(db: Session = Depends(get_db)):
+def list_assets(
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     return (
         db.query(PersonalAssetItem)
-        .filter(PersonalAssetItem.user_id == DEFAULT_USER_ID, PersonalAssetItem.status == "confirmed")
+        .filter(PersonalAssetItem.user_id == actor.actor_id, PersonalAssetItem.status == "confirmed")
         .order_by(PersonalAssetItem.updated_at.desc())
         .all()
     )
 
 
 @router.get("/search", response_model=list[AssetSearchResult])
-def search_assets(q: str = Query(""), limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
+def search_assets(
+    q: str = Query(""),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     q_norm = q.strip()
-    query = db.query(PersonalAssetItem).filter(PersonalAssetItem.user_id == DEFAULT_USER_ID, PersonalAssetItem.status == "confirmed")
+    query = db.query(PersonalAssetItem).filter(PersonalAssetItem.user_id == actor.actor_id, PersonalAssetItem.status == "confirmed")
     if q_norm:
         like = f"%{q_norm}%"
         query = query.filter(
@@ -947,8 +1033,13 @@ def search_assets(q: str = Query(""), limit: int = Query(10, ge=1, le=50), db: S
 
 
 @router.get("/overview", response_model=AssetOverviewOut)
-def overview_assets(q: str = Query(""), limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)):
-    results = search_assets(q=q, limit=limit, db=db)
+def overview_assets(
+    q: str = Query(""),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    results = search_assets(q=q, limit=limit, db=db, actor=actor)
     category_counts = Counter(item.category or "未分类" for item in results)
     tag_counts: Counter[str] = Counter()
     for item in results:

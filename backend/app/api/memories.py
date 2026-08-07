@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..config import settings
+from ..models.chat import ChatSession
 from ..models.memory import MemoryDraft, MemoryEntity, MemoryEntry, MemoryRelation, MemorySource, MemoryStatement, MemoryStatus
+from ..security.actor import ActorContext, get_actor_context
 from ..schemas.memory import (
     MemoryDraftConfirmOut,
     MemoryDraftCreate,
@@ -26,7 +28,6 @@ from ..services.memory_vectors import upsert_statement_vector
 from ..utils.time import local_now
 
 router = APIRouter(prefix="/memories", tags=["memories"])
-DEFAULT_USER_ID = "default-user"
 
 
 @router.get("", response_model=list[MemoryEntryOut])
@@ -34,17 +35,18 @@ def list_memories(
     memory_type: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
-    query = db.query(MemoryEntry).filter(MemoryEntry.user_id == DEFAULT_USER_ID)
+    query = db.query(MemoryEntry).filter(MemoryEntry.user_id == actor.actor_id)
     if memory_type:
         query = query.filter(MemoryEntry.memory_type == memory_type)
     return query.order_by(MemoryEntry.importance.desc(), MemoryEntry.updated_at.desc()).limit(limit).all()
 
 
-def _create_source(source_in, db: Session) -> MemorySource:
+def _create_source(source_in, db: Session, user_id: str) -> MemorySource:
     data = source_in.model_dump()
     metadata = data.pop("metadata", {})
-    source = MemorySource(user_id=DEFAULT_USER_ID, source_metadata=metadata, **data)
+    source = MemorySource(user_id=user_id, source_metadata=metadata, **data)
     db.add(source)
     return source
 
@@ -80,10 +82,10 @@ def _statement_from_draft(draft: MemoryDraft) -> MemoryStatement:
     )
 
 
-def _get_draft_or_404(draft_id: str, db: Session) -> MemoryDraft:
+def _get_draft_or_404(draft_id: str, db: Session, user_id: str) -> MemoryDraft:
     draft = (
         db.query(MemoryDraft)
-        .filter(MemoryDraft.user_id == DEFAULT_USER_ID, MemoryDraft.id == draft_id)
+        .filter(MemoryDraft.user_id == user_id, MemoryDraft.id == draft_id)
         .first()
     )
     if draft is None:
@@ -150,7 +152,13 @@ def _index_statement_vector(statement: MemoryStatement) -> None:
 def _link_statement_entities(db: Session, statement: MemoryStatement) -> None:
     """确认后抽取核心实体并关联；失败不阻塞审阅。"""
     try:
-        extract_and_link_entities(db, content=statement.content, source_id=statement.id, statement_id=statement.id)
+        extract_and_link_entities(
+            db,
+            content=statement.content,
+            source_id=statement.id,
+            statement_id=statement.id,
+            user_id=statement.user_id,
+        )
     except Exception:
         pass
 
@@ -160,8 +168,9 @@ def list_memory_drafts(
     status: Optional[str] = Query(None),
     draft_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
-    query = db.query(MemoryDraft).filter(MemoryDraft.user_id == DEFAULT_USER_ID)
+    query = db.query(MemoryDraft).filter(MemoryDraft.user_id == actor.actor_id)
     if status:
         query = query.filter(MemoryDraft.status == status)
     if draft_type:
@@ -174,12 +183,13 @@ def list_memory_drafts(
 def count_memory_drafts(
     status: str = Query("draft"),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
     """Return count of drafts (default: draft status) for badge display."""
     count = (
         db.query(MemoryDraft)
         .filter(
-            MemoryDraft.user_id == DEFAULT_USER_ID,
+            MemoryDraft.user_id == actor.actor_id,
             MemoryDraft.status == status,
         )
         .count()
@@ -187,7 +197,7 @@ def count_memory_drafts(
     risks = (
         db.query(MemoryDraft.risk_level, func.count())
         .filter(
-            MemoryDraft.user_id == DEFAULT_USER_ID,
+            MemoryDraft.user_id == actor.actor_id,
             MemoryDraft.status == status,
         )
         .group_by(MemoryDraft.risk_level)
@@ -200,17 +210,21 @@ def count_memory_drafts(
 
 
 @router.post("/drafts", response_model=MemoryDraftOut)
-def create_memory_draft(payload: MemoryDraftCreate, db: Session = Depends(get_db)):
+def create_memory_draft(
+    payload: MemoryDraftCreate,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     # Semantic dedup: check if similar memory already exists
     content = payload.payload.get("content") if isinstance(payload.payload, dict) else None
     if isinstance(content, str) and content.strip():
         from backend.app.services.memory_extraction import _check_semantic_duplicate
-        is_dup, _ = _check_semantic_duplicate(db, content.strip())
+        is_dup, _ = _check_semantic_duplicate(db, content.strip(), user_id=actor.actor_id)
         if is_dup:
             raise HTTPException(status_code=409, detail="Similar memory already exists")
-    source = _create_source(payload.source, db) if payload.source else None
+    source = _create_source(payload.source, db, actor.actor_id) if payload.source else None
     draft = MemoryDraft(
-        user_id=DEFAULT_USER_ID,
+        user_id=actor.actor_id,
         draft_type=payload.draft_type,
         payload=payload.payload,
         decision_hint=payload.decision_hint,
@@ -230,7 +244,12 @@ def extract_memory_from_session(
     session_id: str,
     payload: MemoryExtractionRequest | None = None,
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
+    # Only the session owner may trigger extraction on it.
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session is None or session.user_id != actor.actor_id:
+        raise HTTPException(status_code=404, detail="Chat session not found")
     limit = payload.limit if payload else 20
     result = extract_session_memories(db, session_id=session_id, limit=limit)
     drafts = (
@@ -253,8 +272,12 @@ def extract_memory_from_session(
 
 
 @router.post("/drafts/{draft_id}/confirm", response_model=MemoryDraftConfirmOut)
-def confirm_memory_draft(draft_id: str, db: Session = Depends(get_db)):
-    draft = _get_draft_or_404(draft_id, db)
+def confirm_memory_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    draft = _get_draft_or_404(draft_id, db, actor.actor_id)
     _ensure_draft_reviewable(draft)
     statement = _statement_from_draft(draft)
     draft.status = MemoryStatus.CONFIRMED
@@ -270,8 +293,12 @@ def confirm_memory_draft(draft_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/drafts/{draft_id}/reject", response_model=MemoryDraftOut)
-def reject_memory_draft(draft_id: str, db: Session = Depends(get_db)):
-    draft = _get_draft_or_404(draft_id, db)
+def reject_memory_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    draft = _get_draft_or_404(draft_id, db, actor.actor_id)
     _ensure_draft_reviewable(draft)
     draft.status = MemoryStatus.REJECTED
     draft.reviewed_at = local_now()
@@ -285,13 +312,14 @@ def supersede_memory_draft(
     draft_id: str,
     payload: MemorySupersedePayload,
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
-    draft = _get_draft_or_404(draft_id, db)
+    draft = _get_draft_or_404(draft_id, db, actor.actor_id)
     _ensure_draft_reviewable(draft)
     old_statement = (
         db.query(MemoryStatement)
         .filter(
-            MemoryStatement.user_id == DEFAULT_USER_ID,
+            MemoryStatement.user_id == actor.actor_id,
             MemoryStatement.id == payload.superseded_statement_id,
         )
         .first()
@@ -327,11 +355,12 @@ def trigger_scheduled_extraction():
 def list_memory_statements(
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
     statements = (
         db.query(MemoryStatement)
         .filter(
-            MemoryStatement.user_id == DEFAULT_USER_ID,
+            MemoryStatement.user_id == actor.actor_id,
             MemoryStatement.status == MemoryStatus.CONFIRMED,
         )
         .order_by(MemoryStatement.importance.desc(), MemoryStatement.updated_at.desc())
@@ -345,10 +374,11 @@ def list_memory_statements(
 def list_memory_entities(
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
 ):
     entities = (
         db.query(MemoryEntity)
-        .filter(MemoryEntity.user_id == DEFAULT_USER_ID, MemoryEntity.status == MemoryStatus.CONFIRMED)
+        .filter(MemoryEntity.user_id == actor.actor_id, MemoryEntity.status == MemoryStatus.CONFIRMED)
         .order_by(MemoryEntity.mention_count.desc(), MemoryEntity.updated_at.desc())
         .limit(limit)
         .all()
@@ -357,7 +387,7 @@ def list_memory_entities(
     relations = (
         db.query(MemoryRelation)
         .filter(
-            MemoryRelation.user_id == DEFAULT_USER_ID,
+            MemoryRelation.user_id == actor.actor_id,
             MemoryRelation.status == MemoryStatus.CONFIRMED,
             MemoryRelation.subject_entity_id.in_(entity_ids),
             MemoryRelation.object_entity_id.in_(entity_ids),
@@ -391,15 +421,22 @@ def list_memory_entities(
 
 
 @router.post("/reflect", response_model=dict)
-def trigger_reflection(db: Session = Depends(get_db)):
+def trigger_reflection(
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     """手动触发记忆反思：LLM 归纳已确认记忆为高层洞察 Insight。"""
-    result = run_reflection(db)
+    result = run_reflection(db, user_id=actor.actor_id)
     return result
 
 
 @router.get("/insights", response_model=list[dict])
-def get_insights(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
-    insights = list_insights(db, limit=limit)
+def get_insights(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
+    insights = list_insights(db, user_id=actor.actor_id, limit=limit)
     return [
         {
             "id": i.id,
@@ -415,12 +452,18 @@ def get_insights(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get
 
 
 @router.get("/consolidate/preview", response_model=dict)
-def preview_consolidation(db: Session = Depends(get_db)):
+def preview_consolidation(
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     """预览巩固候选：展示将提升重要度的高频记忆，不修改数据。"""
-    return consolidation_candidates(db)
+    return consolidation_candidates(db, user_id=actor.actor_id)
 
 
 @router.post("/consolidate", response_model=dict)
-def trigger_consolidation(db: Session = Depends(get_db)):
+def trigger_consolidation(
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor_context),
+):
     """手动触发巩固：高频被召回但重要度偏低的记忆提升重要度。"""
-    return run_consolidation(db)
+    return run_consolidation(db, user_id=actor.actor_id)
