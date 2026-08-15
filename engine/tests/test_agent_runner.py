@@ -320,6 +320,46 @@ def test_runner_rejects_unknown_checkpoint_phase():
     assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
 
 
+def test_runner_rejects_completed_checkpoint_resume():
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "phase": "completed",
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+            {"type": "ai", "content": "Done.", "tool_calls": []},
+        ],
+        "tool_state": {},
+    }
+    class CountingModel:
+        def __init__(self):
+            self.calls = 0
+
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            self.calls += 1
+            return FakeToolCall(content="Should not resume")
+
+    model = CountingModel()
+
+    lines = list(
+        LangChainAgentRunner(
+            model=model,
+            tools=[FakeEvidenceTool()],
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+    events = [json.loads(line) for line in lines]
+
+    assert [event["type"] for event in events] == ["error", "done"]
+    assert "completed" in events[0]["data"]
+    assert model.calls == 0
+
+
 @pytest.mark.parametrize("iteration", ["2", True, -10])
 def test_runner_checkpoint_state_defaults_malformed_scalar_fields(iteration):
     restored = runner_mod._state_from_checkpoint(

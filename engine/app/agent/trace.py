@@ -226,6 +226,60 @@ class AgentTraceRecorder:
                         quoted(str(exc), limit=300),
                     )
 
+    @classmethod
+    def for_existing_trace(
+        cls,
+        trace_id: str,
+        *,
+        session_factory: Callable[[], Any] = _default_session_factory,
+    ) -> "AgentTraceRecorder | None":
+        db = None
+        try:
+            from backend.app.models import AgentTrace, AgentTraceStep
+
+            db = session_factory()
+            trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).first()
+            if trace is None:
+                return None
+
+            last_step = (
+                db.query(AgentTraceStep)
+                .filter(AgentTraceStep.trace_id == trace_id)
+                .order_by(AgentTraceStep.step_index.desc())
+                .first()
+            )
+            recorder = cls(
+                session_id=trace.session_id,
+                user_message_id=trace.user_message_id,
+                user_query=str(trace.user_query or ""),
+                model=str(trace.model or ""),
+                session_factory=session_factory,
+            )
+            recorder._trace_id = trace_id
+            recorder._enabled = True
+            recorder._next_step_index = (
+                int(last_step.step_index) + 1
+                if last_step is not None and isinstance(last_step.step_index, int)
+                else 0
+            )
+            return recorder
+        except Exception as exc:
+            logger.warning(
+                "[agent.trace] attach existing trace failed trace_id=%s error=%s",
+                quoted(trace_id, limit=80),
+                quoted(str(exc), limit=300),
+            )
+            return None
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception as exc:
+                    logger.warning(
+                        "[agent.trace] attach existing trace close failed error=%s",
+                        quoted(str(exc), limit=300),
+                    )
+
     def find_successful_tool_result(self, *, tool_name: str, args: Any) -> dict[str, Any] | None:
         if not self._enabled or not self._trace_id:
             return None

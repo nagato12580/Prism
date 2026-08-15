@@ -1476,6 +1476,11 @@ class LangChainAgentRunner:
             resume_phase,
             len(messages),
         )
+        if resume_phase == "completed":
+            yield error_event("Cannot resume agent run: checkpoint is already completed.")
+            yield done_event()
+            return
+
         if (
             resume_phase in {"model_response", "pending_tools"}
             and messages

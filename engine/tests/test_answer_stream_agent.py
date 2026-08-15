@@ -250,6 +250,91 @@ def test_answer_stream_uses_existing_trace_checkpoint_on_resume(monkeypatch):
     assert json.loads(lines[0])["data"] == "resumed"
 
 
+def test_answer_stream_resume_infers_tool_groups_from_checkpoint(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+            {
+                "type": "ai",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-knowledge",
+                        "name": "knowledge_search",
+                        "args": {"query": "How?"},
+                    }
+                ],
+            },
+        ],
+        "tool_state": {},
+    }
+    captured = {}
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            return checkpoint
+
+    class FakeRunner:
+        def resume_stream(self, loaded_checkpoint, trace_recorder=None):
+            yield json.dumps({"type": "done", "data": {}}) + "\n"
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return FakeRunner()
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", build)
+
+    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+
+    assert [json.loads(line)["type"] for line in lines] == ["done"]
+    assert "knowledge" in captured["tool_groups"]
+    assert captured["tool_groups"] != []
+
+
+def test_answer_stream_resume_attaches_existing_trace_recorder(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [{"type": "human", "content": "How?"}],
+        "tool_state": {},
+    }
+    bound_recorder = object()
+    captured = {}
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            return checkpoint
+
+        @classmethod
+        def for_existing_trace(cls, trace_id):
+            captured["attached_trace_id"] = trace_id
+            return bound_recorder
+
+    class FakeRunner:
+        def resume_stream(self, loaded_checkpoint, trace_recorder=None):
+            captured["trace_recorder"] = trace_recorder
+            yield json.dumps({"type": "done", "data": {}}) + "\n"
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+
+    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+
+    assert [json.loads(line)["type"] for line in lines] == ["done"]
+    assert captured["attached_trace_id"] == "trace-resume"
+    assert captured["trace_recorder"] is bound_recorder
+
+
 def test_answer_stream_resume_bypasses_kb_selection_preflight(monkeypatch):
     checkpoint = {
         "version": 1,
@@ -313,6 +398,32 @@ def test_answer_stream_resume_missing_checkpoint_emits_done(monkeypatch):
     )
 
     lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-missing"))
+
+    assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
+
+
+def test_answer_stream_resume_exception_emits_done(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [{"type": "human", "content": "How?"}],
+        "tool_state": {},
+    }
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            return checkpoint
+
+    def build(**kwargs):
+        raise RuntimeError("runner boom")
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", build)
+
+    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
 
     assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
 

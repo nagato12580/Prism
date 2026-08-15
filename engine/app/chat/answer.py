@@ -690,6 +690,39 @@ def _recent_turn_history(history: list[dict[str, Any]], turns: int) -> list[dict
     return list(reversed(selected))
 
 
+def _tool_groups_for_resume_checkpoint(checkpoint: Any) -> list[str]:
+    if not isinstance(checkpoint, dict):
+        return []
+    messages = checkpoint.get("messages")
+    if not isinstance(messages, list):
+        return []
+
+    tool_to_group: dict[str, str] = {}
+    for group, group_def in TOOL_GROUPS.items():
+        tools = group_def.get("tools") if isinstance(group_def, dict) else None
+        if not isinstance(tools, list):
+            continue
+        for tool_name in tools:
+            if isinstance(tool_name, str) and tool_name not in COMMON_TOOLS:
+                tool_to_group[tool_name] = group
+
+    groups: set[str] = set()
+    for message in messages:
+        if not isinstance(message, dict) or message.get("type") != "ai":
+            continue
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            group = tool_to_group.get(tool_call.get("name"))
+            if group is not None:
+                groups.add(group)
+
+    return [group for group in TOOL_GROUPS if group in groups]
+
+
 def answer_stream(
     query: str,
     history: list[dict] | None = None,
@@ -722,6 +755,23 @@ def answer_stream(
                 yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
                 yield done_event()
                 return
+            tool_groups = _tool_groups_for_resume_checkpoint(checkpoint)
+            trace_recorder = None
+            attach_recorder = getattr(AgentTraceRecorder, "for_existing_trace", None)
+            if callable(attach_recorder):
+                try:
+                    trace_recorder = attach_recorder(resume_trace_id)
+                    if trace_recorder is None:
+                        logger.warning(
+                            "[chat] resume_trace_attach_skipped trace_id=%s",
+                            resume_trace_id,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[chat] resume_trace_attach_failed trace_id=%s error=%s",
+                        resume_trace_id,
+                        quoted(str(exc), limit=300),
+                    )
             runner = build_agent_runner(
                 topic_id=topic_id,
                 source_types=source_types,
@@ -734,10 +784,10 @@ def answer_stream(
                 knowledge_scope=knowledge_scope,
                 db_session=db_session,
                 retrieval_service=retrieval_service,
-                tool_groups=[],
+                tool_groups=tool_groups,
             )
             logger.info("[chat] runner_ready")
-            yield from runner.resume_stream(checkpoint, trace_recorder=None)
+            yield from runner.resume_stream(checkpoint, trace_recorder=trace_recorder)
             logger.info("[chat] resume_stream_complete trace_id=%s", resume_trace_id)
             return
         except Exception as exc:
@@ -746,6 +796,7 @@ def answer_stream(
                 quoted(str(exc), limit=300),
             )
             yield error_event(str(exc))
+            yield done_event()
             return
         finally:
             if db_session is not None:

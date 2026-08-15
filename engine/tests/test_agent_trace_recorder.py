@@ -141,6 +141,76 @@ def test_agent_trace_recorder_saves_and_loads_checkpoint(session_factory):
         db.close()
 
 
+def test_agent_trace_recorder_attaches_existing_trace(session_factory):
+    recorder = AgentTraceRecorder(
+        session_id="session-attach",
+        user_message_id="message-attach",
+        user_query="resume existing trace",
+        model="test-model",
+        session_factory=session_factory,
+    )
+    trace_id = recorder.start()
+    dedupe_key = AgentTraceRecorder.tool_dedupe_key(
+        trace_id=trace_id,
+        tool_name="knowledge_search",
+        args={"query": "same"},
+    )
+    recorder.record_step(step_type="model_response", output_json={"content": "thinking"})
+    recorder.record_step(
+        step_type="tool_result",
+        tool_name="knowledge_search",
+        tool_call_id="call-existing",
+        dedupe_key=dedupe_key,
+        input_json={"args": {"query": "same"}},
+        output_json={"status": "success", "payload": {"summary": "cached"}},
+        status="success",
+    )
+
+    attached = AgentTraceRecorder.for_existing_trace(
+        trace_id,
+        session_factory=session_factory,
+    )
+
+    assert attached is not None
+    assert attached.trace_id == trace_id
+    assert attached.session_id == "session-attach"
+    assert attached.user_message_id == "message-attach"
+    assert attached.user_query == "resume existing trace"
+    assert attached.model == "test-model"
+    assert attached.record_step(step_type="model_response", output_json={"content": "resumed"})
+    assert attached.find_successful_tool_result(
+        tool_name="knowledge_search",
+        args={"query": "same"},
+    ) == {
+        "dedupe_key": dedupe_key,
+        "output_json": {"status": "success", "payload": {"summary": "cached"}},
+    }
+    assert attached.save_checkpoint(
+        {
+            "version": 1,
+            "query": "resume existing trace",
+            "iteration": 3,
+            "messages": [{"type": "human", "content": "resume existing trace"}],
+            "tool_state": {},
+        }
+    ) is True
+
+    db = session_factory()
+    try:
+        step_indexes = [
+            step.step_index
+            for step in db.query(AgentTraceStep)
+            .filter(AgentTraceStep.trace_id == trace_id)
+            .order_by(AgentTraceStep.step_index)
+            .all()
+        ]
+        trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).one()
+        assert step_indexes == [0, 1, 2]
+        assert trace.last_event_seq == 1
+    finally:
+        db.close()
+
+
 def test_agent_trace_recorder_reuses_successful_tool_result_by_dedupe_key(session_factory):
     recorder = AgentTraceRecorder(
         session_id="session-dedupe",
