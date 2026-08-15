@@ -690,12 +690,12 @@ def _recent_turn_history(history: list[dict[str, Any]], turns: int) -> list[dict
     return list(reversed(selected))
 
 
-def _tool_groups_for_resume_checkpoint(checkpoint: Any) -> list[str]:
+def _resume_tool_selection_from_checkpoint(checkpoint: Any) -> tuple[list[str], bool]:
     if not isinstance(checkpoint, dict):
-        return []
+        return [], False
     messages = checkpoint.get("messages")
     if not isinstance(messages, list):
-        return []
+        return [], False
 
     tool_to_group: dict[str, str] = {}
     for group, group_def in TOOL_GROUPS.items():
@@ -707,6 +707,7 @@ def _tool_groups_for_resume_checkpoint(checkpoint: Any) -> list[str]:
                 tool_to_group[tool_name] = group
 
     groups: set[str] = set()
+    has_deep_knowledge_search = False
     for message in messages:
         if not isinstance(message, dict) or message.get("type") != "ai":
             continue
@@ -716,11 +717,18 @@ def _tool_groups_for_resume_checkpoint(checkpoint: Any) -> list[str]:
         for tool_call in tool_calls:
             if not isinstance(tool_call, dict):
                 continue
-            group = tool_to_group.get(tool_call.get("name"))
+            tool_name = tool_call.get("name")
+            if tool_name == "deep_knowledge_search":
+                has_deep_knowledge_search = True
+            group = tool_to_group.get(tool_name)
             if group is not None:
                 groups.add(group)
 
-    return [group for group in TOOL_GROUPS if group in groups]
+    return [group for group in TOOL_GROUPS if group in groups], has_deep_knowledge_search
+
+
+def _tool_groups_for_resume_checkpoint(checkpoint: Any) -> list[str]:
+    return _resume_tool_selection_from_checkpoint(checkpoint)[0]
 
 
 def answer_stream(
@@ -755,7 +763,7 @@ def answer_stream(
                 yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
                 yield done_event()
                 return
-            tool_groups = _tool_groups_for_resume_checkpoint(checkpoint)
+            tool_groups, checkpoint_has_deep_search = _resume_tool_selection_from_checkpoint(checkpoint)
             trace_recorder = None
             attach_recorder = getattr(AgentTraceRecorder, "for_existing_trace", None)
             if callable(attach_recorder):
@@ -776,7 +784,7 @@ def answer_stream(
                 topic_id=topic_id,
                 source_types=source_types,
                 clarify_depth=clarify_depth,
-                deep_search_enabled=deep_search_enabled,
+                deep_search_enabled=deep_search_enabled or checkpoint_has_deep_search,
                 deep_search_depth=deep_search_depth,
                 deep_search_top_k=deep_search_top_k,
                 graph_hops=graph_hops,

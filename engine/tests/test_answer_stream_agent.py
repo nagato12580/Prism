@@ -298,6 +298,54 @@ def test_answer_stream_resume_infers_tool_groups_from_checkpoint(monkeypatch):
     assert captured["tool_groups"] != []
 
 
+def test_answer_stream_resume_enables_deep_search_from_checkpoint(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+            {
+                "type": "ai",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-deep-knowledge",
+                        "name": "deep_knowledge_search",
+                        "args": {"query": "How?"},
+                    }
+                ],
+            },
+        ],
+        "tool_state": {},
+    }
+    captured = {}
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            return checkpoint
+
+    class FakeRunner:
+        def resume_stream(self, loaded_checkpoint, trace_recorder=None):
+            yield json.dumps({"type": "done", "data": {}}) + "\n"
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return FakeRunner()
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", build)
+
+    lines = list(answer.answer_stream("continue", [], resume_trace_id="trace-deep"))
+
+    assert [json.loads(line)["type"] for line in lines] == ["done"]
+    assert "knowledge" in captured["tool_groups"]
+    assert captured["deep_search_enabled"] is True
+
+
 def test_answer_stream_resume_attaches_existing_trace_recorder(monkeypatch):
     checkpoint = {
         "version": 1,
