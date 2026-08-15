@@ -17,6 +17,7 @@ class AgentTrace(Base):
     __table_args__ = (
         Index("ix_agent_trace_session_started", "session_id", "started_at"),
         Index("ix_agent_trace_assistant_message", "assistant_message_id"),
+        Index("ix_agent_trace_resume_status_started_at", "resume_status", "started_at"),
     )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
@@ -29,6 +30,10 @@ class AgentTrace(Base):
     started_at = Column(DateTime, default=local_now)
     ended_at = Column(DateTime, nullable=True)
     trace_json = Column(JSON, nullable=True, default=None)
+    checkpoint_json = Column(JSON, nullable=True, default=None)
+    resume_status = Column(String(32), default="none", index=True)
+    last_event_seq = Column(Integer, default=0)
+    error_json = Column(JSON, nullable=True, default=None)
 
     steps = relationship(
         "AgentTraceStep",
@@ -43,6 +48,7 @@ class AgentTraceStep(Base):
     __table_args__ = (
         Index("ix_agent_trace_step_trace_index", "trace_id", "step_index"),
         Index("ix_agent_trace_step_tool_call", "tool_call_id"),
+        Index("ix_agent_trace_step_dedupe", "trace_id", "dedupe_key", "step_type", "status"),
     )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
@@ -51,6 +57,7 @@ class AgentTraceStep(Base):
     step_type = Column(String(64), nullable=False, index=True)
     tool_name = Column(String(128), nullable=True, default=None)
     tool_call_id = Column(String(128), nullable=True, default=None)
+    dedupe_key = Column(String(64), nullable=True, default=None, index=True)
     input_json = Column(JSON, nullable=True, default=None)
     output_json = Column(JSON, nullable=True, default=None)
     status = Column(String(32), default="success", index=True)

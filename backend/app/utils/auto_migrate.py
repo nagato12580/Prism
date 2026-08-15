@@ -25,6 +25,7 @@ def auto_migrate(Base, engine) -> None:
     """Incrementally create missing tables, columns, and known constraints."""
     inspector = inspect(engine)
     existing_tables = inspector.get_table_names()
+    skipped_indexes = []
 
     if "knowledge_draft" in existing_tables and "personal_asset_unit" not in existing_tables:
         print("[auto_migrate] Rename table: knowledge_draft -> personal_asset_unit")
@@ -92,6 +93,41 @@ def auto_migrate(Base, engine) -> None:
                     conn.commit()
                 except Exception as exc:
                     print(f"[auto_migrate] Skip constraint {constraint.name}: {exc}")
+
+        existing_index_names = _get_existing_index_names(inspector, table_name)
+        for index in table_obj.indexes:
+            if index.unique:
+                continue
+            if not index.name:
+                continue
+            if index.name in existing_index_names:
+                continue
+            columns = [f"`{column.name}`" for column in index.columns]
+            if not columns:
+                continue
+            alter_sql = (
+                f"ALTER TABLE `{table_name}` "
+                f"ADD INDEX `{index.name}` ({', '.join(columns)})"
+            )
+            print(f"[auto_migrate] Add index: {table_name}.{index.name}")
+            with engine.connect() as conn:
+                try:
+                    conn.execute(text(alter_sql))
+                    conn.commit()
+                except Exception as exc:
+                    skipped_index = f"{table_name}.{index.name}"
+                    skipped_indexes.append(skipped_index)
+                    logger.warning(
+                        "Skipped index creation during auto-migrate: %s",
+                        skipped_index,
+                        exc_info=exc,
+                    )
+                    print(f"[auto_migrate] Skip index {index.name}: {exc}")
+
+    if skipped_indexes:
+        summary = ", ".join(skipped_indexes)
+        print(f"[auto_migrate] Skipped indexes: {summary}")
+        logger.warning("Skipped indexes during auto-migrate: %s", summary)
 
     if _is_application_engine(engine):
         ensure_personal_inbox_backfill()
@@ -163,9 +199,29 @@ def _is_application_engine(engine) -> bool:
     return engine is application_engine
 
 
+def _get_existing_index_names(inspector, table_name: str) -> set[str]:
+    if not hasattr(inspector, "get_indexes"):
+        return set()
+    return {
+        item.get("name")
+        for item in inspector.get_indexes(table_name)
+        if item.get("name")
+    }
+
+
 def _infer_default(col):
     """Infer ADD COLUMN defaults for non-nullable MySQL columns."""
     col_type = col.type
+    if isinstance(col_type, Text):
+        return ""
+    if col.default is not None and getattr(col.default, "is_scalar", False):
+        value = col.default.arg
+        if isinstance(value, str):
+            return f" DEFAULT '{value.replace("'", "''")}'"
+        if isinstance(value, bool):
+            return f" DEFAULT {int(value)}"
+        if isinstance(value, (int, float)):
+            return f" DEFAULT {value}"
     if isinstance(col_type, (Integer, Boolean)):
         return " DEFAULT 0"
     if isinstance(col_type, Float):

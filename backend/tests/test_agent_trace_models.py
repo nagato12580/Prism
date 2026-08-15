@@ -9,6 +9,16 @@ def test_agent_trace_models_persist(db_session):
         user_query="What is this chunk?",
         status="running",
         model="test-model",
+        resume_status="checkpointed",
+        last_event_seq=4,
+        checkpoint_json={
+            "version": 1,
+            "query": "What is this chunk?",
+            "iteration": 1,
+            "messages": [],
+            "tool_state": {"timed_out_tools": []},
+        },
+        error_json={"code": "CLIENT_DISCONNECT"},
     )
     db_session.add(trace)
     db_session.flush()
@@ -23,6 +33,7 @@ def test_agent_trace_models_persist(db_session):
         output_json={"status": "success", "summary": "found"},
         status="success",
         latency_ms=12,
+        dedupe_key="abc123",
     )
     db_session.add(step)
     db_session.flush()
@@ -55,8 +66,17 @@ def test_agent_trace_models_persist(db_session):
     assert loaded.steps[0].evidence_items[0].chunk_id == "chunk-1"
     assert loaded.steps[0].evidence_items[0].metadata_json["chunk_index"] == 3
     assert loaded.steps[0].evidence_items[0].metadata_json["graph_explain"]["evidence_type"] == "INFERRED"
+    assert loaded.resume_status == "checkpointed"
+    assert loaded.last_event_seq == 4
+    assert loaded.checkpoint_json["version"] == 1
+    assert loaded.error_json["code"] == "CLIENT_DISCONNECT"
 
     exported = export_trace(db_session, trace.id)
+    assert exported["resume_status"] == "checkpointed"
+    assert exported["last_event_seq"] == 4
+    assert exported["checkpoint"]["version"] == 1
+    assert exported["error"]["code"] == "CLIENT_DISCONNECT"
+    assert exported["steps"][0]["dedupe_key"] == "abc123"
     metadata = exported["steps"][0]["evidence_items"][0]["metadata"]
     assert metadata["graph_path"][0]["node_id"] == "e1"
     assert metadata["graph_explain"]["why"] == "expanded from seed"

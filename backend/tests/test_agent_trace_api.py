@@ -71,6 +71,11 @@ def _seed_trace(db_session, *, status="success", session_id="session-1", user_me
     return trace.id
 
 
+def _seed_chat_session(db_session, session_id="session-1", *, user_id="default-user"):
+    db_session.add(ChatSession(id=session_id, user_id=user_id, title="Trace session"))
+    db_session.commit()
+
+
 def test_bind_trace_message(client, db_session):
     trace_id = _seed_trace(db_session)
     db_session.add(ChatSession(id="session-1", title="Trace session"))
@@ -258,13 +263,19 @@ def test_bind_trace_message_is_idempotent_for_same_message(client, db_session):
 
 def test_export_trace(client, db_session):
     trace_id = _seed_trace(db_session)
+    _seed_chat_session(db_session)
 
     resp = client.get(f"/api/v1/traces/{trace_id}/export")
 
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["trace_id"] == trace_id
+    assert payload["resume_status"] == "none"
+    assert payload["last_event_seq"] == 0
+    assert payload["checkpoint"] is None
+    assert payload["error"] is None
     assert payload["steps"][0]["tool_name"] == "raw_document_search"
+    assert payload["steps"][0]["dedupe_key"] is None
     assert payload["steps"][0]["evidence_items"][0]["chunk_id"] == "chunk-1"
 
 
@@ -283,6 +294,7 @@ def test_export_session_traces_orders_runs_and_includes_steps(client, db_session
         status="error",
     )
     _seed_trace(db_session, session_id="session-2", user_message_id="other-user", query="other")
+    _seed_chat_session(db_session, "session-1")
 
     resp = client.get("/api/v1/traces/sessions/session-1/export")
 
@@ -298,5 +310,5 @@ def test_export_session_traces_orders_runs_and_includes_steps(client, db_session
 def test_export_session_traces_returns_empty_trace_list_for_unknown_session(client):
     resp = client.get("/api/v1/traces/sessions/missing/export")
 
-    assert resp.status_code == 200
-    assert resp.json() == {"session_id": "missing", "traces": []}
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "session not found"

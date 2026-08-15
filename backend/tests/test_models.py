@@ -6,6 +6,8 @@ from sqlalchemy.dialects import mysql
 
 from backend.app.database import Base
 from backend.app.models import (
+    AgentTrace,
+    AgentTraceStep,
     ChatMessage,
     ChatSession,
     JobStatus,
@@ -372,10 +374,127 @@ def test_auto_migrate_adds_missing_columns_without_string_compile_error(monkeypa
 
 
 def test_auto_migrate_does_not_add_default_to_text_columns():
+    from backend.app.models import AgentTrace
     from backend.app.models.knowledge_item import KnowledgeFile
+
     description_column = KnowledgeFile.__table__.columns["description"]
+    user_query_column = AgentTrace.__table__.columns["user_query"]
 
     assert auto_migrate_module._infer_default(description_column) == ""
+    assert auto_migrate_module._infer_default(user_query_column) == ""
+
+
+def test_auto_migrate_adds_missing_agent_trace_indexes(monkeypatch):
+    executed_sql = []
+
+    class FakeInspector:
+        def get_table_names(self):
+            return list(Base.metadata.tables)
+
+        def get_columns(self, table_name):
+            table = Base.metadata.tables[table_name]
+            return [{"name": column.name, "type": column.type} for column in table.columns]
+
+        def get_unique_constraints(self, table_name):
+            return []
+
+        def get_indexes(self, table_name):
+            if table_name in {"agent_trace", "agent_trace_step"}:
+                return []
+            table = Base.metadata.tables[table_name]
+            return [{"name": index.name} for index in table.indexes if index.name]
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, statement):
+            executed_sql.append(str(statement))
+
+        def commit(self):
+            pass
+
+    class FakeEngine:
+        dialect = mysql.dialect()
+
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(auto_migrate_module, "inspect", lambda engine: FakeInspector())
+
+    auto_migrate_module.auto_migrate(Base, FakeEngine())
+
+    expected_index_names = {
+        "ix_agent_trace_resume_status",
+        "ix_agent_trace_resume_status_started_at",
+        "ix_agent_trace_step_dedupe_key",
+        "ix_agent_trace_step_dedupe",
+    }
+    index_sql = [sql for sql in executed_sql if " ADD INDEX " in sql]
+    for index_name in expected_index_names:
+        assert any(f"ADD INDEX `{index_name}`" in sql for sql in index_sql)
+
+
+def test_auto_migrate_reports_skipped_index_creation(monkeypatch, caplog, capsys):
+    class FakeInspector:
+        def get_table_names(self):
+            return list(Base.metadata.tables)
+
+        def get_columns(self, table_name):
+            table = Base.metadata.tables[table_name]
+            return [{"name": column.name, "type": column.type} for column in table.columns]
+
+        def get_unique_constraints(self, table_name):
+            return []
+
+        def get_indexes(self, table_name):
+            if table_name in {"agent_trace", "agent_trace_step"}:
+                return []
+            table = Base.metadata.tables[table_name]
+            return [{"name": index.name} for index in table.indexes if index.name]
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, statement):
+            sql = str(statement)
+            if " ADD INDEX " in sql:
+                raise RuntimeError("index failed")
+
+        def commit(self):
+            pass
+
+    class FakeEngine:
+        dialect = mysql.dialect()
+
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(auto_migrate_module, "inspect", lambda engine: FakeInspector())
+
+    caplog.set_level("WARNING", logger=auto_migrate_module.logger.name)
+    auto_migrate_module.auto_migrate(Base, FakeEngine())
+
+    output = capsys.readouterr().out
+    assert "Skipped indexes:" in output
+    assert "agent_trace.ix_agent_trace_resume_status" in output
+    assert "agent_trace.ix_agent_trace_resume_status" in caplog.text
+    assert "index failed" in caplog.text
+
+
+def test_auto_migrate_uses_explicit_string_default_for_resume_status():
+    resume_status_column = AgentTrace.__table__.columns["resume_status"]
+    generic_string_column = AgentTraceStep.__table__.columns["tool_name"]
+
+    assert auto_migrate_module._infer_default(resume_status_column) == " DEFAULT 'none'"
+    assert auto_migrate_module._infer_default(generic_string_column) == " DEFAULT ''"
 
 
 def test_auto_migrate_upgrades_existing_text_columns_to_mediumtext(monkeypatch):
