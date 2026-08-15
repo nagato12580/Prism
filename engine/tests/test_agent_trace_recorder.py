@@ -211,6 +211,43 @@ def test_agent_trace_recorder_attaches_existing_trace(session_factory):
         db.close()
 
 
+def test_agent_trace_recorder_attach_requires_matching_resume_owner(session_factory):
+    recorder = AgentTraceRecorder(
+        session_id="session-a",
+        user_message_id="user-a",
+        user_query="resume owner check",
+        model="test-model",
+        session_factory=session_factory,
+    )
+    trace_id = recorder.start()
+    recorder.record_step(step_type="model_response", output_json={"content": "thinking"})
+
+    mismatched = AgentTraceRecorder.for_existing_trace(
+        trace_id,
+        session_id="session-b",
+        session_factory=session_factory,
+    )
+    matched = AgentTraceRecorder.for_existing_trace(
+        trace_id,
+        session_id="session-a",
+        user_message_id="user-a",
+        session_factory=session_factory,
+    )
+    recorder.finish("success")
+    completed = AgentTraceRecorder.for_existing_trace(
+        trace_id,
+        session_id="session-a",
+        user_message_id="user-a",
+        session_factory=session_factory,
+    )
+
+    assert mismatched is None
+    assert matched is not None
+    assert matched.trace_id == trace_id
+    assert matched._next_step_index == 1
+    assert completed is None
+
+
 def test_agent_trace_recorder_reuses_successful_tool_result_by_dedupe_key(session_factory):
     recorder = AgentTraceRecorder(
         session_id="session-dedupe",

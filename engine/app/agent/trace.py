@@ -9,7 +9,7 @@ import json
 from typing import Any, Callable
 from uuid import UUID
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.utils.time import local_now
@@ -198,6 +198,8 @@ class AgentTraceRecorder:
         cls,
         trace_id: str,
         *,
+        session_id: str | None = None,
+        user_message_id: str | None = None,
         session_factory: Callable[[], Any] = _default_session_factory,
     ) -> dict[str, Any] | None:
         db = None
@@ -207,6 +209,10 @@ class AgentTraceRecorder:
             db = session_factory()
             trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).first()
             if trace is None or trace.status not in {"running", "error"}:
+                return None
+            if session_id is not None and trace.session_id != session_id:
+                return None
+            if user_message_id is not None and trace.user_message_id != user_message_id:
                 return None
             checkpoint = trace.checkpoint_json
             return checkpoint if isinstance(checkpoint, dict) else None
@@ -231,6 +237,8 @@ class AgentTraceRecorder:
         cls,
         trace_id: str,
         *,
+        session_id: str | None = None,
+        user_message_id: str | None = None,
         session_factory: Callable[[], Any] = _default_session_factory,
     ) -> "AgentTraceRecorder | None":
         db = None
@@ -239,14 +247,17 @@ class AgentTraceRecorder:
 
             db = session_factory()
             trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).first()
-            if trace is None:
+            if trace is None or trace.status not in {"running", "error"}:
+                return None
+            if session_id is not None and trace.session_id != session_id:
+                return None
+            if user_message_id is not None and trace.user_message_id != user_message_id:
                 return None
 
-            last_step = (
-                db.query(AgentTraceStep)
+            max_step_index = (
+                db.query(func.max(AgentTraceStep.step_index))
                 .filter(AgentTraceStep.trace_id == trace_id)
-                .order_by(AgentTraceStep.step_index.desc())
-                .first()
+                .scalar()
             )
             recorder = cls(
                 session_id=trace.session_id,
@@ -258,8 +269,8 @@ class AgentTraceRecorder:
             recorder._trace_id = trace_id
             recorder._enabled = True
             recorder._next_step_index = (
-                int(last_step.step_index) + 1
-                if last_step is not None and isinstance(last_step.step_index, int)
+                int(max_step_index) + 1
+                if isinstance(max_step_index, int)
                 else 0
             )
             return recorder

@@ -225,7 +225,7 @@ def test_answer_stream_uses_existing_trace_checkpoint_on_resume(monkeypatch):
 
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             calls.append(("load", trace_id))
             return checkpoint
 
@@ -277,7 +277,7 @@ def test_answer_stream_resume_infers_tool_groups_from_checkpoint(monkeypatch):
 
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             return checkpoint
 
     class FakeRunner:
@@ -325,7 +325,7 @@ def test_answer_stream_resume_enables_deep_search_from_checkpoint(monkeypatch):
 
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             return checkpoint
 
     class FakeRunner:
@@ -360,11 +360,11 @@ def test_answer_stream_resume_attaches_existing_trace_recorder(monkeypatch):
 
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             return checkpoint
 
         @classmethod
-        def for_existing_trace(cls, trace_id):
+        def for_existing_trace(cls, trace_id, **kwargs):
             captured["attached_trace_id"] = trace_id
             return bound_recorder
 
@@ -383,6 +383,70 @@ def test_answer_stream_resume_attaches_existing_trace_recorder(monkeypatch):
     assert captured["trace_recorder"] is bound_recorder
 
 
+def test_answer_stream_resume_loads_trace_with_session_owner(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [{"type": "human", "content": "How?"}],
+        "tool_state": {},
+    }
+    bound_recorder = object()
+    calls = []
+
+    class FakeRecorder:
+        next_checkpoint = checkpoint
+
+        @classmethod
+        def load_checkpoint(cls, trace_id, *, session_id=None, user_message_id=None):
+            calls.append(("load", trace_id, session_id, user_message_id))
+            return cls.next_checkpoint
+
+        @classmethod
+        def for_existing_trace(cls, trace_id, *, session_id=None, user_message_id=None):
+            calls.append(("attach", trace_id, session_id, user_message_id))
+            return bound_recorder
+
+    class FakeRunner:
+        def resume_stream(self, loaded_checkpoint, trace_recorder=None):
+            calls.append(("resume", loaded_checkpoint, trace_recorder))
+            yield json.dumps({"type": "done", "data": {}}) + "\n"
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace",
+            session_id="session-a",
+            user_message_id="user-a",
+        )
+    )
+
+    assert [json.loads(line)["type"] for line in lines] == ["done"]
+    assert calls[0] == ("load", "trace", "session-a", "user-a")
+    assert calls[1] == ("attach", "trace", "session-a", "user-a")
+    assert calls[2] == ("resume", checkpoint, bound_recorder)
+
+    calls.clear()
+    FakeRecorder.next_checkpoint = None
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace",
+            session_id="session-a",
+            user_message_id="user-a",
+        )
+    )
+
+    assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
+    assert calls == [("load", "trace", "session-a", "user-a")]
+
+
 def test_answer_stream_resume_bypasses_kb_selection_preflight(monkeypatch):
     checkpoint = {
         "version": 1,
@@ -399,7 +463,7 @@ def test_answer_stream_resume_bypasses_kb_selection_preflight(monkeypatch):
 
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             calls.append(("load", trace_id))
             return checkpoint
 
@@ -434,7 +498,7 @@ def test_answer_stream_resume_bypasses_kb_selection_preflight(monkeypatch):
 def test_answer_stream_resume_missing_checkpoint_emits_done(monkeypatch):
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             return None
 
     monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
@@ -462,7 +526,7 @@ def test_answer_stream_resume_exception_emits_done(monkeypatch):
 
     class FakeRecorder:
         @classmethod
-        def load_checkpoint(cls, trace_id):
+        def load_checkpoint(cls, trace_id, **kwargs):
             return checkpoint
 
     def build(**kwargs):

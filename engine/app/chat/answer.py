@@ -758,7 +758,11 @@ def answer_stream(
     # Resume requests must use the saved checkpoint before any new-request preflight.
     if resume_trace_id:
         try:
-            checkpoint = AgentTraceRecorder.load_checkpoint(resume_trace_id)
+            checkpoint = AgentTraceRecorder.load_checkpoint(
+                resume_trace_id,
+                session_id=session_id,
+                user_message_id=user_message_id,
+            )
             if checkpoint is None:
                 yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
                 yield done_event()
@@ -768,7 +772,11 @@ def answer_stream(
             attach_recorder = getattr(AgentTraceRecorder, "for_existing_trace", None)
             if callable(attach_recorder):
                 try:
-                    trace_recorder = attach_recorder(resume_trace_id)
+                    trace_recorder = attach_recorder(
+                        resume_trace_id,
+                        session_id=session_id,
+                        user_message_id=user_message_id,
+                    )
                     if trace_recorder is None:
                         logger.warning(
                             "[chat] resume_trace_attach_skipped trace_id=%s",

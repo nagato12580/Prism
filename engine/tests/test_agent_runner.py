@@ -1174,6 +1174,50 @@ def test_runner_resumes_pending_tool_checkpoint_uses_dedupe():
     assert result_steps[-1]["dedupe_key"] == "cached-key"
 
 
+@pytest.mark.parametrize(
+    "tool_call",
+    [
+        {"id": "", "name": "knowledge_search", "args": {"query": "same"}},
+        {"name": "knowledge_search", "args": {"query": "same"}},
+    ],
+)
+def test_runner_resumes_checkpoint_tool_call_without_id(tool_call):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "phase": "pending_tools",
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+            {"type": "ai", "content": "", "tool_calls": [tool_call]},
+        ],
+        "tool_state": {
+            "timed_out_tools": [],
+            "open_kb_document_counts": {},
+            "document_windows_by_file": {},
+        },
+    }
+    tool = CountingEvidenceTool()
+
+    lines = list(
+        LangChainAgentRunner(
+            model=FakeResumeModel(),
+            tools=[tool],
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    events = [json.loads(line) for line in lines]
+    assert tool.calls == 1
+    assert not any(
+        event["type"] == "error" and "malformed" in str(event.get("data", ""))
+        for event in events
+    )
+    assert [event["type"] for event in events][-2:] == ["token", "done"]
+    assert events[-2]["data"] == "Resumed final answer"
+
+
 def test_runner_resumes_legacy_model_response_checkpoint_executes_pending_tool():
     recorder = FakeTraceRecorder()
     source_runner = LangChainAgentRunner(

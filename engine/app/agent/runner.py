@@ -244,23 +244,26 @@ def _deserialize_message_from_checkpoint(item: Any) -> Any | None:
     if message_type == "human":
         return HumanMessage(content=content)
     if message_type == "ai":
-        tool_calls = item["tool_calls"] if "tool_calls" in item else []
-        if not isinstance(tool_calls, list):
+        raw_tool_calls = item["tool_calls"] if "tool_calls" in item else []
+        tool_calls = []
+        if not isinstance(raw_tool_calls, list):
             return None
-        for tool_call in tool_calls:
+        for tool_call in raw_tool_calls:
             if not isinstance(tool_call, dict):
                 return None
-            tool_call_id = tool_call.get("id")
+            raw_tool_call_id = tool_call.get("id")
             tool_name = tool_call.get("name")
             tool_args = tool_call.get("args")
             if (
-                not isinstance(tool_call_id, str)
-                or not tool_call_id
+                (raw_tool_call_id is not None and not isinstance(raw_tool_call_id, str))
                 or not isinstance(tool_name, str)
                 or not tool_name
                 or not isinstance(tool_args, dict)
             ):
                 return None
+            restored_tool_call = dict(tool_call)
+            restored_tool_call["id"] = raw_tool_call_id or tool_name
+            tool_calls.append(restored_tool_call)
         try:
             return AIMessage(content=content, tool_calls=tool_calls)
         except Exception:
