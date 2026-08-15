@@ -29,6 +29,18 @@ METRIC_NAMES = (
     "context_precision",
     "context_recall",
 )
+METRIC_ALIASES = {
+    "faithfulness": ("faithfulness",),
+    "response_relevancy": ("response_relevancy", "answer_relevancy"),
+    "context_precision": (
+        "context_precision",
+        "llm_context_precision_with_reference",
+        "llm_context_precision_without_reference",
+        "context_precision_with_reference",
+        "context_precision_without_reference",
+    ),
+    "context_recall": ("context_recall", "llm_context_recall"),
+}
 Evaluator = Callable[[list[dict[str, Any]], str | None], list[dict[str, Any]]]
 
 
@@ -40,7 +52,7 @@ def build_ragas_rows(
 
     for artifact in artifacts:
         missing = _missing_required_fields(artifact)
-        if missing:
+        if "answer" in missing:
             skipped.append(
                 {
                     "query_id": str(artifact.get("query_id") or ""),
@@ -51,10 +63,10 @@ def build_ragas_rows(
 
         rows.append(
             {
-                "user_input": artifact["question"],
-                "response": artifact["answer"],
-                "retrieved_contexts": artifact["retrieved_contexts"],
-                "reference": artifact["reference"],
+                "user_input": artifact.get("question", ""),
+                "response": artifact.get("answer", ""),
+                "retrieved_contexts": artifact.get("retrieved_contexts") or [],
+                "reference": artifact.get("reference", ""),
             }
         )
 
@@ -63,14 +75,12 @@ def build_ragas_rows(
 
 def normalize_metric_row(row: dict[str, Any]) -> dict[str, float]:
     normalized: dict[str, float] = {}
-    for metric in METRIC_NAMES:
-        value = row.get(metric)
-        if _is_number(value):
-            normalized[metric] = float(value)
-
-    answer_relevancy = row.get("answer_relevancy")
-    if "response_relevancy" not in normalized and _is_number(answer_relevancy):
-        normalized["response_relevancy"] = float(answer_relevancy)
+    for metric, aliases in METRIC_ALIASES.items():
+        for alias in aliases:
+            value = row.get(alias)
+            if _is_number(value):
+                normalized[metric] = float(value)
+                break
 
     return normalized
 
@@ -84,8 +94,10 @@ def run_ragas_report(
 ) -> dict[str, Any]:
     artifacts = read_jsonl(artifacts_path)
     ragas_rows, skipped = build_ragas_rows(artifacts)
-    valid_artifacts = [
-        artifact for artifact in artifacts if not _missing_required_fields(artifact)
+    evaluable_artifacts = [
+        artifact
+        for artifact in artifacts
+        if "answer" not in _missing_required_fields(artifact)
     ]
     failures = list(skipped)
     evaluator = evaluator or _default_ragas_evaluator
@@ -102,13 +114,13 @@ def run_ragas_report(
                     "query_id": str(artifact.get("query_id") or ""),
                     "reason": f"ragas evaluation failed: {exc}",
                 }
-                for artifact in valid_artifacts
+                for artifact in evaluable_artifacts
             )
 
     thresholds = _load_thresholds(thresholds_path)
     run_dir = artifacts_path.parent
     score_by_id, alignment_failures = (
-        ({}, []) if evaluator_failed else _align_scores(valid_artifacts, raw_scores)
+        ({}, []) if evaluator_failed else _align_scores(evaluable_artifacts, raw_scores)
     )
     failures.extend(alignment_failures)
     failure_by_id = {
@@ -133,7 +145,7 @@ def run_ragas_report(
         if query_id in failure_by_id and query_id not in score_by_id:
             tags.append(
                 "ragas_failed"
-                if not _missing_required_fields(artifact)
+                if "answer" not in _missing_required_fields(artifact)
                 else "ragas_skipped"
             )
         elif query_id in failure_by_id:
@@ -211,17 +223,17 @@ def _default_ragas_evaluator(
         from datasets import Dataset
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
         from ragas import evaluate
-        from ragas.metrics import (
-            Faithfulness,
-            LLMContextRecall,
-            ResponseRelevancy,
-        )
+        from ragas.metrics import Faithfulness, LLMContextRecall, ResponseRelevancy
         try:
             from ragas.metrics import LLMContextPrecisionWithReference
+
+            context_precision_needs_reference = True
+            ContextPrecisionMetric = LLMContextPrecisionWithReference
         except ImportError:
-            from ragas.metrics import (
-                LLMContextPrecisionWithoutReference as LLMContextPrecisionWithReference,
-            )
+            from ragas.metrics import LLMContextPrecisionWithoutReference
+
+            context_precision_needs_reference = False
+            ContextPrecisionMetric = LLMContextPrecisionWithoutReference
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Missing optional Ragas evaluation dependencies. "
@@ -233,18 +245,45 @@ def _default_ragas_evaluator(
 
     llm = ChatOpenAI(model=judge_model) if judge_model else None
     embeddings = OpenAIEmbeddings() if judge_model else None
-    metrics = [
-        Faithfulness(),
-        ResponseRelevancy(),
-        LLMContextPrecisionWithReference(),
-        LLMContextRecall(),
+    scores_by_index: list[dict[str, Any]] = [{} for _ in rows]
+
+    metric_specs = [
+        (Faithfulness, lambda row: _has_response(row) and _has_contexts(row)),
+        (ResponseRelevancy, lambda row: _has_response(row)),
+        (
+            ContextPrecisionMetric,
+            lambda row: _has_contexts(row)
+            and (not context_precision_needs_reference or _has_reference(row)),
+        ),
+        (
+            LLMContextRecall,
+            lambda row: _has_contexts(row) and _has_reference(row),
+        ),
     ]
-    result = evaluate(
-        Dataset.from_list(rows),
-        metrics=metrics,
-        llm=llm,
-        embeddings=embeddings,
-    )
+
+    for metric_factory, predicate in metric_specs:
+        selected = [
+            (index, row)
+            for index, row in enumerate(rows)
+            if predicate(row)
+        ]
+        if not selected:
+            continue
+
+        result = evaluate(
+            Dataset.from_list([row for _, row in selected]),
+            metrics=[metric_factory()],
+            llm=llm,
+            embeddings=embeddings,
+        )
+        metric_scores = _ragas_result_to_rows(result)
+        for (index, _), score in zip(selected, metric_scores, strict=False):
+            scores_by_index[index].update(score)
+
+    return scores_by_index
+
+
+def _ragas_result_to_rows(result: Any) -> list[dict[str, Any]]:
     if hasattr(result, "to_pandas"):
         return result.to_pandas().to_dict(orient="records")
     if hasattr(result, "scores"):
@@ -261,6 +300,18 @@ def _missing_required_fields(artifact: dict[str, Any]) -> list[str]:
     if not str(artifact.get("reference") or "").strip():
         missing.append("reference")
     return missing
+
+
+def _has_response(row: dict[str, Any]) -> bool:
+    return bool(str(row.get("response") or "").strip())
+
+
+def _has_contexts(row: dict[str, Any]) -> bool:
+    return bool(row.get("retrieved_contexts"))
+
+
+def _has_reference(row: dict[str, Any]) -> bool:
+    return bool(str(row.get("reference") or "").strip())
 
 
 def _align_scores(
@@ -433,17 +484,8 @@ def _is_number(value: Any) -> bool:
 
 
 def _missing_finite_metrics(row: dict[str, Any]) -> list[str]:
-    missing: list[str] = []
-    for metric in METRIC_NAMES:
-        if metric in row and not _is_number(row[metric]):
-            missing.append(metric)
-    if (
-        "response_relevancy" not in row
-        and "answer_relevancy" in row
-        and not _is_number(row["answer_relevancy"])
-    ):
-        missing.append("response_relevancy")
-    return missing
+    normalized = normalize_metric_row(row)
+    return [metric for metric in METRIC_NAMES if metric not in normalized]
 
 
 def _json_dumps(value: Any) -> str:

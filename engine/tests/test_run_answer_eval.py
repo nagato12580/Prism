@@ -67,3 +67,18 @@ def test_parse_ndjson_events_sample():
     assert len(events["sources"]) == 1
     assert events["sources"][0]["chunk_uid"] == "c1"
     assert events["token_count"] >= 2
+
+
+def test_parse_ndjson_events_preserves_error_status_after_later_done():
+    from engine.eval.run_answer_eval import parse_ndjson_events
+
+    events = parse_ndjson_events(
+        [
+            '{"type":"error","data":{"message":"endpoint failed"}}\n',
+            '{"type":"done","data":{"answer":"partial final answer"}}\n',
+        ]
+    )
+
+    assert events["answer"] == "partial final answer"
+    assert events["status"] == "error"
+    assert events["error"] == "endpoint failed"

@@ -66,6 +66,19 @@ def test_parse_ndjson_events_handles_tokens_sources_done_and_error():
     assert parsed["error"] == "late warning"
 
 
+def test_parse_ndjson_events_preserves_error_status_after_later_done():
+    lines = [
+        '{"type":"error","data":{"message":"endpoint failed"}}\n',
+        '{"type":"done","data":{"answer":"partial final answer"}}\n',
+    ]
+
+    parsed = parse_ndjson_events(lines)
+
+    assert parsed["answer"] == "partial final answer"
+    assert parsed["status"] == "error"
+    assert parsed["error"] == "endpoint failed"
+
+
 def test_build_reference_from_gold_uses_inline_chunk_texts():
     question = {
         "relevant_children": [

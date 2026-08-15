@@ -57,7 +57,8 @@ def parse_ndjson_events(lines: Iterable[str]) -> dict[str, Any]:
         elif event_type == "tool_call":
             result["tool_calls"] += 1
         elif event_type == "done":
-            result["status"] = "done"
+            if result.get("status") != "error":
+                result["status"] = "done"
             if isinstance(data, dict) and data.get("answer"):
                 result["answer"] = str(data["answer"])
         elif event_type == "error":
