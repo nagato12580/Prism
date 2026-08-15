@@ -10,6 +10,7 @@ from engine.eval.answer_artifacts import (
     read_jsonl,
     write_jsonl,
 )
+from engine.eval.collect_answer_artifacts import build_artifact, summarize_artifacts
 
 
 def test_answer_artifact_serializes_to_dict():
@@ -217,3 +218,125 @@ def test_aggregate_numeric_metrics_rounds_all_stats_to_four_decimals():
         "min": 0.1111,
         "max": 0.4444,
     }
+
+
+def test_build_artifact_maps_dataset_and_events():
+    question = {
+        "id": "q1",
+        "question": "What is Prism?",
+        "question_type": "single",
+        "item_title": "Doc",
+        "relevant_children": [{"chunk_id": "gold1", "chunk_text": "gold text"}],
+    }
+    events = {
+        "answer": "Prism is a RAG system.",
+        "sources": [{"chunk_uid": "c1", "text": "context text"}],
+        "token_count": 5,
+        "tool_calls": 1,
+        "status": "done",
+    }
+
+    artifact = build_artifact(
+        question,
+        events,
+        ttfb_ms=11,
+        total_latency_ms=22,
+        lookup_chunk_text=lambda chunk_id: None,
+    )
+
+    assert artifact.query_id == "q1"
+    assert artifact.question == "What is Prism?"
+    assert artifact.answer == "Prism is a RAG system."
+    assert artifact.sources == [{"chunk_uid": "c1", "text": "context text"}]
+    assert artifact.retrieved_contexts == ["context text"]
+    assert artifact.reference == "gold text"
+    assert artifact.metadata["question_type"] == "single"
+    assert artifact.metadata["paper_title"] == "Doc"
+    assert artifact.metadata["missing_context_count"] == 0
+    assert artifact.metadata["ttfb_ms"] == 11
+    assert artifact.metadata["total_latency_ms"] == 22
+    assert artifact.metadata["tool_calls"] == 1
+    assert artifact.metadata["token_count"] == 5
+    assert artifact.metadata["status"] == "done"
+
+
+def test_build_artifact_can_lookup_missing_gold_and_context_text():
+    question = {
+        "query_id": "q2",
+        "question": "How does lookup work?",
+        "paper_titles": ["Lookup Paper"],
+        "relevant_children": [{"chunk_uid": "gold2"}],
+    }
+    events = {
+        "answer": "With chunk lookups.",
+        "sources": [{"chunk_uid": "ctx2"}, {"chunk_uid": "ctx3"}],
+        "status": "done",
+    }
+
+    artifact = build_artifact(
+        question,
+        events,
+        ttfb_ms=3,
+        total_latency_ms=7,
+        lookup_chunk_text=lambda chunk_id: {
+            "gold2": "looked up gold",
+            "ctx2": "looked up context",
+        }.get(chunk_id),
+    )
+
+    assert artifact.query_id == "q2"
+    assert artifact.metadata["paper_title"] == "Lookup Paper"
+    assert artifact.reference == "looked up gold"
+    assert artifact.retrieved_contexts == ["looked up context"]
+    assert artifact.metadata["missing_context_count"] == 1
+
+
+def test_build_artifact_preserves_endpoint_error_metadata():
+    question = {"id": "q3", "question": "Will this fail?"}
+    events = {
+        "answer": "",
+        "sources": [],
+        "token_count": 0,
+        "tool_calls": 0,
+        "status": "error",
+        "error": "HTTP 500",
+    }
+
+    artifact = build_artifact(
+        question,
+        events,
+        ttfb_ms=0,
+        total_latency_ms=15,
+        lookup_chunk_text=lambda chunk_id: None,
+    )
+
+    assert artifact.query_id == "q3"
+    assert artifact.answer == ""
+    assert artifact.metadata["status"] == "error"
+    assert artifact.metadata["error"] == "HTTP 500"
+
+
+def test_summarize_artifacts_counts_statuses_and_missing_contexts():
+    artifacts = [
+        AnswerArtifact("q1", "q", "a", [], ["ctx"], "ref", {"status": "done"}).to_dict(),
+        AnswerArtifact(
+            "q2",
+            "q",
+            "",
+            [],
+            [],
+            "",
+            {"status": "error", "missing_context_count": 2},
+        ).to_dict(),
+        AnswerArtifact("q3", "q", "a", [], [], "ref", {}).to_dict(),
+    ]
+
+    summary = summarize_artifacts("dataset.json", artifacts, failures=[{"query_id": "q2"}])
+
+    assert summary["meta"]["dataset"] == "dataset.json"
+    assert summary["meta"]["total_artifacts"] == 3
+    assert summary["meta"]["failed"] == 1
+    assert "run_at" in summary["meta"]
+    assert summary["status_counts"] == {"done": 1, "error": 1, "unknown": 1}
+    assert summary["missing_context_count"] == 2
+    assert summary["failures"] == [{"query_id": "q2"}]
