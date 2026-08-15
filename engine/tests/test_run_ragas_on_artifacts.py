@@ -333,5 +333,9 @@ def test_default_evaluator_reports_missing_optional_dependencies(monkeypatch):
 
     monkeypatch.setattr("builtins.__import__", fake_import)
 
-    with pytest.raises(RuntimeError, match="requirements-eval.txt"):
+    with pytest.raises(RuntimeError) as exc_info:
         _default_ragas_evaluator([], None)
+
+    message = str(exc_info.value)
+    assert "pip install ragas datasets pandas langchain-openai" in message
+    assert "pip install -r requirements-eval.txt" in message

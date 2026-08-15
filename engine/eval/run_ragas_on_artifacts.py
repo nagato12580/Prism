@@ -225,7 +225,10 @@ def _default_ragas_evaluator(
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Missing optional Ragas evaluation dependencies. "
-            "Install them with `pip install -r requirements-eval.txt`."
+            "Install evaluation dependencies with "
+            "`pip install ragas datasets pandas langchain-openai` or, "
+            "after requirements-eval.txt is added, "
+            "`pip install -r requirements-eval.txt`."
         ) from exc
 
     llm = ChatOpenAI(model=judge_model) if judge_model else None
