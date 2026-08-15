@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import Column, DateTime, String, create_engine
+from sqlalchemy import Column, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from engine.eval.answer_artifacts import (
@@ -15,6 +15,7 @@ from engine.eval.answer_artifacts import (
 )
 from engine.eval.collect_answer_artifacts import (
     CachedChunkTextLookup,
+    _load_active_index_generation_in_session,
     _lookup_chunk_text_in_session,
     build_artifact,
     summarize_artifacts,
@@ -346,7 +347,7 @@ def test_cached_chunk_text_lookup_reuses_missing_text_results():
     assert calls == ["shared"]
 
 
-def test_scoped_chunk_lookup_filters_tenant_kb_and_prefers_active_generation():
+def test_scoped_chunk_lookup_filters_tenant_kb_and_active_generation():
     base = declarative_base()
 
     class TestChunk(base):
@@ -357,8 +358,6 @@ def test_scoped_chunk_lookup_filters_tenant_kb_and_prefers_active_generation():
         tenant_id = Column(String, nullable=False)
         kb_uid = Column(String, nullable=False)
         generation = Column(String, nullable=False)
-        status = Column(String, nullable=False)
-        created_at = Column(DateTime)
         chunk_text = Column(String, nullable=False)
 
     engine = create_engine("sqlite:///:memory:")
@@ -372,26 +371,23 @@ def test_scoped_chunk_lookup_filters_tenant_kb_and_prefers_active_generation():
                     chunk_uid="shared",
                     tenant_id="tenant-b",
                     kb_uid="kb-a",
-                    generation="gen-9",
-                    status="active",
+                    generation="gen-active",
                     chunk_text="wrong tenant",
                 ),
                 TestChunk(
-                    id="inactive-newer",
+                    id="lexically-newer-stale",
                     chunk_uid="shared",
                     tenant_id="tenant-a",
                     kb_uid="kb-a",
-                    generation="gen-9",
-                    status="inactive",
-                    chunk_text="inactive newer",
+                    generation="zzzz-stale",
+                    chunk_text="stale lexically newer",
                 ),
                 TestChunk(
-                    id="active-older",
+                    id="active",
                     chunk_uid="shared",
                     tenant_id="tenant-a",
                     kb_uid="kb-a",
-                    generation="gen-1",
-                    status="active",
+                    generation="gen-active",
                     chunk_text="active scoped",
                 ),
             ]
@@ -404,9 +400,56 @@ def test_scoped_chunk_lookup_filters_tenant_kb_and_prefers_active_generation():
             "shared",
             tenant_id="tenant-a",
             kb_uid="kb-a",
+            active_index_generation="gen-active",
         )
 
         assert text == "active scoped"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_load_active_index_generation_filters_topic_by_tenant_and_kb():
+    base = declarative_base()
+
+    class TestTopic(base):
+        __tablename__ = "test_topic"
+
+        id = Column(String, primary_key=True)
+        tenant_id = Column(String, nullable=False)
+        kb_uid = Column(String, nullable=False)
+        active_index_generation = Column(String)
+
+    engine = create_engine("sqlite:///:memory:")
+    base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        session.add_all(
+            [
+                TestTopic(
+                    id="wrong-tenant",
+                    tenant_id="tenant-b",
+                    kb_uid="kb-a",
+                    active_index_generation="wrong",
+                ),
+                TestTopic(
+                    id="active-topic",
+                    tenant_id="tenant-a",
+                    kb_uid="kb-a",
+                    active_index_generation="gen-active",
+                ),
+            ]
+        )
+        session.commit()
+
+        generation = _load_active_index_generation_in_session(
+            session,
+            TestTopic,
+            tenant_id="tenant-a",
+            kb_uid="kb-a",
+        )
+
+        assert generation == "gen-active"
     finally:
         session.close()
         engine.dispose()

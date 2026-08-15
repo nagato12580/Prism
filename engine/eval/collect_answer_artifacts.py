@@ -136,15 +136,22 @@ def _paper_title(q: dict[str, Any]) -> str:
 def create_scoped_chunk_text_lookup(
     tenant_id: str,
     kb_uid: str,
+    active_index_generation: str | None = None,
 ) -> CachedChunkTextLookup:
     """Create a tenant/kb scoped, cached chunk text lookup for one collector run."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from backend.app.models.knowledge_item import KnowledgeChunk
+    from backend.app.models.knowledge_item import KnowledgeChunk, KnowledgeTopic
 
     engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
     session = sessionmaker(bind=engine)()
+    resolved_generation = active_index_generation or _load_active_index_generation_in_session(
+        session,
+        KnowledgeTopic,
+        tenant_id=tenant_id,
+        kb_uid=kb_uid,
+    )
 
     def fetch_chunk_text(chunk_id: str) -> str | None:
         return _lookup_chunk_text_in_session(
@@ -153,6 +160,7 @@ def create_scoped_chunk_text_lookup(
             chunk_id,
             tenant_id=tenant_id,
             kb_uid=kb_uid,
+            active_index_generation=resolved_generation,
         )
 
     def close() -> None:
@@ -169,6 +177,7 @@ def _lookup_chunk_text_in_session(
     *,
     tenant_id: str,
     kb_uid: str,
+    active_index_generation: str | None = None,
 ) -> str | None:
     """Find a chunk by row id or public chunk_uid within the authorized scope."""
     if not chunk_id:
@@ -180,6 +189,7 @@ def _lookup_chunk_text_in_session(
 
         query = session.query(chunk_model).filter(getattr(chunk_model, field_name) == chunk_id)
         query = _apply_chunk_scope(query, chunk_model, tenant_id=tenant_id, kb_uid=kb_uid)
+        query = _apply_active_generation(query, chunk_model, active_index_generation)
         query = _prefer_current_chunk_rows(query, chunk_model)
         chunk = query.first()
         if chunk is not None:
@@ -202,6 +212,16 @@ def _apply_chunk_scope(
     return query
 
 
+def _apply_active_generation(
+    query: Any,
+    chunk_model: Any,
+    active_index_generation: str | None,
+) -> Any:
+    if active_index_generation and hasattr(chunk_model, "generation"):
+        query = query.filter(chunk_model.generation == active_index_generation)
+    return query
+
+
 def _prefer_current_chunk_rows(query: Any, chunk_model: Any) -> Any:
     from sqlalchemy import case
 
@@ -210,8 +230,6 @@ def _prefer_current_chunk_rows(query: Any, chunk_model: Any) -> Any:
         order_clauses.append(case((chunk_model.is_active.is_(True), 1), else_=0).desc())
     if hasattr(chunk_model, "status"):
         order_clauses.append(case((chunk_model.status == "active", 1), else_=0).desc())
-    if hasattr(chunk_model, "generation"):
-        order_clauses.append(chunk_model.generation.desc())
     if hasattr(chunk_model, "created_at"):
         order_clauses.append(chunk_model.created_at.desc())
     if hasattr(chunk_model, "id"):
@@ -219,6 +237,28 @@ def _prefer_current_chunk_rows(query: Any, chunk_model: Any) -> Any:
     if order_clauses:
         query = query.order_by(*order_clauses)
     return query
+
+
+def _load_active_index_generation_in_session(
+    session: Any,
+    topic_model: Any,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+) -> str | None:
+    if not hasattr(topic_model, "active_index_generation"):
+        return None
+
+    query = session.query(topic_model)
+    if tenant_id and hasattr(topic_model, "tenant_id"):
+        query = query.filter(topic_model.tenant_id == tenant_id)
+    if kb_uid and hasattr(topic_model, "kb_uid"):
+        query = query.filter(topic_model.kb_uid == kb_uid)
+    topic = query.first()
+    if topic is None:
+        return None
+    generation = getattr(topic, "active_index_generation", None)
+    return str(generation) if generation else None
 
 
 def _sign_scope(tenant_id: str, kb_uid: str) -> str:
