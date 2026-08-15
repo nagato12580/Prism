@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from sqlalchemy import Column, DateTime, String, create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from engine.eval.answer_artifacts import (
     AnswerArtifact,
     aggregate_numeric_metrics,
@@ -10,7 +13,12 @@ from engine.eval.answer_artifacts import (
     read_jsonl,
     write_jsonl,
 )
-from engine.eval.collect_answer_artifacts import build_artifact, summarize_artifacts
+from engine.eval.collect_answer_artifacts import (
+    CachedChunkTextLookup,
+    _lookup_chunk_text_in_session,
+    build_artifact,
+    summarize_artifacts,
+)
 
 
 def test_answer_artifact_serializes_to_dict():
@@ -289,6 +297,119 @@ def test_build_artifact_can_lookup_missing_gold_and_context_text():
     assert artifact.reference == "looked up gold"
     assert artifact.retrieved_contexts == ["looked up context"]
     assert artifact.metadata["missing_context_count"] == 1
+
+
+def test_build_artifact_uses_query_id_override_for_index_fallback():
+    question = {"question": "No explicit id?"}
+    events = {"answer": "yes", "sources": [], "status": "done"}
+
+    artifact = build_artifact(
+        question,
+        events,
+        ttfb_ms=1,
+        total_latency_ms=2,
+        query_id_override="7",
+    )
+
+    assert artifact.query_id == "7"
+
+
+def test_cached_chunk_text_lookup_reuses_missing_text_results():
+    calls: list[str] = []
+
+    def lookup(chunk_id: str) -> str | None:
+        calls.append(chunk_id)
+        return {"shared": "shared text"}.get(chunk_id)
+
+    cached_lookup = CachedChunkTextLookup(lookup)
+    question = {
+        "id": "q-cache",
+        "question": "Cache repeated IDs?",
+        "relevant_children": [{"chunk_id": "shared"}, {"chunk_id": "shared"}],
+    }
+    events = {
+        "answer": "cached",
+        "sources": [{"chunk_uid": "shared"}, {"chunk_uid": "shared"}],
+        "status": "done",
+    }
+
+    artifact = build_artifact(
+        question,
+        events,
+        ttfb_ms=1,
+        total_latency_ms=2,
+        lookup_chunk_text=cached_lookup,
+    )
+
+    assert artifact.reference == "shared text\n\n---\n\nshared text"
+    assert artifact.retrieved_contexts == ["shared text", "shared text"]
+    assert calls == ["shared"]
+
+
+def test_scoped_chunk_lookup_filters_tenant_kb_and_prefers_active_generation():
+    base = declarative_base()
+
+    class TestChunk(base):
+        __tablename__ = "test_chunk"
+
+        id = Column(String, primary_key=True)
+        chunk_uid = Column(String, nullable=False)
+        tenant_id = Column(String, nullable=False)
+        kb_uid = Column(String, nullable=False)
+        generation = Column(String, nullable=False)
+        status = Column(String, nullable=False)
+        created_at = Column(DateTime)
+        chunk_text = Column(String, nullable=False)
+
+    engine = create_engine("sqlite:///:memory:")
+    base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        session.add_all(
+            [
+                TestChunk(
+                    id="wrong-tenant",
+                    chunk_uid="shared",
+                    tenant_id="tenant-b",
+                    kb_uid="kb-a",
+                    generation="gen-9",
+                    status="active",
+                    chunk_text="wrong tenant",
+                ),
+                TestChunk(
+                    id="inactive-newer",
+                    chunk_uid="shared",
+                    tenant_id="tenant-a",
+                    kb_uid="kb-a",
+                    generation="gen-9",
+                    status="inactive",
+                    chunk_text="inactive newer",
+                ),
+                TestChunk(
+                    id="active-older",
+                    chunk_uid="shared",
+                    tenant_id="tenant-a",
+                    kb_uid="kb-a",
+                    generation="gen-1",
+                    status="active",
+                    chunk_text="active scoped",
+                ),
+            ]
+        )
+        session.commit()
+
+        text = _lookup_chunk_text_in_session(
+            session,
+            TestChunk,
+            "shared",
+            tenant_id="tenant-a",
+            kb_uid="kb-a",
+        )
+
+        assert text == "active scoped"
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_build_artifact_preserves_endpoint_error_metadata():

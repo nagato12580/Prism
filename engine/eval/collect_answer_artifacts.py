@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -33,6 +33,30 @@ from engine.eval.answer_artifacts import (
 
 RESULTS_DIR = _project_root / "evaluation" / "runs" / "answer"
 SCOPE_TTL_SECONDS = 600
+FetchChunkText = Callable[[str], str | None]
+
+
+class CachedChunkTextLookup:
+    """Cache chunk text lookups for a single artifact collection run."""
+
+    def __init__(
+        self,
+        fetch_chunk_text: FetchChunkText,
+        *,
+        close: Callable[[], None] | None = None,
+    ) -> None:
+        self._fetch_chunk_text = fetch_chunk_text
+        self._close = close
+        self._cache: dict[str, str | None] = {}
+
+    def __call__(self, chunk_id: str) -> str | None:
+        if chunk_id not in self._cache:
+            self._cache[chunk_id] = self._fetch_chunk_text(chunk_id)
+        return self._cache[chunk_id]
+
+    def close(self) -> None:
+        if self._close is not None:
+            self._close()
 
 
 def build_artifact(
@@ -42,6 +66,7 @@ def build_artifact(
     ttfb_ms: int,
     total_latency_ms: int,
     lookup_chunk_text: ChunkTextLookup | None = None,
+    query_id_override: str | None = None,
 ) -> AnswerArtifact:
     """Map one dataset row plus parsed stream events into an answer artifact."""
     sources = [source for source in events.get("sources") or [] if isinstance(source, dict)]
@@ -63,7 +88,7 @@ def build_artifact(
         metadata["error"] = events["error"]
 
     return AnswerArtifact(
-        query_id=str(q.get("id") or q.get("query_id") or ""),
+        query_id=str(query_id_override or q.get("id") or q.get("query_id") or ""),
         question=str(q.get("question") or q.get("query") or ""),
         answer=str(events.get("answer") or ""),
         sources=sources,
@@ -108,7 +133,11 @@ def _paper_title(q: dict[str, Any]) -> str:
     return str(q.get("item_title") or q.get("paper_title") or "")
 
 
-def _lookup_chunk_text(chunk_id: str) -> str | None:
+def create_scoped_chunk_text_lookup(
+    tenant_id: str,
+    kb_uid: str,
+) -> CachedChunkTextLookup:
+    """Create a tenant/kb scoped, cached chunk text lookup for one collector run."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -116,17 +145,80 @@ def _lookup_chunk_text(chunk_id: str) -> str | None:
 
     engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
     session = sessionmaker(bind=engine)()
-    try:
-        chunk = session.query(KnowledgeChunk).filter(KnowledgeChunk.id == chunk_id).first()
-        if chunk is None:
-            chunk = (
-                session.query(KnowledgeChunk)
-                .filter(KnowledgeChunk.chunk_uid == chunk_id)
-                .first()
-            )
-        return str(chunk.chunk_text) if chunk is not None else None
-    finally:
+
+    def fetch_chunk_text(chunk_id: str) -> str | None:
+        return _lookup_chunk_text_in_session(
+            session,
+            KnowledgeChunk,
+            chunk_id,
+            tenant_id=tenant_id,
+            kb_uid=kb_uid,
+        )
+
+    def close() -> None:
         session.close()
+        engine.dispose()
+
+    return CachedChunkTextLookup(fetch_chunk_text, close=close)
+
+
+def _lookup_chunk_text_in_session(
+    session: Any,
+    chunk_model: Any,
+    chunk_id: str,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+) -> str | None:
+    """Find a chunk by row id or public chunk_uid within the authorized scope."""
+    if not chunk_id:
+        return None
+
+    for field_name in ("id", "chunk_uid"):
+        if not hasattr(chunk_model, field_name):
+            continue
+
+        query = session.query(chunk_model).filter(getattr(chunk_model, field_name) == chunk_id)
+        query = _apply_chunk_scope(query, chunk_model, tenant_id=tenant_id, kb_uid=kb_uid)
+        query = _prefer_current_chunk_rows(query, chunk_model)
+        chunk = query.first()
+        if chunk is not None:
+            text = getattr(chunk, "chunk_text", None)
+            return str(text) if text is not None else None
+    return None
+
+
+def _apply_chunk_scope(
+    query: Any,
+    chunk_model: Any,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+) -> Any:
+    if tenant_id and hasattr(chunk_model, "tenant_id"):
+        query = query.filter(chunk_model.tenant_id == tenant_id)
+    if kb_uid and hasattr(chunk_model, "kb_uid"):
+        query = query.filter(chunk_model.kb_uid == kb_uid)
+    return query
+
+
+def _prefer_current_chunk_rows(query: Any, chunk_model: Any) -> Any:
+    from sqlalchemy import case
+
+    order_clauses = []
+    if hasattr(chunk_model, "is_active"):
+        order_clauses.append(case((chunk_model.is_active.is_(True), 1), else_=0).desc())
+    if hasattr(chunk_model, "status"):
+        order_clauses.append(case((chunk_model.status == "active", 1), else_=0).desc())
+    if hasattr(chunk_model, "generation"):
+        order_clauses.append(chunk_model.generation.desc())
+    if hasattr(chunk_model, "created_at"):
+        order_clauses.append(chunk_model.created_at.desc())
+    if hasattr(chunk_model, "id"):
+        order_clauses.append(chunk_model.id.desc())
+    if order_clauses:
+        query = query.order_by(*order_clauses)
+    return query
 
 
 def _sign_scope(tenant_id: str, kb_uid: str) -> str:
@@ -217,6 +309,7 @@ def main(argv: list[str] | None = None) -> None:
     artifacts: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     token_cache: dict[str, Any] = {"token": None, "last": 0.0}
+    chunk_lookup = create_scoped_chunk_text_lookup(args.tenant_id, args.kb_uid)
 
     def scope_token() -> str:
         if token_cache["token"] is None or time.time() - float(token_cache["last"]) > 500:
@@ -224,37 +317,41 @@ def main(argv: list[str] | None = None) -> None:
             token_cache["last"] = time.time()
         return str(token_cache["token"])
 
-    with httpx.Client(timeout=300.0) as client:
-        for index, query in enumerate(queries, start=1):
-            question = str(query.get("question") or query.get("query") or "")
-            query_id = str(query.get("id") or query.get("query_id") or index)
-            print(f"[{index}/{len(queries)}] {query_id} {question[:80]}", flush=True)
+    try:
+        with httpx.Client(timeout=300.0) as client:
+            for index, query in enumerate(queries, start=1):
+                question = str(query.get("question") or query.get("query") or "")
+                query_id = str(query.get("id") or query.get("query_id") or index)
+                print(f"[{index}/{len(queries)}] {query_id} {question[:80]}", flush=True)
 
-            try:
-                events, ttfb_ms, total_latency_ms = _collect_one(
-                    client,
-                    engine_url=args.engine_url,
-                    question=question,
-                    scope_token=scope_token(),
-                    deep_search=_is_deep_search_case(query),
-                )
-            except Exception as exc:
-                failures.append(
-                    {"query_id": query_id, "question": question, "error": str(exc)}
-                )
-                events = _error_events(str(exc))
-                ttfb_ms = 0
-                total_latency_ms = 0
+                try:
+                    events, ttfb_ms, total_latency_ms = _collect_one(
+                        client,
+                        engine_url=args.engine_url,
+                        question=question,
+                        scope_token=scope_token(),
+                        deep_search=_is_deep_search_case(query),
+                    )
+                except Exception as exc:
+                    failures.append(
+                        {"query_id": query_id, "question": question, "error": str(exc)}
+                    )
+                    events = _error_events(str(exc))
+                    ttfb_ms = 0
+                    total_latency_ms = 0
 
-            artifacts.append(
-                build_artifact(
-                    query,
-                    events,
-                    ttfb_ms=ttfb_ms,
-                    total_latency_ms=total_latency_ms,
-                    lookup_chunk_text=_lookup_chunk_text,
-                ).to_dict()
-            )
+                artifacts.append(
+                    build_artifact(
+                        query,
+                        events,
+                        ttfb_ms=ttfb_ms,
+                        total_latency_ms=total_latency_ms,
+                        lookup_chunk_text=chunk_lookup,
+                        query_id_override=query_id,
+                    ).to_dict()
+                )
+    finally:
+        chunk_lookup.close()
 
     artifact_path = run_dir / "answer_artifacts.jsonl"
     summary_path = run_dir / "answer_summary.json"
