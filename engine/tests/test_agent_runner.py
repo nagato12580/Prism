@@ -566,6 +566,20 @@ class CountingEvidenceTool(FakeEvidenceTool):
         return super().invoke(args)
 
 
+class FakePartialMultiToolResumeModel:
+    def __init__(self):
+        self.calls = 0
+        self.final_messages = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        self.final_messages = list(messages)
+        return AIMessage(content="Multi-tool resumed final answer")
+
+
 class FakeGraphExplainTool:
     name = "knowledge_search"
 
@@ -1023,6 +1037,38 @@ def test_runner_resumes_from_model_response_checkpoint_executes_pending_tool():
     assert events[-2]["data"] == "Resumed final answer"
 
 
+def test_runner_resumes_legacy_model_response_checkpoint_executes_pending_tool():
+    recorder = FakeTraceRecorder()
+    source_runner = LangChainAgentRunner(
+        model=FakeCheckpointModel(),
+        tools=[FakeCheckpointTool()],
+    )
+
+    list(source_runner.stream("How?", [], trace_recorder=recorder))
+
+    checkpoint = next(
+        item["checkpoint"]
+        for item in recorder.checkpoints
+        if item["resume_status"] == "checkpointed"
+        and item["checkpoint"]["messages"][-1]["type"] == "ai"
+        and item["checkpoint"]["messages"][-1]["tool_calls"]
+    )
+    checkpoint.pop("phase")
+
+    resume_tool = CountingEvidenceTool()
+    lines = list(
+        LangChainAgentRunner(
+            model=FakeResumeModel(),
+            tools=[resume_tool],
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    events = [json.loads(line) for line in lines]
+    assert resume_tool.calls == 1
+    assert [event["type"] for event in events][-2:] == ["token", "done"]
+    assert events[-2]["data"] == "Resumed final answer"
+
+
 def test_runner_resumes_from_last_tool_checkpoint_forces_final_answer():
     recorder = FakeTraceRecorder()
     source_runner = LangChainAgentRunner(
@@ -1055,6 +1101,103 @@ def test_runner_resumes_from_last_tool_checkpoint_forces_final_answer():
     assert "error" not in [event["type"] for event in events]
     assert [event["type"] for event in events][-2:] == ["token", "done"]
     assert events[-2]["data"] == "Forced resumed final answer"
+
+
+def test_runner_resumes_legacy_last_tool_checkpoint_forces_final_answer():
+    recorder = FakeTraceRecorder()
+    source_runner = LangChainAgentRunner(
+        model=FakeCheckpointModel(),
+        tools=[FakeCheckpointTool()],
+        max_iterations=1,
+    )
+
+    list(source_runner.stream("How?", [], trace_recorder=recorder))
+
+    checkpoint = next(
+        item["checkpoint"]
+        for item in recorder.checkpoints
+        if item["resume_status"] == "checkpointed"
+        and item["checkpoint"]["messages"][-1]["type"] == "tool"
+    )
+    checkpoint.pop("phase")
+
+    model = FakeResumeForcedFinalModel()
+    lines = list(
+        LangChainAgentRunner(
+            model=model,
+            tools=[CountingEvidenceTool()],
+            max_iterations=1,
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    events = [json.loads(line) for line in lines]
+    assert model.calls == 1
+    assert "error" not in [event["type"] for event in events]
+    assert [event["type"] for event in events][-2:] == ["token", "done"]
+    assert events[-2]["data"] == "Forced resumed final answer"
+
+
+def test_runner_resumes_partial_multi_tool_checkpoint_without_synthetic_ai():
+    original_ai = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "call_first",
+                "name": "knowledge_search",
+                "args": {"query": "first"},
+            },
+            {
+                "id": "call_second",
+                "name": "knowledge_search",
+                "args": {"query": "second"},
+            },
+        ],
+    )
+    checkpoint = runner_mod._checkpoint_from_state(
+        query="How?",
+        effective_query="How?",
+        iteration=1,
+        messages=[
+            SystemMessage(content="system"),
+            HumanMessage(content="How?"),
+            original_ai,
+            ToolMessage(
+                content='{"status":"sufficient","summary":"First evidence."}',
+                tool_call_id="call_first",
+            ),
+        ],
+        runner_state={
+            "timed_out_tools": [],
+            "open_kb_document_counts": {},
+            "document_windows_by_file": {},
+        },
+        phase="tool_result",
+    )
+    model = FakePartialMultiToolResumeModel()
+    resume_tool = CountingEvidenceTool()
+
+    lines = list(
+        LangChainAgentRunner(
+            model=model,
+            tools=[resume_tool],
+            max_iterations=2,
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    events = [json.loads(line) for line in lines]
+    assert resume_tool.calls == 1
+    assert [event["type"] for event in events][-2:] == ["token", "done"]
+    assert events[-2]["data"] == "Multi-tool resumed final answer"
+    assert model.final_messages is not None
+    assert [
+        type(message)
+        for message in model.final_messages[-3:]
+    ] == [AIMessage, ToolMessage, ToolMessage]
+    assert model.final_messages[-3].tool_calls == original_ai.tool_calls
+    assert [
+        message.tool_call_id
+        for message in model.final_messages[-2:]
+    ] == ["call_first", "call_second"]
 
 
 def test_runner_reuses_successful_tool_result_for_duplicate_call():

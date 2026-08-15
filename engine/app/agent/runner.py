@@ -302,7 +302,60 @@ def _checkpoint_from_state(
                 runner_state.get("document_windows_by_file") or {}
             ),
         },
+        "resume_state": {
+            "has_grounding_evidence": bool(
+                runner_state.get("has_grounding_evidence") or False
+            ),
+            "force_answer_with_available_evidence": bool(
+                runner_state.get("force_answer_with_available_evidence") or False
+            ),
+            "forced_answer_text": (
+                runner_state.get("forced_answer_text")
+                if isinstance(runner_state.get("forced_answer_text"), str)
+                else None
+            ),
+            "ungrounded_insufficient_results": (
+                runner_state.get("ungrounded_insufficient_results")
+                if isinstance(runner_state.get("ungrounded_insufficient_results"), int)
+                and not isinstance(runner_state.get("ungrounded_insufficient_results"), bool)
+                and runner_state.get("ungrounded_insufficient_results") >= 0
+                else 0
+            ),
+            "pending_clarify": _json_safe_checkpoint_value(
+                runner_state.get("pending_clarify")
+            ),
+        },
     }
+
+
+def _inferred_checkpoint_phase(messages: list[Any]) -> str:
+    if not messages:
+        return "loop"
+    last = messages[-1]
+    if isinstance(last, AIMessage):
+        return "pending_tools" if getattr(last, "tool_calls", None) else "model_response"
+    if isinstance(last, ToolMessage):
+        return "tool_result"
+    return "loop"
+
+
+def _validated_pending_clarify(value: Any) -> tuple[str, list[dict[str, str]]] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    question, options = value
+    if not isinstance(question, str) or not isinstance(options, list):
+        return None
+    validated_options: list[dict[str, str]] = []
+    for option in options:
+        if not isinstance(option, dict):
+            return None
+        if not all(
+            isinstance(key, str) and isinstance(item, str)
+            for key, item in option.items()
+        ):
+            return None
+        validated_options.append(dict(option))
+    return question, validated_options
 
 
 def _state_from_checkpoint(
@@ -328,9 +381,15 @@ def _state_from_checkpoint(
     effective_query = checkpoint.get("effective_query")
     iteration = checkpoint.get("iteration")
     phase = checkpoint.get("phase")
+    resume_state = checkpoint.get("resume_state") or {}
+    if not isinstance(resume_state, dict):
+        resume_state = {}
     timed_out_tools = tool_state.get("timed_out_tools")
     open_kb_document_counts = tool_state.get("open_kb_document_counts")
     document_windows_by_file = tool_state.get("document_windows_by_file")
+    ungrounded_insufficient_results = resume_state.get(
+        "ungrounded_insufficient_results"
+    )
     sanitized_timed_out_tools = (
         {item for item in timed_out_tools if isinstance(item, str)}
         if isinstance(timed_out_tools, (list, tuple, set, frozenset))
@@ -379,10 +438,35 @@ def _state_from_checkpoint(
             and iteration >= 0
             else 0
         ),
-        "phase": phase if isinstance(phase, str) and phase else "loop",
+        "phase": (
+            phase
+            if isinstance(phase, str) and phase
+            else _inferred_checkpoint_phase(messages)
+        ),
         "timed_out_tools": sanitized_timed_out_tools,
         "open_kb_document_counts": sanitized_open_kb_document_counts,
         "document_windows_by_file": sanitized_document_windows_by_file,
+        "has_grounding_evidence": bool(
+            resume_state.get("has_grounding_evidence") or False
+        ),
+        "force_answer_with_available_evidence": bool(
+            resume_state.get("force_answer_with_available_evidence") or False
+        ),
+        "forced_answer_text": (
+            resume_state.get("forced_answer_text")
+            if isinstance(resume_state.get("forced_answer_text"), str)
+            else None
+        ),
+        "ungrounded_insufficient_results": (
+            ungrounded_insufficient_results
+            if isinstance(ungrounded_insufficient_results, int)
+            and not isinstance(ungrounded_insufficient_results, bool)
+            and ungrounded_insufficient_results >= 0
+            else 0
+        ),
+        "pending_clarify": _validated_pending_clarify(
+            resume_state.get("pending_clarify")
+        ),
     }
     return messages, state
 
@@ -1354,10 +1438,15 @@ class LangChainAgentRunner:
             return
         messages, state = restored
         self._pending_clarify = None
-        self._has_grounding_evidence = False
-        self._force_answer_with_available_evidence = False
-        self._forced_answer_text = None
-        self._ungrounded_insufficient_results = 0
+        self._has_grounding_evidence = bool(state.get("has_grounding_evidence"))
+        self._force_answer_with_available_evidence = bool(
+            state.get("force_answer_with_available_evidence")
+        )
+        self._forced_answer_text = state.get("forced_answer_text")
+        self._ungrounded_insufficient_results = int(
+            state.get("ungrounded_insufficient_results") or 0
+        )
+        self._pending_clarify = state.get("pending_clarify")
         self._active_continuation = None
         self._resume_consumed = False
         self._effective_objective_source = "checkpoint"
@@ -1393,12 +1482,27 @@ class LangChainAgentRunner:
         if resume_phase == "tool_result":
             pending_tool_calls = _pending_tool_calls_after_last_ai(messages)
             if pending_tool_calls:
-                yield from self._stream_with_pending_model_response(
+                yield from self._stream_pending_tool_result_calls(
                     query=query,
                     messages=messages,
-                    pending_response=AIMessage(content="", tool_calls=pending_tool_calls),
-                    start_iteration=checkpoint_iteration,
+                    pending_tool_calls=pending_tool_calls,
+                    iteration=checkpoint_iteration,
                     trace_recorder=trace_recorder,
+                )
+                if checkpoint_iteration >= self.max_iterations:
+                    yield from self._stream_iteration_limit_final(
+                        query=query,
+                        messages=messages,
+                        iteration=checkpoint_iteration,
+                        trace_recorder=trace_recorder,
+                    )
+                    return
+                yield from self._stream_from_messages(
+                    query=query,
+                    messages=messages,
+                    start_iteration=start_iteration,
+                    trace_recorder=trace_recorder,
+                    is_first_exchange=False,
                 )
                 return
             if checkpoint_iteration >= self.max_iterations:
@@ -1439,6 +1543,238 @@ class LangChainAgentRunner:
             )
         finally:
             self.model = original_model
+
+    def _checkpoint_runner_state(self) -> dict[str, Any]:
+        return {
+            "timed_out_tools": self._timed_out_tools,
+            "open_kb_document_counts": self._open_kb_document_counts,
+            "document_windows_by_file": self._document_windows_by_file,
+            "has_grounding_evidence": self._has_grounding_evidence,
+            "force_answer_with_available_evidence": (
+                self._force_answer_with_available_evidence
+            ),
+            "forced_answer_text": self._forced_answer_text,
+            "ungrounded_insufficient_results": self._ungrounded_insufficient_results,
+            "pending_clarify": self._pending_clarify,
+        }
+
+    def _stream_pending_tool_result_calls(
+        self,
+        *,
+        query: str,
+        messages: list[Any],
+        pending_tool_calls: list[Any],
+        iteration: int,
+        trace_recorder: Any | None = None,
+    ):
+        for tool_call in pending_tool_calls:
+            name = str(_call_value(tool_call, "name", ""))
+            tool_call_id = _resolved_tool_call_id(tool_call)
+            args = _call_value(tool_call, "args", {}) or {}
+            if not isinstance(args, dict):
+                args = {}
+            args = self._apply_active_resume(name, args)
+            query_arg = str(args.get("query") or args.get("question") or "")
+            logger.info(
+                "[agent] tool_call tool=%s tool_call_id=%s query=%s",
+                name,
+                tool_call_id,
+                quoted(query_arg),
+            )
+            _record_trace_step(
+                trace_recorder,
+                step_type="tool_call",
+                input_json={
+                    "tool": name,
+                    "call_id": tool_call_id,
+                    "args": args,
+                    "query": query_arg,
+                },
+                tool_name=name,
+                tool_call_id=tool_call_id,
+            )
+            yield tool_call_event(name, query_arg)
+
+            result_text, payload, status, latency_ms = self._invoke_tool(name, args)
+            summary = str(
+                payload.get("summary") or payload.get("question") or result_text
+            )
+            logger.info(
+                "[agent] tool_result tool=%s status=%s latency_ms=%s summary=%s",
+                name,
+                status,
+                latency_ms,
+                quoted(summary),
+            )
+            stats = payload.get("stats")
+            trace_steps = payload.get("trace_steps")
+            if not trace_steps and isinstance(stats, dict):
+                trace_steps = stats.get("deep_trace_steps") or stats.get("trace_steps")
+            evidence_items = payload.get("evidence_items")
+            if not isinstance(evidence_items, list):
+                evidence_items = None
+            has_meaningful_evidence = _payload_has_meaningful_evidence(payload)
+            _record_trace_step(
+                trace_recorder,
+                step_type="tool_result",
+                input_json={
+                    "tool": name,
+                    "call_id": tool_call_id,
+                    "args": args,
+                    "query": query_arg,
+                    "reused": False,
+                },
+                output_json={
+                    "status": status,
+                    "summary": summary,
+                    "stats": stats,
+                    "trace_steps": trace_steps,
+                    "evidence_items": evidence_items,
+                    "payload": payload,
+                    "latency_ms": latency_ms,
+                },
+                status=status,
+                tool_name=name,
+                tool_call_id=tool_call_id,
+                latency_ms=latency_ms,
+                evidence_items=evidence_items,
+            )
+            yield tool_result_event(
+                tool=name,
+                status=status,
+                summary=summary,
+                query=query_arg,
+                stats=stats,
+                latency_ms=latency_ms,
+                trace_steps=trace_steps,
+                evidence_items=evidence_items,
+            )
+
+            sources = payload.get("sources") or []
+            evidence = payload.get("evidence") or []
+            payload_status = str(payload.get("status") or "").lower()
+            if (
+                status == "success"
+                and (
+                    has_meaningful_evidence
+                    or (
+                        payload_status == "sufficient"
+                        and bool(sources or evidence_items or evidence)
+                    )
+                )
+            ):
+                self._has_grounding_evidence = True
+            if sources:
+                yield sources_event(sources)
+
+            messages.append(ToolMessage(content=result_text, tool_call_id=tool_call_id))
+            open_kb_document_count = None
+            if name == "open_kb_document":
+                self._track_document_window(payload, status)
+                open_kb_document_count = self._record_open_kb_document_call(args)
+            self._apply_post_tool_state(
+                name=name,
+                args=args,
+                status=status,
+                payload=payload,
+                payload_status=payload_status,
+                has_meaningful_evidence=has_meaningful_evidence,
+                open_kb_document_count=open_kb_document_count,
+                tool_call_id=tool_call_id,
+                messages=messages,
+            )
+            _save_trace_checkpoint(
+                trace_recorder,
+                query=query,
+                effective_query=self._effective_query,
+                iteration=iteration,
+                messages=messages,
+                runner_state=self._checkpoint_runner_state(),
+                phase="tool_result",
+            )
+
+    def _apply_post_tool_state(
+        self,
+        *,
+        name: str,
+        args: dict[str, Any],
+        status: str,
+        payload: dict[str, Any],
+        payload_status: str,
+        has_meaningful_evidence: bool,
+        open_kb_document_count: int | None,
+        tool_call_id: str,
+        messages: list[Any],
+    ) -> None:
+        if (
+            status == "success"
+            and payload_status == "insufficient"
+            and not has_meaningful_evidence
+        ):
+            self._ungrounded_insufficient_results += 1
+        else:
+            self._ungrounded_insufficient_results = 0
+
+        if (
+            status == "error"
+            and payload.get("summary") == f"Unknown tool: {name}"
+            and self._has_grounding_evidence
+        ):
+            self._force_answer_with_available_evidence = True
+            messages.append(
+                SystemMessage(
+                    content=(
+                        f"The requested tool `{name}` is unavailable in this chat mode. "
+                        "Do not call more tools. Answer now using only the evidence already "
+                        "returned in tool messages. If evidence is incomplete, say so clearly."
+                    )
+                )
+            )
+        elif (
+            name == "open_kb_document"
+            and open_kb_document_count is not None
+            and open_kb_document_count >= OPEN_KB_DOCUMENT_PER_FILE_LIMIT
+        ):
+            self._force_answer_with_available_evidence = True
+            self._forced_answer_text = FORCED_PARTIAL_DOCUMENT_ANSWER
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "You have already opened this knowledge-base document 5 times in this "
+                        "answer. Do not call more tools. Answer now using the document content "
+                        "already returned in tool messages. Clearly tell the user the full "
+                        "document has not been completely read and ask whether to continue."
+                    )
+                )
+            )
+        elif self._ungrounded_insufficient_results >= 2:
+            self._force_answer_with_available_evidence = True
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "The last retrieval tools returned no usable grounded evidence. "
+                        "Do not call more tools. Answer now by clearly stating that the "
+                        "current knowledge base does not contain usable supporting evidence "
+                        "for this question."
+                    )
+                )
+            )
+
+        clarify = _payload_clarify(payload)
+        if clarify is not None:
+            if self.clarify_depth >= 1:
+                logger.info(
+                    "[agent] clarify_suppressed depth=%s question=%s",
+                    self.clarify_depth,
+                    quoted(clarify[0]),
+                )
+            else:
+                logger.info(
+                    "[agent] clarify_pending question=%s options=%s",
+                    quoted(clarify[0]),
+                    len(clarify[1]),
+                )
+                self._pending_clarify = clarify
 
     def _stream_iteration_limit_final(
         self,
@@ -1496,11 +1832,7 @@ class LangChainAgentRunner:
             effective_query=self._effective_query,
             iteration=iteration,
             messages=[*synthesis_messages, forced_response],
-            runner_state={
-                "timed_out_tools": self._timed_out_tools,
-                "open_kb_document_counts": self._open_kb_document_counts,
-                "document_windows_by_file": self._document_windows_by_file,
-            },
+            runner_state=self._checkpoint_runner_state(),
             resume_status="completed",
             phase="completed",
         )
@@ -1573,11 +1905,7 @@ class LangChainAgentRunner:
                     effective_query=self._effective_query,
                     iteration=iteration,
                     messages=messages_with_response,
-                    runner_state={
-                        "timed_out_tools": self._timed_out_tools,
-                        "open_kb_document_counts": self._open_kb_document_counts,
-                        "document_windows_by_file": self._document_windows_by_file,
-                    },
+                    runner_state=self._checkpoint_runner_state(),
                     phase="pending_tools" if tool_calls else "model_response",
                 )
                 if self._force_answer_with_available_evidence:
@@ -1632,11 +1960,7 @@ class LangChainAgentRunner:
                         effective_query=self._effective_query,
                         iteration=iteration,
                         messages=messages_with_response,
-                        runner_state={
-                            "timed_out_tools": self._timed_out_tools,
-                            "open_kb_document_counts": self._open_kb_document_counts,
-                            "document_windows_by_file": self._document_windows_by_file,
-                        },
+                        runner_state=self._checkpoint_runner_state(),
                         resume_status="completed",
                         phase="completed",
                     )
@@ -1830,19 +2154,6 @@ class LangChainAgentRunner:
                         tool_call_id,
                         _message_role_summary(messages),
                     )
-                    _save_trace_checkpoint(
-                        trace_recorder,
-                        query=query,
-                        effective_query=self._effective_query,
-                        iteration=iteration,
-                        messages=messages,
-                        runner_state={
-                            "timed_out_tools": self._timed_out_tools,
-                            "open_kb_document_counts": self._open_kb_document_counts,
-                            "document_windows_by_file": self._document_windows_by_file,
-                        },
-                        phase="tool_result",
-                    )
 
                     if (
                         status == "success"
@@ -1890,6 +2201,15 @@ class LangChainAgentRunner:
                             messages,
                             required_tool_call_ids=[tool_call_id],
                         )
+                        _save_trace_checkpoint(
+                            trace_recorder,
+                            query=query,
+                            effective_query=self._effective_query,
+                            iteration=iteration,
+                            messages=messages,
+                            runner_state=self._checkpoint_runner_state(),
+                            phase="tool_result",
+                        )
                         _record_trace_step(
                             trace_recorder,
                             step_type="model_invoke",
@@ -1934,11 +2254,7 @@ class LangChainAgentRunner:
                             effective_query=self._effective_query,
                             iteration=iteration,
                             messages=[*synthesis_messages, forced_response],
-                            runner_state={
-                                "timed_out_tools": self._timed_out_tools,
-                                "open_kb_document_counts": self._open_kb_document_counts,
-                                "document_windows_by_file": self._document_windows_by_file,
-                            },
+                            runner_state=self._checkpoint_runner_state(),
                             resume_status="completed",
                             phase="completed",
                         )
@@ -1986,6 +2302,16 @@ class LangChainAgentRunner:
                                 len(clarify[1]),
                             )
                             self._pending_clarify = clarify
+
+                    _save_trace_checkpoint(
+                        trace_recorder,
+                        query=query,
+                        effective_query=self._effective_query,
+                        iteration=iteration,
+                        messages=messages,
+                        runner_state=self._checkpoint_runner_state(),
+                        phase="tool_result",
+                    )
 
                 if iteration == self.max_iterations:
                     required_tool_call_ids = [
@@ -2036,11 +2362,7 @@ class LangChainAgentRunner:
                         effective_query=self._effective_query,
                         iteration=iteration,
                         messages=[*synthesis_messages, forced_response],
-                        runner_state={
-                            "timed_out_tools": self._timed_out_tools,
-                            "open_kb_document_counts": self._open_kb_document_counts,
-                            "document_windows_by_file": self._document_windows_by_file,
-                        },
+                        runner_state=self._checkpoint_runner_state(),
                         resume_status="completed",
                         phase="completed",
                     )
