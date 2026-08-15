@@ -1397,9 +1397,60 @@ class LangChainAgentRunner:
                     )
                     yield tool_call_event(name, query_arg)
 
-                    result_text, payload, status, latency_ms = self._invoke_tool(
-                        name, args
-                    )
+                    cached_tool_result = None
+                    if trace_recorder is not None and hasattr(
+                        trace_recorder, "find_successful_tool_result"
+                    ):
+                        try:
+                            candidate = trace_recorder.find_successful_tool_result(
+                                tool_name=name,
+                                args=args,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "[agent] trace_tool_result_lookup_failed tool=%s error=%s",
+                                name,
+                                quoted(str(exc), limit=300),
+                            )
+                        else:
+                            if isinstance(candidate, dict) and isinstance(
+                                candidate.get("output_json"), dict
+                            ):
+                                cached_tool_result = candidate
+
+                    dedupe_key = None
+                    if cached_tool_result is not None:
+                        cached_output = cached_tool_result["output_json"]
+                        cached_payload = cached_output.get("payload")
+                        if not isinstance(cached_payload, dict):
+                            cached_payload = dict(cached_output)
+                            cached_payload.pop("payload", None)
+                        payload = _enrich_payload_for_model(cached_payload)
+                        result_text = json.dumps(payload, ensure_ascii=False)
+                        status = str(cached_output.get("status") or "success")
+                        latency_ms = 0
+                        dedupe_key = cached_tool_result.get("dedupe_key")
+                    else:
+                        result_text, payload, status, latency_ms = self._invoke_tool(
+                            name, args
+                        )
+                        if (
+                            trace_recorder is not None
+                            and getattr(trace_recorder, "trace_id", None)
+                            and hasattr(trace_recorder, "tool_dedupe_key")
+                        ):
+                            try:
+                                dedupe_key = trace_recorder.tool_dedupe_key(
+                                    trace_id=trace_recorder.trace_id,
+                                    tool_name=name,
+                                    args=args,
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "[agent] trace_tool_dedupe_key_failed tool=%s error=%s",
+                                    name,
+                                    quoted(str(exc), limit=300),
+                                )
                     summary = str(
                         payload.get("summary")
                         or payload.get("question")
@@ -1429,6 +1480,7 @@ class LangChainAgentRunner:
                             "call_id": tool_call_id,
                             "args": args,
                             "query": query_arg,
+                            "reused": cached_tool_result is not None,
                         },
                         output_json={
                             "status": status,
@@ -1441,6 +1493,7 @@ class LangChainAgentRunner:
                         status=status,
                         tool_name=name,
                         tool_call_id=tool_call_id,
+                        dedupe_key=dedupe_key,
                         latency_ms=latency_ms,
                         evidence_items=evidence_items,
                     )

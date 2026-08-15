@@ -512,6 +512,37 @@ class FakeEvidenceModel:
         return FakeToolCall(content="Final answer")
 
 
+class FakeDuplicateToolModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls <= 2:
+            return FakeToolCall(
+                tool_calls=[
+                    {
+                        "id": f"call_dup_{self.calls}",
+                        "name": "knowledge_search",
+                        "args": {"query": "same"},
+                    }
+                ]
+            )
+        return FakeToolCall(content="Final answer")
+
+
+class CountingEvidenceTool(FakeEvidenceTool):
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, args):
+        self.calls += 1
+        return super().invoke(args)
+
+
 class FakeGraphExplainTool:
     name = "knowledge_search"
 
@@ -897,6 +928,42 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
     ]
     assert recorder.steps[3]["evidence_items"] == tool_result["data"]["evidence_items"]
     assert recorder.finished_status == "success"
+
+
+def test_runner_reuses_successful_tool_result_for_duplicate_call():
+    model = FakeDuplicateToolModel()
+    tool = CountingEvidenceTool()
+    recorder = FakeTraceRecorder()
+    cached = {}
+
+    def find_successful_tool_result(*, tool_name, args):
+        key = (tool_name, json.dumps(args, sort_keys=True))
+        if key not in cached:
+            return None
+        return cached[key]
+
+    def record_step(**kwargs):
+        recorder.steps.append(kwargs)
+        if kwargs["step_type"] == "tool_result" and kwargs["status"] == "success":
+            key = (
+                kwargs["tool_name"],
+                json.dumps(kwargs["input_json"]["args"], sort_keys=True),
+            )
+            cached[key] = {
+                "dedupe_key": kwargs["dedupe_key"],
+                "output_json": kwargs["output_json"],
+            }
+        return f"step-{len(recorder.steps)}"
+
+    recorder.find_successful_tool_result = find_successful_tool_result
+    recorder.record_step = record_step
+
+    runner = LangChainAgentRunner(model=model, tools=[tool])
+    lines = list(runner.stream("How?", [], trace_recorder=recorder))
+
+    assert tool.calls == 1
+    assert event_types(lines).count("tool_result") == 2
+    assert any(step.get("input_json", {}).get("reused") is True for step in recorder.steps)
 
 
 class FakeCheckpointTool:
@@ -2103,6 +2170,7 @@ def test_runner_trace_tool_result_records_full_payload_for_bad_case_analysis():
         "call_id": "call_trace",
         "args": {"query": "deep search"},
         "query": "deep search",
+        "reused": False,
     }
     assert tool_result_step["output_json"]["payload"]["status"] == "partial"
     assert tool_result_step["output_json"]["payload"]["trace_steps"][0]["agent"] == "SearcherAgent"
