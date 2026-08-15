@@ -198,3 +198,22 @@ def test_aggregate_numeric_metrics_ignores_missing_and_non_numeric_values():
             "max": 0.5,
         },
     }
+
+
+def test_aggregate_numeric_metrics_rounds_all_stats_to_four_decimals():
+    aggregate = aggregate_numeric_metrics(
+        [
+            {"faithfulness": 0.11111},
+            {"faithfulness": 0.22222},
+            {"faithfulness": 0.33333},
+            {"faithfulness": 0.44444},
+        ],
+        ["faithfulness"],
+    )
+
+    assert aggregate["faithfulness"] == {
+        "mean": 0.2778,
+        "median": 0.2778,
+        "min": 0.1111,
+        "max": 0.4444,
+    }
