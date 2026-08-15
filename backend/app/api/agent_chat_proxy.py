@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.database import get_db
+from backend.app.models import ChatMessage, ChatSession
 from backend.app.security.actor import ActorContext, get_actor_context
 from backend.app.security.knowledge_scope import AuthorizedKnowledgeScope, sign_scope
 from backend.app.services.knowledge_access import (
@@ -122,6 +123,29 @@ def _authorize_kbs(
     return allowed
 
 
+def _authorize_resume_request(db: Session, actor: ActorContext, req: ChatAnswerRequest) -> None:
+    if req.resume_trace_id is None:
+        return
+    if not req.session_id or not req.user_message_id:
+        raise HTTPException(status_code=400, detail="resume requires session_id and user_message_id")
+
+    session = db.query(ChatSession).filter(ChatSession.id == req.session_id).first()
+    if session is None or session.user_id != actor.actor_id:
+        raise HTTPException(status_code=403, detail="access denied to chat session")
+
+    message = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.id == req.user_message_id,
+            ChatMessage.session_id == req.session_id,
+            ChatMessage.role == "user",
+        )
+        .first()
+    )
+    if message is None:
+        raise HTTPException(status_code=403, detail="access denied to chat message")
+
+
 @router.post("/answer")
 async def chat_answer_proxy(
     req: ChatAnswerRequest,
@@ -129,6 +153,7 @@ async def chat_answer_proxy(
     actor: ActorContext = Depends(get_actor_context),
     db: Session = Depends(get_db),
 ):
+    _authorize_resume_request(db, actor, req)
     policy = KnowledgeAccessPolicy(db)
     allowed_kb_uids = _authorize_kbs(policy, actor, req.kb_uids)
     if req.include_personal_inbox:

@@ -212,6 +212,17 @@ test('finds latest resumable assistant message by trace id', () => {
     traceId: 'trace-new',
   })
   assert.equal(latestResumableAssistant([{ id: 'a3', role: 'assistant', content: 'done', streaming: false }]), undefined)
+  assert.deepEqual(latestResumableAssistant([
+    { id: 'u2', role: 'user', content: 'question' },
+    { id: 'a4', role: 'assistant', content: 'stopped', streaming: false, traceId: 'trace-stopped', agentStatus: 'interrupted' },
+  ]), {
+    messageId: 'a4',
+    traceId: 'trace-stopped',
+  })
+  assert.equal(latestResumableAssistant([
+    { id: 'u3', role: 'user', content: 'question' },
+    { id: 'a5', role: 'assistant', content: 'done', streaming: false, traceId: 'trace-done', agentStatus: 'done' },
+  ]), undefined)
 })
 
 test('chat page sends resume trace id without creating a new assistant placeholder', () => {

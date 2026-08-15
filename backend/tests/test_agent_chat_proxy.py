@@ -11,7 +11,7 @@ import json
 
 import backend.app.api.agent_chat_proxy as proxy_module
 from backend.app.api.agent_chat_proxy import ChatAnswerRequest
-from backend.app.models import KnowledgeTopic
+from backend.app.models import ChatMessage, ChatSession, KnowledgeTopic
 
 
 def _seed_owned_kb(db, kb_uid, owner="default-user", tenant="default-user"):
@@ -24,6 +24,19 @@ def _seed_owned_kb(db, kb_uid, owner="default-user", tenant="default-user"):
             owner_user_id=owner,
             name=kb_uid,
             status="active",
+        )
+    )
+    db.commit()
+
+
+def _seed_chat_turn(db, session_id="session-a", user_message_id="message-a", user_id="default-user"):
+    db.add(ChatSession(id=session_id, user_id=user_id, title="Resume session"))
+    db.add(
+        ChatMessage(
+            id=user_message_id,
+            session_id=session_id,
+            role="user",
+            content="continue",
         )
     )
     db.commit()
@@ -90,7 +103,8 @@ def test_backend_proxy_forwards_deep_search_depth_controls(client, db_session, m
     assert captured["payload"]["deep_search_depth"] == "deep"
 
 
-def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, monkeypatch):
+def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, db_session, monkeypatch):
+    _seed_chat_turn(db_session)
     captured = {}
 
     async def fake_stream(signed_token, payload):
@@ -117,6 +131,66 @@ def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, monkeypatch)
     assert captured["payload"]["resume_trace_id"] == "trace-resume"
     assert captured["payload"]["session_id"] == "session-a"
     assert captured["payload"]["user_message_id"] == "message-a"
+
+
+def test_chat_proxy_rejects_resume_for_other_users_session(client, db_session, monkeypatch):
+    _seed_chat_turn(db_session, user_id="alice")
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["payload"] = payload
+        yield b'{"type":"done","data":{}}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        headers={"X-Prism-Actor": "bob", "X-Prism-Tenant": "bob"},
+        json={
+            "query": "continue",
+            "resume_trace_id": "trace-resume",
+            "session_id": "session-a",
+            "user_message_id": "message-a",
+            "kb_uids": [],
+        },
+    )
+
+    assert response.status_code == 403
+    assert captured == {}
+
+
+def test_chat_proxy_rejects_resume_with_wrong_user_message(client, db_session, monkeypatch):
+    _seed_chat_turn(db_session)
+    db_session.add(
+        ChatMessage(
+            id="assistant-a",
+            session_id="session-a",
+            role="assistant",
+            content="partial",
+        )
+    )
+    db_session.commit()
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["payload"] = payload
+        yield b'{"type":"done","data":{}}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "query": "continue",
+            "resume_trace_id": "trace-resume",
+            "session_id": "session-a",
+            "user_message_id": "assistant-a",
+            "kb_uids": [],
+        },
+    )
+
+    assert response.status_code == 403
+    assert captured == {}
 
 
 def test_backend_proxy_signs_only_authorized_kbs(client, db_session, monkeypatch):

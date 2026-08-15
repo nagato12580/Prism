@@ -688,6 +688,7 @@ export function ChatPage() {
       const isUserStop = streamStoppedByUser && streamAbortController.signal.aborted
       if (isUserStop) {
         appendToLast(`\n\n已停止本次回答。`, sessionId, assistantMessageId)
+        setLastAgentStatus('interrupted', sessionId, assistantMessageId)
         finishLast(sessionId, assistantMessageId, 'error')
         return
       }
@@ -695,6 +696,7 @@ export function ChatPage() {
         ? '知识库检索时间过长，已停止本次请求。可以换个更具体的问题再试。'
         : (e as Error).message
       appendToLast('请求失败：' + message, sessionId, assistantMessageId)
+      setLastAgentStatus('error', sessionId, assistantMessageId)
       finishLast(sessionId, assistantMessageId, 'error')
     } finally {
       clearStreamTimeout()
