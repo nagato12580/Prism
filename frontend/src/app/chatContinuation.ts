@@ -59,6 +59,17 @@ export function buildAgentHistory(
   })
 }
 
+export function latestResumableAssistant(messages: Message[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    const traceId = typeof message.traceId === 'string' ? message.traceId.trim() : ''
+    if (message.role === 'assistant' && message.streaming && traceId) {
+      return { messageId: message.id, traceId }
+    }
+  }
+  return undefined
+}
+
 export function buildAssistantProcess(message: Message) {
   return {
     trace_id: message.traceId || null,

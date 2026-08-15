@@ -224,6 +224,19 @@ export interface ChatMessageUpdate {
   process?: any | null
 }
 
+export interface ChatAnswerRequest {
+  query: string
+  kb_uids: string[]
+  history: unknown[]
+  session_id: string
+  user_message_id: string
+  resume_trace_id?: string
+  deep_search_enabled: boolean
+  deep_search_depth: string
+  mode: 'standard' | 'deep'
+  include_personal_inbox: boolean
+}
+
 export interface TraceBindRequest {
   session_id: string
   assistant_message_id: string

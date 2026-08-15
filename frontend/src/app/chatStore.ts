@@ -6,6 +6,7 @@ export {
   applyAgentContinuationEvent,
   buildAgentHistory,
   buildAssistantProcess,
+  latestResumableAssistant,
   normalizeAgentContinuation,
 } from './chatContinuation'
 

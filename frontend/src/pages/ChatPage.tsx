@@ -29,6 +29,7 @@ import {
   applyAgentContinuationEvent,
   buildAgentHistory,
   buildAssistantProcess as buildAssistantProcessSnapshot,
+  latestResumableAssistant,
   normalizeEvidenceItems,
   type ClarifyOption,
   type ClarifyRequest,
@@ -257,6 +258,7 @@ export function ChatPage() {
   const replaceMessageId = useChatStore((s) => s.replaceMessageId)
   const getSessionMessages = useChatStore((s) => s.getSessionMessages)
   const restoreFromSession = useChatStore((s) => s.restoreFromSession)
+  const resumableAssistant = currentSessionId ? latestResumableAssistant(messages) : undefined
   const [showTopicPicker, setShowTopicPicker] = useState(false)
   const [kbSelectorOpen, setKbSelectorOpen] = useState(false)
   const [pendingKbQuery, setPendingKbQuery] = useState<string | null>(null)
@@ -381,15 +383,26 @@ export function ChatPage() {
     content: string = input,
     options?: { overrideKbUids?: string[] }
   ) {
-    if (!content.trim() || sending) return
-
-    const query = content.trim()
+    const activeSessionMessages = currentSessionId
+      ? useChatStore.getState().getSessionMessages(currentSessionId)
+      : messages
+    const resumable = currentSessionId ? latestResumableAssistant(activeSessionMessages) : undefined
+    const resumableIndex = resumable
+      ? activeSessionMessages.findIndex((message) => message.id === resumable.messageId)
+      : -1
+    const resumeUserMessage = resumableIndex > 0
+      ? [...activeSessionMessages.slice(0, resumableIndex)].reverse().find((message) => message.role === 'user')
+      : undefined
+    const resumeTraceId = resumable && resumeUserMessage ? resumable.traceId : undefined
+    const requestedContent = content.trim()
+    const query = requestedContent || (resumeTraceId ? (resumeUserMessage?.content || '').trim() : '')
+    if (!query || sending) return
 
     // Light client-side precheck: obvious document/knowledge queries sent with
     // no KB selected (and no personal-inbox search) open the selector up front
     // instead of surfacing an internal scope error from the engine.
     const hasOverride = !!options?.overrideKbUids?.length
-    if (!hasOverride && selectedTopicIds.length === 0 && !includePersonalInbox && mayNeedKnowledge(query)) {
+    if (!resumeTraceId && !hasOverride && selectedTopicIds.length === 0 && !includePersonalInbox && mayNeedKnowledge(query)) {
       setPendingKbQuery(query)
       setKbSelectorOpen(true)
       return
@@ -423,31 +436,36 @@ export function ChatPage() {
 
     const userMessageId = genId()
     const temporaryAssistantMessageId = genId()
-    let engineUserMessageId = userMessageId
-    let assistantMessageId = temporaryAssistantMessageId
-    let assistantPersistedId: string | null = null
-    let traceId: string | null = null
-    addMessage({ id: userMessageId, role: 'user', content: query }, sessionId)
-    addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
+    let engineUserMessageId = resumeTraceId && resumeUserMessage ? resumeUserMessage.id : userMessageId
+    let assistantMessageId = resumeTraceId ? (resumable?.messageId ?? temporaryAssistantMessageId) : temporaryAssistantMessageId
+    let assistantPersistedId: string | null = resumeTraceId ? (resumable?.messageId ?? null) : null
+    let traceId: string | null = resumeTraceId ?? null
+    let finalAssistantPersistPromise: Promise<Awaited<ReturnType<typeof persistAssistantPlaceholder>>> = Promise.resolve(undefined)
 
-    const userPersistPromise = persistUserMessage(sessionId, query)
-    await userPersistPromise
-    const assistantPersistPromise = persistAssistantPlaceholder(sessionId)
-    try {
-      const persistedUserMessage = await userPersistPromise
-      if (persistedUserMessage) {
-        replaceMessageId(sessionId, userMessageId, persistedUserMessage.id)
-        engineUserMessageId = persistedUserMessage.id
-      }
-    } catch { /* user persistence failure falls back to the optimistic id */ }
-    try {
-      const persisted = await assistantPersistPromise
-      if (persisted) {
-        assistantPersistedId = persisted.id
-        replaceMessageId(sessionId, temporaryAssistantMessageId, persisted.id)
-        assistantMessageId = persisted.id
-      }
-    } catch { /* placeholder persistence is best-effort */ }
+    if (!resumeTraceId) {
+      addMessage({ id: userMessageId, role: 'user', content: query }, sessionId)
+      addMessage({ id: temporaryAssistantMessageId, role: 'assistant', content: '', streaming: true }, sessionId)
+
+      const userPersistPromise = persistUserMessage(sessionId, query)
+      await userPersistPromise
+      const assistantPersistPromise = persistAssistantPlaceholder(sessionId)
+      finalAssistantPersistPromise = assistantPersistPromise
+      try {
+        const persistedUserMessage = await userPersistPromise
+        if (persistedUserMessage) {
+          replaceMessageId(sessionId, userMessageId, persistedUserMessage.id)
+          engineUserMessageId = persistedUserMessage.id
+        }
+      } catch { /* user persistence failure falls back to the optimistic id */ }
+      try {
+        const persisted = await assistantPersistPromise
+        if (persisted) {
+          assistantPersistedId = persisted.id
+          replaceMessageId(sessionId, temporaryAssistantMessageId, persisted.id)
+          assistantMessageId = persisted.id
+        }
+      } catch { /* placeholder persistence is best-effort */ }
+    }
 
     let titleReceived = false
     const streamAbortController = new AbortController()
@@ -626,6 +644,7 @@ export function ChatPage() {
           history,
           sessionId,
           engineUserMessageId,
+          resume_trace_id: resumeTraceId,
           deepSearchEnabled,
           deepSearchDepth,
           includePersonalInbox,
@@ -691,7 +710,7 @@ export function ChatPage() {
         if (aiMsg) {
           try {
             if (!assistantPersistedId) {
-              const persisted = await assistantPersistPromise
+              const persisted = await finalAssistantPersistPromise
               assistantPersistedId = persisted?.id || null
             }
             if (assistantPersistedId) await chatApi.updateMessage(sessionId, assistantPersistedId, {
@@ -1257,7 +1276,7 @@ export function ChatPage() {
                 type={sending ? 'button' : 'submit'}
                 aria-label={sending ? '停止生成' : '发送'}
                 onClick={sending ? stopStreaming : undefined}
-                disabled={!sending && !input.trim()}
+                disabled={!sending && !input.trim() && !resumableAssistant}
                 className={cn(
                   'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] disabled:bg-slate-300',
                   sending

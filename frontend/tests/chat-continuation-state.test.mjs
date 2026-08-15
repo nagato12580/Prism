@@ -197,6 +197,29 @@ test('buildAgentHistory filters before indexing and adds continuation only to th
   ])
 })
 
+test('finds latest resumable assistant message by trace id', () => {
+  const { latestResumableAssistant } = chatContinuationModule
+  assert.equal(typeof latestResumableAssistant, 'function')
+
+  const messages = [
+    { id: 'a1', role: 'assistant', content: 'done', streaming: false, traceId: 'trace-old' },
+    { id: 'u1', role: 'user', content: 'question' },
+    { id: 'a2', role: 'assistant', content: '', streaming: true, traceId: ' trace-new ' },
+  ]
+
+  assert.deepEqual(latestResumableAssistant(messages), {
+    messageId: 'a2',
+    traceId: 'trace-new',
+  })
+  assert.equal(latestResumableAssistant([{ id: 'a3', role: 'assistant', content: 'done', streaming: false }]), undefined)
+})
+
+test('chat page sends resume trace id without creating a new assistant placeholder', () => {
+  assert.match(chatPageSource, /resume_trace_id:\s*resumeTraceId/)
+  assert.match(chatPageSource, /assistantMessageId\s*=\s*resumeTraceId\s*\?\s*\(resumable\?\.messageId/)
+  assert.match(chatPageSource, /resumeTraceId\s*=\s*resumable\s*&&\s*resumeUserMessage\s*\?\s*resumable\.traceId/)
+})
+
 test('continuation event helper validates data and persists only after updating state', () => {
   const { applyAgentContinuationEvent } = chatContinuationModule
   assert.equal(typeof applyAgentContinuationEvent, 'function')

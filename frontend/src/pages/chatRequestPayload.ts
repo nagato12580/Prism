@@ -4,6 +4,7 @@ export interface BuildChatRequestPayloadArgs {
   history: unknown[]
   sessionId: string
   engineUserMessageId: string
+  resume_trace_id?: string
   deepSearchEnabled: boolean
   deepSearchDepth: string
   includePersonalInbox: boolean
@@ -15,6 +16,7 @@ export function buildChatRequestPayload({
   history,
   sessionId,
   engineUserMessageId,
+  resume_trace_id,
   deepSearchEnabled,
   deepSearchDepth,
   includePersonalInbox,
@@ -25,6 +27,7 @@ export function buildChatRequestPayload({
     history,
     session_id: sessionId,
     user_message_id: engineUserMessageId,
+    ...(resume_trace_id ? { resume_trace_id } : {}),
     deep_search_enabled: deepSearchEnabled,
     deep_search_depth: deepSearchDepth,
     mode: deepSearchEnabled ? 'deep' : 'standard',
