@@ -294,6 +294,32 @@ def test_runner_rejects_malformed_checkpoint():
     assert runner_mod._state_from_checkpoint({"version": 1, "messages": "bad"}) is None
 
 
+def test_runner_rejects_unknown_checkpoint_phase():
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "phase": "weird",
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+        ],
+        "tool_state": {},
+    }
+
+    assert runner_mod._state_from_checkpoint(checkpoint) is None
+
+    lines = list(
+        LangChainAgentRunner(
+            model=FakeResumeModel(),
+            tools=[FakeEvidenceTool()],
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
+
+
 @pytest.mark.parametrize("iteration", ["2", True, -10])
 def test_runner_checkpoint_state_defaults_malformed_scalar_fields(iteration):
     restored = runner_mod._state_from_checkpoint(
@@ -1037,6 +1063,77 @@ def test_runner_resumes_from_model_response_checkpoint_executes_pending_tool():
     assert events[-2]["data"] == "Resumed final answer"
 
 
+def test_runner_resumes_pending_tool_checkpoint_uses_dedupe():
+    checkpoint = runner_mod._checkpoint_from_state(
+        query="How?",
+        effective_query="How?",
+        iteration=1,
+        messages=[
+            SystemMessage(content="system"),
+            HumanMessage(content="How?"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_dedupe",
+                        "name": "knowledge_search",
+                        "args": {"query": "same"},
+                    }
+                ],
+            ),
+        ],
+        runner_state={
+            "timed_out_tools": [],
+            "open_kb_document_counts": {},
+            "document_windows_by_file": {},
+        },
+        phase="pending_tools",
+    )
+    tool = CountingEvidenceTool()
+    recorder = FakeTraceRecorder()
+    recorder.find_successful_tool_result = lambda *, tool_name, args: {
+        "dedupe_key": "cached-key",
+        "output_json": {
+            "status": "success",
+            "summary": "Cached evidence.",
+            "payload": {
+                "status": "sufficient",
+                "summary": "Cached evidence.",
+                "stats": {"result_count": 1},
+                "evidence_items": [
+                    {
+                        "evidence_id": "ev-cached",
+                        "chunk_id": "c-cached",
+                        "source_id": "s-cached",
+                        "display_title": "Cached title",
+                        "excerpt": "Cached evidence",
+                        "score": 0.9,
+                    }
+                ],
+            },
+            "latency_ms": 7,
+        },
+    }
+
+    lines = list(
+        LangChainAgentRunner(
+            model=FakeResumeModel(),
+            tools=[tool],
+        ).resume_stream(checkpoint, trace_recorder=recorder)
+    )
+
+    events = [json.loads(line) for line in lines]
+    tool_results = [event for event in events if event["type"] == "tool_result"]
+    result_steps = [
+        step for step in recorder.steps if step.get("step_type") == "tool_result"
+    ]
+    assert tool.calls == 0
+    assert tool_results
+    assert tool_results[0]["data"]["summary"] == "Cached evidence."
+    assert result_steps[-1]["input_json"]["reused"] is True
+    assert result_steps[-1]["dedupe_key"] == "cached-key"
+
+
 def test_runner_resumes_legacy_model_response_checkpoint_executes_pending_tool():
     recorder = FakeTraceRecorder()
     source_runner = LangChainAgentRunner(
@@ -1198,6 +1295,82 @@ def test_runner_resumes_partial_multi_tool_checkpoint_without_synthetic_ai():
         message.tool_call_id
         for message in model.final_messages[-2:]
     ] == ["call_first", "call_second"]
+
+
+def test_runner_resumes_open_document_pending_tool_preserves_cap_final():
+    original_ai = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "call_first",
+                "name": "knowledge_search",
+                "args": {"query": "first"},
+            },
+            {
+                "id": "call_open",
+                "name": "open_kb_document",
+                "args": {
+                    "kb_uid": "kb-a",
+                    "file_uid": "file-a",
+                    "offset": 4000,
+                    "window_size": 1000,
+                },
+            },
+        ],
+    )
+    checkpoint = runner_mod._checkpoint_from_state(
+        query="Summarize the full paper",
+        effective_query="Summarize the full paper",
+        iteration=1,
+        messages=[
+            SystemMessage(content="system"),
+            HumanMessage(content="Summarize the full paper"),
+            original_ai,
+            ToolMessage(
+                content='{"status":"sufficient","summary":"First evidence."}',
+                tool_call_id="call_first",
+            ),
+        ],
+        runner_state={
+            "timed_out_tools": [],
+            "open_kb_document_counts": {"file-a": 4},
+            "document_windows_by_file": {
+                "file-a": [
+                    {
+                        "kb_uid": "kb-a",
+                        "file_uid": "file-a",
+                        "offset": index * 1000,
+                        "next_offset": (index + 1) * 1000,
+                        "content": f"existing window {index}",
+                        "has_more_after": True,
+                    }
+                    for index in range(4)
+                ]
+            },
+        },
+        phase="tool_result",
+    )
+    tool = FakeOpenKbDocumentTool()
+    model = FakeLoopingOpenKbDocumentModel()
+
+    lines = list(
+        LangChainAgentRunner(
+            model=model,
+            tools=[FakeEvidenceTool(), tool],
+            max_iterations=5,
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    events = [json.loads(line) for line in lines]
+    token_text = "".join(
+        event["data"] for event in events if event["type"] == "token"
+    )
+    assert tool.calls == 1
+    assert "Agent reached the maximum tool iteration limit" not in "\n".join(lines)
+    assert event_types(lines)[-3:] == ["token", "continuation", "done"]
+    assert "5" in token_text
+    assert events[-2]["data"]["file_uid"] == "file-a"
+    assert events[-2]["data"]["next_offset"] > 4000
 
 
 def test_runner_reuses_successful_tool_result_for_duplicate_call():

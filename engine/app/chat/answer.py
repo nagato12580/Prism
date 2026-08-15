@@ -714,6 +714,43 @@ def answer_stream(
         1 for msg in history
         if msg.get("role") == "assistant" and msg.get("clarify")
     )
+    # Resume requests must use the saved checkpoint before any new-request preflight.
+    if resume_trace_id:
+        try:
+            checkpoint = AgentTraceRecorder.load_checkpoint(resume_trace_id)
+            if checkpoint is None:
+                yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
+                yield done_event()
+                return
+            runner = build_agent_runner(
+                topic_id=topic_id,
+                source_types=source_types,
+                clarify_depth=clarify_depth,
+                deep_search_enabled=deep_search_enabled,
+                deep_search_depth=deep_search_depth,
+                deep_search_top_k=deep_search_top_k,
+                graph_hops=graph_hops,
+                rag_max_iterations=rag_max_iterations,
+                knowledge_scope=knowledge_scope,
+                db_session=db_session,
+                retrieval_service=retrieval_service,
+                tool_groups=[],
+            )
+            logger.info("[chat] runner_ready")
+            yield from runner.resume_stream(checkpoint, trace_recorder=None)
+            logger.info("[chat] resume_stream_complete trace_id=%s", resume_trace_id)
+            return
+        except Exception as exc:
+            logger.exception(
+                "[chat] request_error error=%s",
+                quoted(str(exc), limit=300),
+            )
+            yield error_event(str(exc))
+            return
+        finally:
+            if db_session is not None:
+                db_session.close()
+
     # --- Intent classification → dynamic tool groups -------------------------
     intent_history = _recent_turn_history(history, settings.INTENT_RECENT_TURNS)
     intent = classify_intent(query, intent_history)
@@ -766,16 +803,6 @@ def answer_stream(
             tool_groups=tool_groups,
         )
         logger.info("[chat] runner_ready")
-        if resume_trace_id:
-            checkpoint = AgentTraceRecorder.load_checkpoint(resume_trace_id)
-            if checkpoint is None:
-                yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
-                yield done_event()
-                return
-            yield from runner.resume_stream(checkpoint, trace_recorder=None)
-            logger.info("[chat] resume_stream_complete trace_id=%s", resume_trace_id)
-            return
-
         trace_recorder = None
         try:
             candidate_recorder = AgentTraceRecorder(

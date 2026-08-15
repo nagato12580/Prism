@@ -339,6 +339,15 @@ def _inferred_checkpoint_phase(messages: list[Any]) -> str:
     return "loop"
 
 
+_ALLOWED_CHECKPOINT_PHASES = {
+    "loop",
+    "model_response",
+    "pending_tools",
+    "tool_result",
+    "completed",
+}
+
+
 def _validated_pending_clarify(value: Any) -> tuple[str, list[dict[str, str]]] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None
@@ -381,6 +390,12 @@ def _state_from_checkpoint(
     effective_query = checkpoint.get("effective_query")
     iteration = checkpoint.get("iteration")
     phase = checkpoint.get("phase")
+    if phase is None or (isinstance(phase, str) and not phase):
+        checkpoint_phase = _inferred_checkpoint_phase(messages)
+    elif isinstance(phase, str) and phase in _ALLOWED_CHECKPOINT_PHASES:
+        checkpoint_phase = phase
+    else:
+        return None
     resume_state = checkpoint.get("resume_state") or {}
     if not isinstance(resume_state, dict):
         resume_state = {}
@@ -438,11 +453,7 @@ def _state_from_checkpoint(
             and iteration >= 0
             else 0
         ),
-        "phase": (
-            phase
-            if isinstance(phase, str) and phase
-            else _inferred_checkpoint_phase(messages)
-        ),
+        "phase": checkpoint_phase,
         "timed_out_tools": sanitized_timed_out_tools,
         "open_kb_document_counts": sanitized_open_kb_document_counts,
         "document_windows_by_file": sanitized_document_windows_by_file,
@@ -1482,13 +1493,15 @@ class LangChainAgentRunner:
         if resume_phase == "tool_result":
             pending_tool_calls = _pending_tool_calls_after_last_ai(messages)
             if pending_tool_calls:
-                yield from self._stream_pending_tool_result_calls(
+                completed = yield from self._stream_pending_tool_result_calls(
                     query=query,
                     messages=messages,
                     pending_tool_calls=pending_tool_calls,
                     iteration=checkpoint_iteration,
                     trace_recorder=trace_recorder,
                 )
+                if completed:
+                    return
                 if checkpoint_iteration >= self.max_iterations:
                     yield from self._stream_iteration_limit_final(
                         query=query,
@@ -1558,6 +1571,159 @@ class LangChainAgentRunner:
             "pending_clarify": self._pending_clarify,
         }
 
+    def _resolve_tool_result(
+        self,
+        *,
+        name: str,
+        args: dict[str, Any],
+        trace_recorder: Any | None,
+    ) -> tuple[str, dict[str, Any], str, int, str | None, bool]:
+        cached_tool_result = None
+        if trace_recorder is not None and hasattr(
+            trace_recorder, "find_successful_tool_result"
+        ):
+            try:
+                candidate = trace_recorder.find_successful_tool_result(
+                    tool_name=name,
+                    args=args,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[agent] trace_tool_result_lookup_failed tool=%s error=%s",
+                    name,
+                    quoted(str(exc), limit=300),
+                )
+            else:
+                if isinstance(candidate, dict) and isinstance(
+                    candidate.get("output_json"), dict
+                ):
+                    candidate_status = str(
+                        candidate["output_json"].get("status") or "success"
+                    ).lower()
+                    if candidate_status == "success":
+                        cached_tool_result = candidate
+
+        dedupe_key = None
+        if cached_tool_result is not None:
+            cached_output = cached_tool_result["output_json"]
+            cached_payload = cached_output.get("payload")
+            if not isinstance(cached_payload, dict):
+                cached_payload = dict(cached_output)
+                cached_payload.pop("payload", None)
+            payload = _enrich_payload_for_model(cached_payload)
+            result_text = json.dumps(payload, ensure_ascii=False)
+            status = str(cached_output.get("status") or "success")
+            try:
+                latency_ms = int(cached_output.get("latency_ms") or 0)
+            except (TypeError, ValueError):
+                latency_ms = 0
+            dedupe_key = cached_tool_result.get("dedupe_key")
+            return result_text, payload, status, latency_ms, dedupe_key, True
+
+        result_text, payload, status, latency_ms = self._invoke_tool(name, args)
+        if (
+            trace_recorder is not None
+            and getattr(trace_recorder, "trace_id", None)
+            and hasattr(trace_recorder, "tool_dedupe_key")
+        ):
+            try:
+                dedupe_key = trace_recorder.tool_dedupe_key(
+                    trace_id=trace_recorder.trace_id,
+                    tool_name=name,
+                    args=args,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[agent] trace_tool_dedupe_key_failed tool=%s error=%s",
+                    name,
+                    quoted(str(exc), limit=300),
+                )
+        return result_text, payload, status, latency_ms, dedupe_key, False
+
+    def _stream_open_document_limit_final(
+        self,
+        *,
+        query: str,
+        messages: list[Any],
+        iteration: int,
+        tool_call_id: str,
+        args: dict[str, Any],
+        trace_recorder: Any | None,
+    ):
+        synthesis_messages = _document_cap_synthesis_messages(
+            self._effective_query,
+            messages,
+            required_tool_call_ids=[tool_call_id],
+        )
+        _save_trace_checkpoint(
+            trace_recorder,
+            query=query,
+            effective_query=self._effective_query,
+            iteration=iteration,
+            messages=messages,
+            runner_state=self._checkpoint_runner_state(),
+            phase="tool_result",
+        )
+        _record_trace_step(
+            trace_recorder,
+            step_type="model_invoke",
+            input_json={
+                "iteration": "forced_final_after_open_limit",
+                "message_count": len(synthesis_messages),
+                "message_roles": _message_roles(synthesis_messages),
+                "effective_objective_source": self._effective_objective_source,
+            },
+        )
+        forced_response = self.model.invoke(synthesis_messages)
+        forced_tool_calls = getattr(forced_response, "tool_calls", None) or []
+        forced_text = _message_content(forced_response)
+        _record_trace_step(
+            trace_recorder,
+            step_type="model_response",
+            input_json={"iteration": "forced_final_after_open_limit"},
+            output_json={
+                "iteration": "forced_final_after_open_limit",
+                "tool_calls": _tool_call_summaries(forced_tool_calls),
+                "content_preview": _content_preview(forced_text),
+            },
+        )
+        if forced_tool_calls or _looks_like_textual_tool_call(forced_text):
+            logger.warning(
+                "[agent] forced_final_after_open_limit_ignored_tool_call tool_calls=%s preview=%s",
+                len(forced_tool_calls),
+                quoted(forced_text, limit=300),
+            )
+            forced_text = ""
+        final_text = _normalize_document_cap_progress(
+            forced_text or _partial_document_answer_from_messages(messages)
+        )
+        _record_trace_step(
+            trace_recorder,
+            step_type="final_answer",
+            output_json={"content": final_text},
+        )
+        _save_trace_checkpoint(
+            trace_recorder,
+            query=query,
+            effective_query=self._effective_query,
+            iteration=iteration,
+            messages=[*synthesis_messages, forced_response],
+            runner_state=self._checkpoint_runner_state(),
+            resume_status="completed",
+            phase="completed",
+        )
+        _finish_trace(trace_recorder, "success")
+        logger.info(
+            "[agent] open_kb_document_limit_reached; returning forced final answer"
+        )
+        yield agent_status_event("generating answer")
+        yield token_event(final_text)
+        continuation = self._continuation_for_file(args)
+        if continuation is not None:
+            yield continuation_event(continuation)
+        logger.info("[agent] done")
+        yield done_event()
+
     def _stream_pending_tool_result_calls(
         self,
         *,
@@ -1595,7 +1761,18 @@ class LangChainAgentRunner:
             )
             yield tool_call_event(name, query_arg)
 
-            result_text, payload, status, latency_ms = self._invoke_tool(name, args)
+            (
+                result_text,
+                payload,
+                status,
+                latency_ms,
+                dedupe_key,
+                reused,
+            ) = self._resolve_tool_result(
+                name=name,
+                args=args,
+                trace_recorder=trace_recorder,
+            )
             summary = str(
                 payload.get("summary") or payload.get("question") or result_text
             )
@@ -1622,7 +1799,7 @@ class LangChainAgentRunner:
                     "call_id": tool_call_id,
                     "args": args,
                     "query": query_arg,
-                    "reused": False,
+                    "reused": reused,
                 },
                 output_json={
                     "status": status,
@@ -1636,6 +1813,7 @@ class LangChainAgentRunner:
                 status=status,
                 tool_name=name,
                 tool_call_id=tool_call_id,
+                dedupe_key=dedupe_key,
                 latency_ms=latency_ms,
                 evidence_items=evidence_items,
             )
@@ -1692,6 +1870,21 @@ class LangChainAgentRunner:
                 runner_state=self._checkpoint_runner_state(),
                 phase="tool_result",
             )
+            if (
+                name == "open_kb_document"
+                and open_kb_document_count is not None
+                and open_kb_document_count >= OPEN_KB_DOCUMENT_PER_FILE_LIMIT
+            ):
+                yield from self._stream_open_document_limit_final(
+                    query=query,
+                    messages=messages,
+                    iteration=iteration,
+                    tool_call_id=tool_call_id,
+                    args=args,
+                    trace_recorder=trace_recorder,
+                )
+                return True
+        return False
 
     def _apply_post_tool_state(
         self,
@@ -1998,67 +2191,18 @@ class LangChainAgentRunner:
                     )
                     yield tool_call_event(name, query_arg)
 
-                    cached_tool_result = None
-                    if trace_recorder is not None and hasattr(
-                        trace_recorder, "find_successful_tool_result"
-                    ):
-                        try:
-                            candidate = trace_recorder.find_successful_tool_result(
-                                tool_name=name,
-                                args=args,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "[agent] trace_tool_result_lookup_failed tool=%s error=%s",
-                                name,
-                                quoted(str(exc), limit=300),
-                            )
-                        else:
-                            if isinstance(candidate, dict) and isinstance(
-                                candidate.get("output_json"), dict
-                            ):
-                                candidate_status = str(
-                                    candidate["output_json"].get("status") or "success"
-                                ).lower()
-                                if candidate_status == "success":
-                                    cached_tool_result = candidate
-
-                    dedupe_key = None
-                    if cached_tool_result is not None:
-                        cached_output = cached_tool_result["output_json"]
-                        cached_payload = cached_output.get("payload")
-                        if not isinstance(cached_payload, dict):
-                            cached_payload = dict(cached_output)
-                            cached_payload.pop("payload", None)
-                        payload = _enrich_payload_for_model(cached_payload)
-                        result_text = json.dumps(payload, ensure_ascii=False)
-                        status = str(cached_output.get("status") or "success")
-                        try:
-                            latency_ms = int(cached_output.get("latency_ms") or 0)
-                        except (TypeError, ValueError):
-                            latency_ms = 0
-                        dedupe_key = cached_tool_result.get("dedupe_key")
-                    else:
-                        result_text, payload, status, latency_ms = self._invoke_tool(
-                            name, args
-                        )
-                        if (
-                            trace_recorder is not None
-                            and getattr(trace_recorder, "trace_id", None)
-                            and hasattr(trace_recorder, "tool_dedupe_key")
-                        ):
-                            try:
-                                dedupe_key = trace_recorder.tool_dedupe_key(
-                                    trace_id=trace_recorder.trace_id,
-                                    tool_name=name,
-                                    args=args,
-                                )
-                            except Exception as exc:
-                                logger.warning(
-                                    "[agent] trace_tool_dedupe_key_failed tool=%s error=%s",
-                                    name,
-                                    quoted(str(exc), limit=300),
-                                )
+                    (
+                        result_text,
+                        payload,
+                        status,
+                        latency_ms,
+                        dedupe_key,
+                        reused,
+                    ) = self._resolve_tool_result(
+                        name=name,
+                        args=args,
+                        trace_recorder=trace_recorder,
+                    )
                     summary = str(
                         payload.get("summary")
                         or payload.get("question")
@@ -2088,7 +2232,7 @@ class LangChainAgentRunner:
                             "call_id": tool_call_id,
                             "args": args,
                             "query": query_arg,
-                            "reused": cached_tool_result is not None,
+                            "reused": reused,
                         },
                         output_json={
                             "status": status,

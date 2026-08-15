@@ -250,6 +250,54 @@ def test_answer_stream_uses_existing_trace_checkpoint_on_resume(monkeypatch):
     assert json.loads(lines[0])["data"] == "resumed"
 
 
+def test_answer_stream_resume_bypasses_kb_selection_preflight(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "总结资料",
+        "effective_query": "总结资料",
+        "iteration": 1,
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "总结资料"},
+        ],
+        "tool_state": {},
+    }
+    calls = []
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            calls.append(("load", trace_id))
+            return checkpoint
+
+    class FakeRunner:
+        def resume_stream(self, loaded_checkpoint, trace_recorder=None):
+            calls.append(("resume", loaded_checkpoint, trace_recorder))
+            yield json.dumps({"type": "token", "data": "resumed from checkpoint"}) + "\n"
+            yield json.dumps({"type": "done", "data": {}}) + "\n"
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {
+            "groups": ["knowledge"],
+            "kb_specs": [],
+            "reasoning": "needs knowledge",
+        },
+    )
+
+    lines = list(answer.answer_stream("总结资料", [], resume_trace_id="trace-resume"))
+    events = [json.loads(line) for line in lines]
+
+    assert calls[0] == ("load", "trace-resume")
+    assert calls[1][0] == "resume"
+    assert [event["type"] for event in events] == ["token", "done"]
+    assert events[0]["data"] == "resumed from checkpoint"
+    assert not any(event["type"] == "needs_kb_selection" for event in events)
+
+
 def test_answer_stream_resume_missing_checkpoint_emits_done(monkeypatch):
     class FakeRecorder:
         @classmethod
