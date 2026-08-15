@@ -1482,8 +1482,10 @@ class LangChainAgentRunner:
                             tool_call_id=tool_call_id,
                         )
                     )
+                    open_kb_document_count = None
                     if name == "open_kb_document":
                         self._track_document_window(payload, status)
+                        open_kb_document_count = self._record_open_kb_document_call(args)
                     logger.info(
                         "[agent] appended_tool_message tool=%s tool_call_id=%s message_roles=%s",
                         name,
@@ -1529,7 +1531,8 @@ class LangChainAgentRunner:
                         )
                     elif (
                         name == "open_kb_document"
-                        and self._record_open_kb_document_call(args) >= OPEN_KB_DOCUMENT_PER_FILE_LIMIT
+                        and open_kb_document_count is not None
+                        and open_kb_document_count >= OPEN_KB_DOCUMENT_PER_FILE_LIMIT
                     ):
                         self._force_answer_with_available_evidence = True
                         self._forced_answer_text = FORCED_PARTIAL_DOCUMENT_ANSWER

@@ -1002,6 +1002,47 @@ def test_runner_saves_checkpoint_after_model_response_and_tool_result():
     assert recorder.checkpoints[-1]["resume_status"] == "completed"
 
 
+def test_runner_saves_open_kb_document_count_in_tool_checkpoint():
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(
+        model=FakeScriptedOpenModel(
+            [("open_kb_document", {"kb_uid": "kb-a", "file_uid": "file-a", "offset": 0})],
+            final_text="Done.",
+        ),
+        tools=[
+            FakeRecordingDocumentTool(
+                [
+                    {
+                        "kb_uid": "kb-a",
+                        "file_uid": "file-a",
+                        "offset": 0,
+                        "next_offset": 6,
+                        "content": "window",
+                        "has_more_after": True,
+                    }
+                ]
+            )
+        ],
+    )
+
+    list(
+        runner.stream(
+            "Open the document",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+
+    tool_checkpoint = next(
+        item["checkpoint"]
+        for item in recorder.checkpoints
+        if item["resume_status"] == "checkpointed"
+        and any(message["type"] == "tool" for message in item["checkpoint"]["messages"])
+    )
+
+    assert tool_checkpoint["tool_state"]["open_kb_document_counts"]["file-a"] == 1
+
+
 def test_runner_preserves_graph_explanations_in_tool_message_payload():
     model = FakeGraphExplainModel()
     runner = LangChainAgentRunner(model=model, tools=[FakeGraphExplainTool()])
