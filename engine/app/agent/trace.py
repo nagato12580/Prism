@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
+import hashlib
 import math
+import json
 from typing import Any, Callable
 from uuid import UUID
 
@@ -56,6 +58,20 @@ class AgentTraceRecorder:
         self._next_step_index = 0
         self._enabled = True
 
+    @property
+    def trace_id(self) -> str | None:
+        return self._trace_id
+
+    @staticmethod
+    def tool_dedupe_key(trace_id: str, tool_name: str, args: Any) -> str:
+        payload = {
+            "trace_id": trace_id,
+            "tool_name": tool_name,
+            "args": _dedupe_json_identity(args),
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
     def start(self) -> str | None:
         if not self._enabled:
             return None
@@ -103,6 +119,7 @@ class AgentTraceRecorder:
         status: str = "success",
         tool_name: str | None = None,
         tool_call_id: str | None = None,
+        dedupe_key: str | None = None,
         latency_ms: int | None = None,
         evidence_items: list[dict[str, Any]] | None = None,
     ) -> str | None:
@@ -120,6 +137,7 @@ class AgentTraceRecorder:
                 step_type=step_type,
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
+                dedupe_key=dedupe_key,
                 input_json=_json_safe(input_json),
                 output_json=_json_safe(output_json),
                 status=status,
@@ -150,6 +168,99 @@ class AgentTraceRecorder:
         finally:
             if db is not None:
                 self._close_safely("record_step", db)
+
+    def save_checkpoint(self, checkpoint: dict[str, Any], *, resume_status: str = "checkpointed") -> bool:
+        if not self._enabled or not self._trace_id:
+            return False
+
+        db = None
+        try:
+            from backend.app.models import AgentTrace
+
+            db = self._session_factory()
+            trace = db.query(AgentTrace).filter(AgentTrace.id == self._trace_id).first()
+            if trace is None:
+                raise LookupError("trace not found")
+            trace.checkpoint_json = _json_safe(checkpoint)
+            trace.resume_status = resume_status
+            trace.last_event_seq = (trace.last_event_seq or 0) + 1
+            db.commit()
+            return True
+        except Exception as exc:
+            self._disable("save_checkpoint", exc, db)
+            return False
+        finally:
+            if db is not None:
+                self._close_safely("save_checkpoint", db)
+
+    @classmethod
+    def load_checkpoint(
+        cls,
+        trace_id: str,
+        *,
+        session_factory: Callable[[], Any] = _default_session_factory,
+    ) -> dict[str, Any] | None:
+        db = None
+        try:
+            from backend.app.models import AgentTrace
+
+            db = session_factory()
+            trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).first()
+            if trace is None or trace.status not in {"running", "error"}:
+                return None
+            checkpoint = trace.checkpoint_json
+            return checkpoint if isinstance(checkpoint, dict) else None
+        except Exception as exc:
+            logger.warning(
+                "[agent.trace] load_checkpoint failed error=%s",
+                quoted(str(exc), limit=300),
+            )
+            return None
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception as exc:
+                    logger.warning(
+                        "[agent.trace] load_checkpoint close failed error=%s",
+                        quoted(str(exc), limit=300),
+                    )
+
+    def find_successful_tool_result(self, *, tool_name: str, args: Any) -> dict[str, Any] | None:
+        if not self._enabled or not self._trace_id:
+            return None
+
+        db = None
+        try:
+            from backend.app.models import AgentTraceStep
+
+            dedupe_key = self.tool_dedupe_key(
+                trace_id=self._trace_id,
+                tool_name=tool_name,
+                args=args,
+            )
+            db = self._session_factory()
+            step = (
+                db.query(AgentTraceStep)
+                .filter(
+                    AgentTraceStep.trace_id == self._trace_id,
+                    AgentTraceStep.tool_name == tool_name,
+                    AgentTraceStep.dedupe_key == dedupe_key,
+                    AgentTraceStep.step_type == "tool_result",
+                    AgentTraceStep.status == "success",
+                )
+                .order_by(AgentTraceStep.step_index.desc())
+                .first()
+            )
+            if step is None:
+                return None
+            return {"dedupe_key": dedupe_key, "output_json": step.output_json}
+        except Exception as exc:
+            self._disable("find_successful_tool_result", exc, db)
+            return None
+        finally:
+            if db is not None:
+                self._close_safely("find_successful_tool_result", db)
 
     def record_evidence_snapshot(
         self,
@@ -283,6 +394,62 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_json_safe(item) for item in value]
     return _safe_repr(value)
+
+
+def _dedupe_json_identity(value: Any, *, sensitive: bool = False) -> Any:
+    if sensitive and (
+        value is None
+        or isinstance(value, (bool, int, str, float, Decimal, datetime, date, UUID, bytes))
+    ):
+        return _sensitive_identity_for_value(value)
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, str):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Decimal):
+        try:
+            coerced = float(value)
+        except (OverflowError, ValueError):
+            return None
+        return coerced if math.isfinite(coerced) else None
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, bytes):
+        try:
+            decoded = value.decode("utf-8")
+        except UnicodeDecodeError:
+            decoded = _safe_repr(value)
+        return decoded
+    if isinstance(value, Mapping):
+        identity: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = str(_dedupe_json_identity(key))
+            child_sensitive = sensitive or _is_sensitive_key(safe_key)
+            output_key = _sensitive_key_identity(key) if sensitive else safe_key
+            identity[output_key] = _dedupe_json_identity(item, sensitive=child_sensitive)
+        return identity
+    if isinstance(value, (set, frozenset)):
+        items = [_dedupe_json_identity(item, sensitive=sensitive) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+    if isinstance(value, (list, tuple)):
+        return [_dedupe_json_identity(item, sensitive=sensitive) for item in value]
+    if sensitive:
+        return _sensitive_identity_for_value(value)
+    return _safe_repr(value)
+
+
+def _sensitive_identity_for_value(value: Any) -> dict[str, str]:
+    identity = _dedupe_json_identity(value, sensitive=False)
+    serialized = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return {"__sensitive_sha256__": hashlib.sha256(serialized.encode("utf-8")).hexdigest()}
+
+
+def _sensitive_key_identity(value: Any) -> str:
+    return f"sensitive:{_sensitive_identity_for_value(value)['__sensitive_sha256__']}"
 
 
 def _safe_repr(value: Any) -> str:

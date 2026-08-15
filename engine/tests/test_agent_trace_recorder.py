@@ -1,9 +1,11 @@
 import os
+import json
 import subprocess
 import sys
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -14,6 +16,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./_agent_trace_recorder_import.
 
 from backend.app.database import Base
 from backend.app.models import AgentTrace, AgentTraceEvidence, AgentTraceStep
+from engine.app.agent import trace as trace_module
 from engine.app.agent.trace import AgentTraceRecorder
 
 
@@ -102,6 +105,174 @@ def test_agent_trace_recorder_persists_run_step_evidence_and_finish(session_fact
         assert evidence.metadata_json == {"rank": 1}
     finally:
         db.close()
+
+
+def test_agent_trace_recorder_saves_and_loads_checkpoint(session_factory):
+    recorder = AgentTraceRecorder(
+        session_id="session-checkpoint",
+        user_message_id="message-checkpoint",
+        user_query="resume me",
+        model="test-model",
+        session_factory=session_factory,
+    )
+    trace_id = recorder.start()
+
+    checkpoint = {
+        "version": 1,
+        "query": "resume me",
+        "iteration": 2,
+        "messages": [{"type": "human", "content": "resume me"}],
+        "tool_state": {"timed_out_tools": []},
+    }
+    assert recorder.save_checkpoint(checkpoint, resume_status="checkpointed") is True
+
+    loaded = AgentTraceRecorder.load_checkpoint(
+        trace_id,
+        session_factory=session_factory,
+    )
+    assert loaded == checkpoint
+
+    db = session_factory()
+    try:
+        trace = db.query(AgentTrace).filter(AgentTrace.id == trace_id).one()
+        assert trace.resume_status == "checkpointed"
+        assert trace.last_event_seq == 1
+    finally:
+        db.close()
+
+
+def test_agent_trace_recorder_reuses_successful_tool_result_by_dedupe_key(session_factory):
+    recorder = AgentTraceRecorder(
+        session_id="session-dedupe",
+        user_message_id="message-dedupe",
+        user_query="dedupe",
+        model="test-model",
+        session_factory=session_factory,
+    )
+    trace_id = recorder.start()
+    dedupe_key = AgentTraceRecorder.tool_dedupe_key(
+        trace_id=trace_id,
+        tool_name="knowledge_search",
+        args={"query": "same", "top_k": 3},
+    )
+    recorder.record_step(
+        step_type="tool_result",
+        tool_name="knowledge_search",
+        tool_call_id="call-1",
+        dedupe_key=dedupe_key,
+        input_json={"args": {"query": "same", "top_k": 3}},
+        output_json={"payload": {"status": "success", "summary": "cached"}, "status": "success", "latency_ms": 12},
+        status="success",
+        latency_ms=12,
+    )
+
+    reused = recorder.find_successful_tool_result(
+        tool_name="knowledge_search",
+        args={"top_k": 3, "query": "same"},
+    )
+
+    assert reused == {
+        "dedupe_key": dedupe_key,
+        "output_json": {"payload": {"status": "success", "summary": "cached"}, "status": "success", "latency_ms": 12},
+    }
+
+
+def test_tool_dedupe_key_distinguishes_sensitive_values_without_exposing_them():
+    first = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="external_tool",
+        args={"query": "same", "api_key": "secret-one"},
+    )
+    second = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="external_tool",
+        args={"query": "same", "api_key": "secret-two"},
+    )
+    repeat = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="external_tool",
+        args={"api_key": "secret-one", "query": "same"},
+    )
+    identity_helper = getattr(trace_module, "_dedupe_json_identity", None)
+
+    assert first != second
+    assert first == repeat
+    assert identity_helper is not None
+    identity = identity_helper({"api_key": "secret-one"})
+    assert "secret-one" not in repr(identity)
+
+
+def test_dedupe_identity_hashes_nested_sensitive_values():
+    identity = trace_module._dedupe_json_identity({"api_key": {"value": "secret-one", "scopes": ["read"]}})
+    dumped = json.dumps(identity, sort_keys=True)
+    assert "secret-one" not in dumped
+    assert "read" not in dumped
+    assert "__sensitive_sha256__" in dumped
+
+    first = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="external_tool",
+        args={"api_key": {"value": "secret-one"}},
+    )
+    second = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="external_tool",
+        args={"api_key": {"value": "secret-two"}},
+    )
+    repeat = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="external_tool",
+        args={"api_key": {"value": "secret-one"}},
+    )
+    assert first != second
+    assert first == repeat
+
+
+def test_dedupe_identity_hashes_sensitive_nested_mapping_keys():
+    identity = trace_module._dedupe_json_identity({"api_key": {"secret-key": "secret-value"}})
+    dumped = json.dumps(identity, sort_keys=True)
+    assert "secret-key" not in dumped
+    assert "secret-value" not in dumped
+    assert "__sensitive_sha256__" in dumped
+
+
+def test_dedupe_identity_hashes_sensitive_non_string_leaves():
+    identity = trace_module._dedupe_json_identity({"access_token": {"expires": 123, "enabled": True}})
+    sensitive_subtree = identity["access_token"]
+
+    assert all(key.startswith("sensitive:") for key in sensitive_subtree)
+    assert all(
+        isinstance(value, dict) and set(value) == {"__sensitive_sha256__"}
+        for value in sensitive_subtree.values()
+    )
+    assert 123 not in sensitive_subtree.values()
+    assert True not in sensitive_subtree.values()
+
+
+def test_dedupe_identity_hashes_sensitive_object_fallback():
+    class SecretObject:
+        def __repr__(self):
+            return "secret-object-token"
+
+    identity = trace_module._dedupe_json_identity({"api_key": SecretObject()})
+    dumped = json.dumps(identity, sort_keys=True)
+    assert "secret-object-token" not in dumped
+    assert "__sensitive_sha256__" in dumped
+
+
+def test_tool_dedupe_key_is_deterministic_for_sets():
+    first = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="set_tool",
+        args={"tags": {"beta", "alpha", "gamma"}},
+    )
+    second = AgentTraceRecorder.tool_dedupe_key(
+        trace_id="trace-1",
+        tool_name="set_tool",
+        args={"tags": {"gamma", "beta", "alpha"}},
+    )
+
+    assert first == second
 
 
 def test_agent_trace_recorder_disables_after_session_factory_failure():
@@ -325,7 +496,7 @@ def test_agent_trace_module_import_does_not_create_default_engine_when_database_
 
     result = subprocess.run(
         [sys.executable, "-c", "import engine.app.agent.trace"],
-        cwd=os.getcwd(),
+        cwd=Path(__file__).resolve().parents[2],
         env=env,
         capture_output=True,
         text=True,
