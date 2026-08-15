@@ -788,12 +788,18 @@ def answer_stream(
                             "[chat] resume_trace_attach_skipped trace_id=%s",
                             resume_trace_id,
                         )
+                        yield error_event("Cannot resume agent run: trace ownership validation failed.")
+                        yield done_event()
+                        return
                 except Exception as exc:
                     logger.warning(
                         "[chat] resume_trace_attach_failed trace_id=%s error=%s",
                         resume_trace_id,
                         quoted(str(exc), limit=300),
                     )
+                    yield error_event("Cannot resume agent run: trace ownership validation failed.")
+                    yield done_event()
+                    return
             runner = build_agent_runner(
                 topic_id=topic_id,
                 source_types=source_types,

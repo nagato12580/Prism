@@ -520,16 +520,27 @@ def _pending_tool_calls_after_last_ai(messages: list[Any]) -> list[Any]:
     if last_ai_index is None:
         return []
 
-    completed_tool_call_ids = {
+    completed_tool_call_ids = [
         str(getattr(message, "tool_call_id", "") or "")
         for message in messages[last_ai_index + 1 :]
         if isinstance(message, ToolMessage)
-    }
-    return [
-        call
-        for call in last_tool_calls
-        if _resolved_tool_call_id(call) not in completed_tool_call_ids
     ]
+    pending_tool_calls = []
+    for call in last_tool_calls:
+        call_id = _resolved_tool_call_id(call)
+        if call_id in completed_tool_call_ids:
+            completed_tool_call_ids.remove(call_id)
+            continue
+
+        # Legacy checkpoints serialized tool calls without IDs and stored the
+        # tool result under the tool name. Match one such result to one call.
+        call_name = str(_call_value(call, "name", "") or "")
+        if call_name and call_name in completed_tool_call_ids:
+            completed_tool_call_ids.remove(call_name)
+            continue
+
+        pending_tool_calls.append(call)
+    return pending_tool_calls
 
 
 class _ResumePendingResponseModel:

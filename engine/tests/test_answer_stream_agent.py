@@ -415,6 +415,86 @@ def test_answer_stream_resume_attaches_existing_trace_recorder(monkeypatch):
     assert captured["trace_recorder"] is bound_recorder
 
 
+def test_answer_stream_resume_attach_none_emits_error_done(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [{"type": "human", "content": "How?"}],
+        "tool_state": {},
+    }
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id, **kwargs):
+            return checkpoint
+
+        @classmethod
+        def for_existing_trace(cls, trace_id, **kwargs):
+            return None
+
+    def fail_build_agent_runner(**kwargs):
+        raise AssertionError("runner should not be built")
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", fail_build_agent_runner)
+
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
+    events = [json.loads(line) for line in lines]
+
+    assert [event["type"] for event in events] == ["error", "done"]
+    assert "trace ownership validation failed" in events[0]["data"]
+
+
+def test_answer_stream_resume_attach_exception_emits_error_done(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [{"type": "human", "content": "How?"}],
+        "tool_state": {},
+    }
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id, **kwargs):
+            return checkpoint
+
+        @classmethod
+        def for_existing_trace(cls, trace_id, **kwargs):
+            raise RuntimeError("attach failed")
+
+    def fail_build_agent_runner(**kwargs):
+        raise AssertionError("runner should not be built")
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", fail_build_agent_runner)
+
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
+    events = [json.loads(line) for line in lines]
+
+    assert [event["type"] for event in events] == ["error", "done"]
+    assert "trace ownership validation failed" in events[0]["data"]
+
+
 def test_answer_stream_resume_requires_session_owner(monkeypatch):
     calls = []
 
