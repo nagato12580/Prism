@@ -757,6 +757,12 @@ def answer_stream(
     )
     # Resume requests must use the saved checkpoint before any new-request preflight.
     if resume_trace_id:
+        if not session_id or not user_message_id:
+            yield error_event("Cannot resume agent run: resume requires session/user message identifiers.")
+            yield done_event()
+            if db_session is not None:
+                db_session.close()
+            return
         try:
             checkpoint = AgentTraceRecorder.load_checkpoint(
                 resume_trace_id,

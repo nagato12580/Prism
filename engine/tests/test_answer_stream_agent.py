@@ -243,7 +243,15 @@ def test_answer_stream_uses_existing_trace_checkpoint_on_resume(monkeypatch):
         lambda query, history: {"groups": [], "kb_specs": [], "reasoning": ""},
     )
 
-    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
 
     assert calls[0] == ("load", "trace-resume")
     assert calls[1][0] == "resume"
@@ -291,7 +299,15 @@ def test_answer_stream_resume_infers_tool_groups_from_checkpoint(monkeypatch):
     monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
     monkeypatch.setattr(answer, "build_agent_runner", build)
 
-    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
 
     assert [json.loads(line)["type"] for line in lines] == ["done"]
     assert "knowledge" in captured["tool_groups"]
@@ -339,7 +355,15 @@ def test_answer_stream_resume_enables_deep_search_from_checkpoint(monkeypatch):
     monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
     monkeypatch.setattr(answer, "build_agent_runner", build)
 
-    lines = list(answer.answer_stream("continue", [], resume_trace_id="trace-deep"))
+    lines = list(
+        answer.answer_stream(
+            "continue",
+            [],
+            resume_trace_id="trace-deep",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
 
     assert [json.loads(line)["type"] for line in lines] == ["done"]
     assert "knowledge" in captured["tool_groups"]
@@ -376,11 +400,42 @@ def test_answer_stream_resume_attaches_existing_trace_recorder(monkeypatch):
     monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
     monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
 
-    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
 
     assert [json.loads(line)["type"] for line in lines] == ["done"]
     assert captured["attached_trace_id"] == "trace-resume"
     assert captured["trace_recorder"] is bound_recorder
+
+
+def test_answer_stream_resume_requires_session_owner(monkeypatch):
+    calls = []
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id, **kwargs):
+            calls.append(("load", trace_id, kwargs))
+            raise AssertionError("load_checkpoint should not be called")
+
+    def fail_build_agent_runner(**kwargs):
+        raise AssertionError("runner should not be built")
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", fail_build_agent_runner)
+
+    lines = list(answer.answer_stream("continue", [], resume_trace_id="trace-only"))
+    events = [json.loads(line) for line in lines]
+
+    assert [event["type"] for event in events] == ["error", "done"]
+    assert "resume requires session/user message identifiers" in events[0]["data"]
+    assert calls == []
 
 
 def test_answer_stream_resume_loads_trace_with_session_owner(monkeypatch):
@@ -485,7 +540,15 @@ def test_answer_stream_resume_bypasses_kb_selection_preflight(monkeypatch):
         },
     )
 
-    lines = list(answer.answer_stream("总结资料", [], resume_trace_id="trace-resume"))
+    lines = list(
+        answer.answer_stream(
+            "总结资料",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
     events = [json.loads(line) for line in lines]
 
     assert calls[0] == ("load", "trace-resume")
@@ -509,7 +572,15 @@ def test_answer_stream_resume_missing_checkpoint_emits_done(monkeypatch):
         lambda query, history: {"groups": [], "kb_specs": [], "reasoning": ""},
     )
 
-    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-missing"))
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-missing",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
 
     assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
 
@@ -535,7 +606,15 @@ def test_answer_stream_resume_exception_emits_done(monkeypatch):
     monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
     monkeypatch.setattr(answer, "build_agent_runner", build)
 
-    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+    lines = list(
+        answer.answer_stream(
+            "How?",
+            [],
+            resume_trace_id="trace-resume",
+            session_id="session-a",
+            user_message_id="message-a",
+        )
+    )
 
     assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
 

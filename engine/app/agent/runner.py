@@ -248,7 +248,7 @@ def _deserialize_message_from_checkpoint(item: Any) -> Any | None:
         tool_calls = []
         if not isinstance(raw_tool_calls, list):
             return None
-        for tool_call in raw_tool_calls:
+        for index, tool_call in enumerate(raw_tool_calls):
             if not isinstance(tool_call, dict):
                 return None
             raw_tool_call_id = tool_call.get("id")
@@ -262,7 +262,7 @@ def _deserialize_message_from_checkpoint(item: Any) -> Any | None:
             ):
                 return None
             restored_tool_call = dict(tool_call)
-            restored_tool_call["id"] = raw_tool_call_id or tool_name
+            restored_tool_call["id"] = raw_tool_call_id or f"{tool_name}:{index}"
             tool_calls.append(restored_tool_call)
         try:
             return AIMessage(content=content, tool_calls=tool_calls)

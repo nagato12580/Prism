@@ -1381,6 +1381,86 @@ def test_runner_resumes_partial_multi_tool_checkpoint_without_synthetic_ai():
     ] == ["call_first", "call_second"]
 
 
+def test_runner_resumes_partial_same_tool_checkpoint_without_ids():
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "phase": "tool_result",
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+            {
+                "type": "ai",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "name": "knowledge_search",
+                        "args": {"query": "first"},
+                    },
+                    {
+                        "id": "",
+                        "name": "knowledge_search",
+                        "args": {"query": "second"},
+                    },
+                ],
+            },
+            {
+                "type": "tool",
+                "content": '{"status":"sufficient","summary":"First evidence."}',
+                "tool_call_id": "knowledge_search:0",
+            },
+        ],
+        "tool_state": {
+            "timed_out_tools": [],
+            "open_kb_document_counts": {},
+            "document_windows_by_file": {},
+        },
+    }
+    model = FakePartialMultiToolResumeModel()
+    resume_tool = CountingEvidenceTool()
+    seen_args = []
+    original_invoke = resume_tool.invoke
+
+    def capture_args(args):
+        seen_args.append(dict(args))
+        return original_invoke(args)
+
+    resume_tool.invoke = capture_args
+
+    lines = list(
+        LangChainAgentRunner(
+            model=model,
+            tools=[resume_tool],
+            max_iterations=2,
+        ).resume_stream(checkpoint, trace_recorder=FakeTraceRecorder())
+    )
+
+    events = [json.loads(line) for line in lines]
+    assert resume_tool.calls == 1
+    assert seen_args == [{"query": "second"}]
+    assert [event["type"] for event in events][-2:] == ["token", "done"]
+    assert events[-2]["data"] == "Multi-tool resumed final answer"
+    assert model.final_messages is not None
+    assert [
+        type(message)
+        for message in model.final_messages[-3:]
+    ] == [AIMessage, ToolMessage, ToolMessage]
+    assert [
+        call["id"]
+        for call in model.final_messages[-3].tool_calls
+    ] == ["knowledge_search:0", "knowledge_search:1"]
+    assert [
+        call["args"]
+        for call in model.final_messages[-3].tool_calls
+    ] == [{"query": "first"}, {"query": "second"}]
+    assert [
+        message.tool_call_id
+        for message in model.final_messages[-2:]
+    ] == ["knowledge_search:0", "knowledge_search:1"]
+
+
 def test_runner_resumes_open_document_pending_tool_preserves_cap_final():
     original_ai = AIMessage(
         content="",
