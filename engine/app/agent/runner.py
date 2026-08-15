@@ -193,6 +193,178 @@ def _message_content(message: Any) -> str:
     return "".join(visible_text)
 
 
+def _serialize_message_for_checkpoint(message: Any) -> dict[str, Any] | None:
+    content = _message_content(message)
+    if isinstance(message, SystemMessage):
+        return {"type": "system", "content": content}
+    if isinstance(message, HumanMessage):
+        return {"type": "human", "content": content}
+    if isinstance(message, AIMessage):
+        return {
+            "type": "ai",
+            "content": content,
+            "tool_calls": getattr(message, "tool_calls", None) or [],
+        }
+    if isinstance(message, ToolMessage):
+        return {
+            "type": "tool",
+            "content": content,
+            "tool_call_id": getattr(message, "tool_call_id", None),
+        }
+    return None
+
+
+def _deserialize_message_from_checkpoint(item: Any) -> Any | None:
+    if not isinstance(item, dict):
+        return None
+    content = item.get("content")
+    if not isinstance(content, str):
+        return None
+
+    message_type = item.get("type")
+    if message_type == "system":
+        return SystemMessage(content=content)
+    if message_type == "human":
+        return HumanMessage(content=content)
+    if message_type == "ai":
+        tool_calls = item["tool_calls"] if "tool_calls" in item else []
+        if not isinstance(tool_calls, list):
+            return None
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                return None
+            tool_call_id = tool_call.get("id")
+            tool_name = tool_call.get("name")
+            tool_args = tool_call.get("args")
+            if (
+                not isinstance(tool_call_id, str)
+                or not tool_call_id
+                or not isinstance(tool_name, str)
+                or not tool_name
+                or not isinstance(tool_args, dict)
+            ):
+                return None
+        try:
+            return AIMessage(content=content, tool_calls=tool_calls)
+        except Exception:
+            return None
+    if message_type == "tool":
+        tool_call_id = item.get("tool_call_id")
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            return None
+        return ToolMessage(content=content, tool_call_id=tool_call_id)
+    return None
+
+
+def _checkpoint_from_state(
+    query: str,
+    effective_query: str,
+    iteration: int,
+    messages: list[Any],
+    runner_state: dict[str, Any],
+) -> dict[str, Any]:
+    serialized_messages = [
+        serialized
+        for message in messages
+        if (serialized := _serialize_message_for_checkpoint(message)) is not None
+    ]
+    return {
+        "version": 1,
+        "query": query,
+        "effective_query": effective_query,
+        "iteration": iteration,
+        "messages": serialized_messages,
+        "tool_state": {
+            "timed_out_tools": list(runner_state.get("timed_out_tools") or []),
+            "open_kb_document_counts": dict(
+                runner_state.get("open_kb_document_counts") or {}
+            ),
+            "document_windows_by_file": dict(
+                runner_state.get("document_windows_by_file") or {}
+            ),
+        },
+    }
+
+
+def _state_from_checkpoint(
+    checkpoint: Any,
+) -> tuple[list[Any], dict[str, Any]] | None:
+    if not isinstance(checkpoint, dict) or checkpoint.get("version") != 1:
+        return None
+    serialized_messages = checkpoint.get("messages")
+    if not isinstance(serialized_messages, list):
+        return None
+
+    messages: list[Any] = []
+    for item in serialized_messages:
+        message = _deserialize_message_from_checkpoint(item)
+        if message is None:
+            return None
+        messages.append(message)
+
+    tool_state = checkpoint.get("tool_state") or {}
+    if not isinstance(tool_state, dict):
+        tool_state = {}
+    query = checkpoint.get("query")
+    effective_query = checkpoint.get("effective_query")
+    iteration = checkpoint.get("iteration")
+    timed_out_tools = tool_state.get("timed_out_tools")
+    open_kb_document_counts = tool_state.get("open_kb_document_counts")
+    document_windows_by_file = tool_state.get("document_windows_by_file")
+    sanitized_timed_out_tools = (
+        {item for item in timed_out_tools if isinstance(item, str)}
+        if isinstance(timed_out_tools, (list, tuple, set, frozenset))
+        else set()
+    )
+    sanitized_open_kb_document_counts = {
+        key: value
+        for key, value in (
+            open_kb_document_counts.items()
+            if isinstance(open_kb_document_counts, dict)
+            else []
+        )
+        if isinstance(key, str)
+        and key
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
+    }
+    sanitized_document_windows_by_file = {}
+    for key, value in (
+        document_windows_by_file.items()
+        if isinstance(document_windows_by_file, dict)
+        else []
+    ):
+        if not isinstance(key, str) or not key or not isinstance(value, list):
+            continue
+        valid_windows = [
+            window
+            for candidate in value
+            if isinstance(candidate, dict)
+            and (
+                window := _validated_document_window(
+                    {"status": "success", "data": candidate}
+                )
+            )
+            is not None
+        ]
+        if valid_windows:
+            sanitized_document_windows_by_file[key] = valid_windows
+    state = {
+        "query": query if isinstance(query, str) else "",
+        "effective_query": effective_query if isinstance(effective_query, str) else "",
+        "iteration": (
+            iteration
+            if isinstance(iteration, int) and not isinstance(iteration, bool)
+            else 0
+        ),
+        "timed_out_tools": sanitized_timed_out_tools,
+        "open_kb_document_counts": sanitized_open_kb_document_counts,
+        "document_windows_by_file": sanitized_document_windows_by_file,
+    }
+    return messages, state
+
+
 def _call_value(tool_call: Any, key: str, default: Any = None) -> Any:
     if isinstance(tool_call, dict):
         return tool_call.get(key, default)

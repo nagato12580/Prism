@@ -5,7 +5,7 @@ import re
 import time
 
 import pytest
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///./_agent_runner_test.db"
@@ -205,6 +205,200 @@ class FakeUnknownToolRecoveryBoundModel:
 
 def event_types(lines):
     return [json.loads(line)["type"] for line in lines]
+
+
+def test_runner_checkpoint_round_trips_langchain_messages():
+    messages = [
+        SystemMessage(content="system"),
+        HumanMessage(content="hello"),
+        AIMessage(
+            content="need tool",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "name": "knowledge_search",
+                    "args": {"query": "x"},
+                }
+            ],
+        ),
+        ToolMessage(content='{"status":"success"}', tool_call_id="call-1"),
+        AIMessage(content="final"),
+    ]
+
+    payload = runner_mod._checkpoint_from_state(
+        query="hello",
+        effective_query="hello",
+        iteration=1,
+        messages=messages,
+        runner_state={
+            "timed_out_tools": [],
+            "open_kb_document_counts": {"file-a": 2},
+            "document_windows_by_file": {},
+        },
+    )
+    json.dumps(payload)
+    restored_messages, restored_state = runner_mod._state_from_checkpoint(payload)
+
+    assert payload["version"] == 1
+    assert [type(message) for message in restored_messages] == [
+        SystemMessage,
+        HumanMessage,
+        AIMessage,
+        ToolMessage,
+        AIMessage,
+    ]
+    assert restored_messages[2].tool_calls[0]["id"] == "call-1"
+    assert restored_messages[3].tool_call_id == "call-1"
+    assert restored_state["open_kb_document_counts"] == {"file-a": 2}
+
+
+@pytest.mark.parametrize(
+    "tool_calls",
+    [
+        "",
+        0,
+        False,
+        {},
+        ["bad"],
+        [{"id": "call-1", "name": "knowledge_search"}],
+        [{"id": "call-1", "name": "knowledge_search", "args": "bad"}],
+    ],
+)
+def test_runner_rejects_malformed_ai_tool_calls(tool_calls):
+    checkpoint = {
+        "version": 1,
+        "messages": [
+            {"type": "ai", "content": "", "tool_calls": tool_calls},
+        ],
+    }
+
+    assert runner_mod._state_from_checkpoint(checkpoint) is None
+
+
+def test_runner_accepts_ai_message_with_missing_tool_calls():
+    checkpoint = {
+        "version": 1,
+        "messages": [
+            {"type": "ai", "content": "final"},
+        ],
+    }
+
+    restored_messages, _ = runner_mod._state_from_checkpoint(checkpoint)
+
+    assert isinstance(restored_messages[0], AIMessage)
+    assert restored_messages[0].tool_calls == []
+
+
+def test_runner_rejects_malformed_checkpoint():
+    assert runner_mod._state_from_checkpoint({"version": 2}) is None
+    assert runner_mod._state_from_checkpoint({"version": 1, "messages": "bad"}) is None
+
+
+@pytest.mark.parametrize("iteration", ["2", True])
+def test_runner_checkpoint_state_defaults_malformed_scalar_fields(iteration):
+    restored = runner_mod._state_from_checkpoint(
+        {
+            "version": 1,
+            "query": {"bad": "query"},
+            "effective_query": ["bad"],
+            "iteration": iteration,
+            "messages": [{"type": "human", "content": "hello"}],
+            "tool_state": {},
+        }
+    )
+
+    assert restored is not None
+    _messages, state = restored
+    assert state["query"] == ""
+    assert state["effective_query"] == ""
+    assert state["iteration"] == 0
+
+
+def test_runner_checkpoint_state_defaults_malformed_tool_state_children():
+    restored = runner_mod._state_from_checkpoint(
+        {
+            "version": 1,
+            "messages": [{"type": "human", "content": "hello"}],
+            "tool_state": {
+                "timed_out_tools": 1,
+                "open_kb_document_counts": 1,
+                "document_windows_by_file": 1,
+            },
+        }
+    )
+
+    assert restored is not None
+    _messages, state = restored
+    assert state["timed_out_tools"] == set()
+    assert state["open_kb_document_counts"] == {}
+    assert state["document_windows_by_file"] == {}
+
+
+def test_runner_checkpoint_state_sanitizes_nested_tool_state_values():
+    valid_window = {
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "offset": 0,
+        "next_offset": 5,
+        "content": "hello",
+        "has_more_after": True,
+    }
+    invalid_next_offset_window = {
+        "kb_uid": "kb-a",
+        "file_uid": "file-a",
+        "offset": 0,
+        "next_offset": 10,
+        "content": "hello",
+        "has_more_after": True,
+    }
+    restored = runner_mod._state_from_checkpoint(
+        {
+            "version": 1,
+            "messages": [{"type": "human", "content": "hello"}],
+            "tool_state": {
+                "timed_out_tools": ["datetime", 3],
+                "open_kb_document_counts": {
+                    "file-a": 2,
+                    "file-b": "x",
+                    "file-c": True,
+                    "": 4,
+                },
+                "document_windows_by_file": {
+                    "file-a": [
+                        valid_window,
+                        {"next_offset": 10},
+                        invalid_next_offset_window,
+                        "bad",
+                    ],
+                    "file-b": "bad",
+                    "": [valid_window],
+                },
+            },
+        }
+    )
+
+    assert restored is not None
+    _messages, state = restored
+    assert state["timed_out_tools"] == {"datetime"}
+    assert state["open_kb_document_counts"] == {"file-a": 2}
+    assert state["document_windows_by_file"] == {"file-a": [valid_window]}
+
+
+def test_runner_checkpoint_serializes_structured_message_content_as_text():
+    message = AIMessage(content=[{"type": "text", "text": "visible"}])
+    payload = runner_mod._checkpoint_from_state(
+        query="q",
+        effective_query="q",
+        iteration=1,
+        messages=[message],
+        runner_state={},
+    )
+
+    restored = runner_mod._state_from_checkpoint(payload)
+
+    assert restored is not None
+    messages, _state = restored
+    assert messages[0].content == "visible"
 
 
 class FakeTraceRecorder:
