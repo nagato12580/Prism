@@ -294,7 +294,7 @@ def test_runner_rejects_malformed_checkpoint():
     assert runner_mod._state_from_checkpoint({"version": 1, "messages": "bad"}) is None
 
 
-@pytest.mark.parametrize("iteration", ["2", True])
+@pytest.mark.parametrize("iteration", ["2", True, -10])
 def test_runner_checkpoint_state_defaults_malformed_scalar_fields(iteration):
     restored = runner_mod._state_from_checkpoint(
         {
@@ -399,6 +399,43 @@ def test_runner_checkpoint_serializes_structured_message_content_as_text():
     assert restored is not None
     messages, _state = restored
     assert messages[0].content == "visible"
+
+
+def test_runner_checkpoint_serializes_ai_tool_calls_as_json_safe_payload():
+    sentinel = object()
+    message = AIMessage(
+        content="need tool",
+        tool_calls=[
+            {
+                "id": "call-1",
+                "name": "knowledge_search",
+                "args": {
+                    "query": "x",
+                    "filters": {"tags": {"alpha", "beta"}},
+                    "sentinel": sentinel,
+                },
+            }
+        ],
+    )
+
+    payload = runner_mod._checkpoint_from_state(
+        query="q",
+        effective_query="q",
+        iteration=1,
+        messages=[message],
+        runner_state={},
+    )
+    json.dumps(payload)
+    restored = runner_mod._state_from_checkpoint(payload)
+
+    assert restored is not None
+    messages, _state = restored
+    restored_call = messages[0].tool_calls[0]
+    assert restored_call["args"]["query"] == "x"
+    assert isinstance(restored_call["args"]["filters"]["tags"], str)
+    assert isinstance(restored_call["args"]["sentinel"], str)
+    assert message.tool_calls[0]["args"]["filters"]["tags"] == {"alpha", "beta"}
+    assert message.tool_calls[0]["args"]["sentinel"] is sentinel
 
 
 class FakeTraceRecorder:

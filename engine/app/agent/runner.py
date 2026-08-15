@@ -193,6 +193,21 @@ def _message_content(message: Any) -> str:
     return "".join(visible_text)
 
 
+def _json_safe_checkpoint_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_json_safe_checkpoint_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe_checkpoint_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe_checkpoint_value(item)
+            for key, item in value.items()
+        }
+    return str(value)
+
+
 def _serialize_message_for_checkpoint(message: Any) -> dict[str, Any] | None:
     content = _message_content(message)
     if isinstance(message, SystemMessage):
@@ -203,7 +218,9 @@ def _serialize_message_for_checkpoint(message: Any) -> dict[str, Any] | None:
         return {
             "type": "ai",
             "content": content,
-            "tool_calls": getattr(message, "tool_calls", None) or [],
+            "tool_calls": _json_safe_checkpoint_value(
+                getattr(message, "tool_calls", None) or []
+            ),
         }
     if isinstance(message, ToolMessage):
         return {
@@ -356,6 +373,7 @@ def _state_from_checkpoint(
         "iteration": (
             iteration
             if isinstance(iteration, int) and not isinstance(iteration, bool)
+            and iteration >= 0
             else 0
         ),
         "timed_out_tools": sanitized_timed_out_tools,
