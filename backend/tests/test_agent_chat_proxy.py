@@ -90,6 +90,35 @@ def test_backend_proxy_forwards_deep_search_depth_controls(client, db_session, m
     assert captured["payload"]["deep_search_depth"] == "deep"
 
 
+def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, monkeypatch):
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["token"] = signed_token
+        captured["payload"] = payload
+        yield b'{"type":"done","data":{}}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "query": "continue",
+            "history": [],
+            "resume_trace_id": "trace-resume",
+            "session_id": "session-a",
+            "user_message_id": "message-a",
+            "kb_uids": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["token"] == ""
+    assert captured["payload"]["resume_trace_id"] == "trace-resume"
+    assert captured["payload"]["session_id"] == "session-a"
+    assert captured["payload"]["user_message_id"] == "message-a"
+
+
 def test_backend_proxy_signs_only_authorized_kbs(client, db_session, monkeypatch):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")

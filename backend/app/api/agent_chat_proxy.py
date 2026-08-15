@@ -55,6 +55,7 @@ class ChatAnswerRequest(BaseModel):
     history: list[dict[str, Any]] | None = None
     session_id: str | None = None
     user_message_id: str | None = None
+    resume_trace_id: str | None = None
     mode: Literal["standard", "deep"] = "standard"
     deep_search_enabled: bool = False
     deep_search_depth: Literal["quick", "standard", "deep"] = "standard"
@@ -81,6 +82,8 @@ def _public_payload(req: ChatAnswerRequest) -> dict[str, Any]:
         payload["session_id"] = req.session_id
     if req.user_message_id is not None:
         payload["user_message_id"] = req.user_message_id
+    if req.resume_trace_id is not None:
+        payload["resume_trace_id"] = req.resume_trace_id
     return payload
 
 
