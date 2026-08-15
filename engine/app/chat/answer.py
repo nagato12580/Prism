@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from ..agent.events import error_event, needs_kb_selection_event, trace_event
+from ..agent.events import done_event, error_event, needs_kb_selection_event, trace_event
 from ..agent.knowledge_skill import compose_system_prompt_with_groups, compose_system_prompt_with_knowledge_skill
 from ..agent.rag.agentic import AgenticRagRunner, RagJudgeResult, RagRunConfig
 from ..agent.prompts import AGENT_SYSTEM_PROMPT
@@ -770,6 +770,7 @@ def answer_stream(
             checkpoint = AgentTraceRecorder.load_checkpoint(resume_trace_id)
             if checkpoint is None:
                 yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
+                yield done_event()
                 return
             yield from runner.resume_stream(checkpoint, trace_recorder=None)
             logger.info("[chat] resume_stream_complete trace_id=%s", resume_trace_id)

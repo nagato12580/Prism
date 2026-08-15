@@ -279,6 +279,7 @@ def _checkpoint_from_state(
     iteration: int,
     messages: list[Any],
     runner_state: dict[str, Any],
+    phase: str = "loop",
 ) -> dict[str, Any]:
     serialized_messages = [
         serialized
@@ -290,6 +291,7 @@ def _checkpoint_from_state(
         "query": query,
         "effective_query": effective_query,
         "iteration": iteration,
+        "phase": phase,
         "messages": serialized_messages,
         "tool_state": {
             "timed_out_tools": list(runner_state.get("timed_out_tools") or []),
@@ -325,6 +327,7 @@ def _state_from_checkpoint(
     query = checkpoint.get("query")
     effective_query = checkpoint.get("effective_query")
     iteration = checkpoint.get("iteration")
+    phase = checkpoint.get("phase")
     timed_out_tools = tool_state.get("timed_out_tools")
     open_kb_document_counts = tool_state.get("open_kb_document_counts")
     document_windows_by_file = tool_state.get("document_windows_by_file")
@@ -376,6 +379,7 @@ def _state_from_checkpoint(
             and iteration >= 0
             else 0
         ),
+        "phase": phase if isinstance(phase, str) and phase else "loop",
         "timed_out_tools": sanitized_timed_out_tools,
         "open_kb_document_counts": sanitized_open_kb_document_counts,
         "document_windows_by_file": sanitized_document_windows_by_file,
@@ -395,6 +399,72 @@ def _resolved_tool_call_id(tool_call: Any) -> str:
         or _call_value(tool_call, "name", "")
         or "tool"
     )
+
+
+def _last_ai_tool_calls(messages: list[Any]) -> list[Any]:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return list(getattr(message, "tool_calls", None) or [])
+    return []
+
+
+def _pending_tool_calls_after_last_ai(messages: list[Any]) -> list[Any]:
+    last_ai_index = None
+    last_tool_calls: list[Any] = []
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, AIMessage):
+            tool_calls = list(getattr(message, "tool_calls", None) or [])
+            if tool_calls:
+                last_ai_index = index
+                last_tool_calls = tool_calls
+            break
+    if last_ai_index is None:
+        return []
+
+    completed_tool_call_ids = {
+        str(getattr(message, "tool_call_id", "") or "")
+        for message in messages[last_ai_index + 1 :]
+        if isinstance(message, ToolMessage)
+    }
+    return [
+        call
+        for call in last_tool_calls
+        if _resolved_tool_call_id(call) not in completed_tool_call_ids
+    ]
+
+
+class _ResumePendingResponseModel:
+    def __init__(
+        self,
+        base_model: Any,
+        response: Any,
+        state: dict[str, bool] | None = None,
+        delegate: Any | None = None,
+    ):
+        self._base_model = base_model
+        self._response = response
+        self._state = state if state is not None else {"used": False}
+        self._delegate = delegate
+
+    def bind_tools(self, tools):
+        delegate = (
+            self._base_model.bind_tools(tools)
+            if hasattr(self._base_model, "bind_tools")
+            else self._base_model
+        )
+        return _ResumePendingResponseModel(
+            self._base_model,
+            self._response,
+            self._state,
+            delegate,
+        )
+
+    def invoke(self, messages):
+        if not self._state["used"]:
+            self._state["used"] = True
+            return self._response
+        return (self._delegate or self._base_model).invoke(messages)
 
 
 def _message_role_summary(messages: list[Any]) -> str:
@@ -1062,6 +1132,7 @@ def _save_trace_checkpoint(
     messages: list[Any],
     runner_state: dict[str, Any],
     resume_status: str = "checkpointed",
+    phase: str = "loop",
 ) -> None:
     if trace_recorder is None or not hasattr(trace_recorder, "save_checkpoint"):
         return
@@ -1072,6 +1143,7 @@ def _save_trace_checkpoint(
             iteration=iteration,
             messages=messages,
             runner_state=runner_state,
+            phase=phase,
         )
         trace_recorder.save_checkpoint(checkpoint, resume_status=resume_status)
     except Exception as exc:
@@ -1294,13 +1366,50 @@ class LangChainAgentRunner:
         self._open_kb_document_counts = dict(state.get("open_kb_document_counts") or {})
         self._document_windows_by_file = dict(state.get("document_windows_by_file") or {})
         query = state.get("query") or self._effective_query
-        start_iteration = int(state.get("iteration") or 0) + 1
+        checkpoint_iteration = int(state.get("iteration") or 0)
+        resume_phase = str(state.get("phase") or "loop")
+        start_iteration = checkpoint_iteration + 1
         logger.info(
-            "[agent] resume query=%s checkpoint_iteration=%s message_count=%s",
+            "[agent] resume query=%s checkpoint_iteration=%s phase=%s message_count=%s",
             quoted(query),
             state.get("iteration"),
+            resume_phase,
             len(messages),
         )
+        if (
+            resume_phase in {"model_response", "pending_tools"}
+            and messages
+            and isinstance(messages[-1], AIMessage)
+        ):
+            yield from self._stream_with_pending_model_response(
+                query=query,
+                messages=messages[:-1],
+                pending_response=messages[-1],
+                start_iteration=checkpoint_iteration,
+                trace_recorder=trace_recorder,
+            )
+            return
+
+        if resume_phase == "tool_result":
+            pending_tool_calls = _pending_tool_calls_after_last_ai(messages)
+            if pending_tool_calls:
+                yield from self._stream_with_pending_model_response(
+                    query=query,
+                    messages=messages,
+                    pending_response=AIMessage(content="", tool_calls=pending_tool_calls),
+                    start_iteration=checkpoint_iteration,
+                    trace_recorder=trace_recorder,
+                )
+                return
+            if checkpoint_iteration >= self.max_iterations:
+                yield from self._stream_iteration_limit_final(
+                    query=query,
+                    messages=messages,
+                    iteration=checkpoint_iteration,
+                    trace_recorder=trace_recorder,
+                )
+                return
+
         yield from self._stream_from_messages(
             query=query,
             messages=messages,
@@ -1308,6 +1417,97 @@ class LangChainAgentRunner:
             trace_recorder=trace_recorder,
             is_first_exchange=False,
         )
+
+    def _stream_with_pending_model_response(
+        self,
+        *,
+        query: str,
+        messages: list[Any],
+        pending_response: Any,
+        start_iteration: int,
+        trace_recorder: Any | None = None,
+    ):
+        original_model = self.model
+        self.model = _ResumePendingResponseModel(original_model, pending_response)
+        try:
+            yield from self._stream_from_messages(
+                query=query,
+                messages=messages,
+                start_iteration=start_iteration,
+                trace_recorder=trace_recorder,
+                is_first_exchange=False,
+            )
+        finally:
+            self.model = original_model
+
+    def _stream_iteration_limit_final(
+        self,
+        *,
+        query: str,
+        messages: list[Any],
+        iteration: int,
+        trace_recorder: Any | None = None,
+    ):
+        required_tool_call_ids = [
+            _resolved_tool_call_id(call) for call in _last_ai_tool_calls(messages)
+        ]
+        synthesis_messages = _iteration_limit_synthesis_messages(
+            self._effective_query,
+            messages,
+            required_tool_call_ids=required_tool_call_ids,
+        )
+        _record_trace_step(
+            trace_recorder,
+            step_type="model_invoke",
+            input_json={
+                "iteration": "forced_final_after_iteration_limit",
+                "message_count": len(synthesis_messages),
+                "message_roles": _message_roles(synthesis_messages),
+                "effective_objective_source": self._effective_objective_source,
+            },
+        )
+        forced_response = self.model.invoke(synthesis_messages)
+        forced_tool_calls = getattr(forced_response, "tool_calls", None) or []
+        forced_text = _message_content(forced_response)
+        _record_trace_step(
+            trace_recorder,
+            step_type="model_response",
+            input_json={"iteration": "forced_final_after_iteration_limit"},
+            output_json={
+                "iteration": "forced_final_after_iteration_limit",
+                "tool_calls": _tool_call_summaries(forced_tool_calls),
+                "content_preview": _content_preview(forced_text),
+            },
+        )
+        if forced_tool_calls or _looks_like_textual_tool_call(forced_text):
+            forced_text = ""
+        final_text = forced_text or _grounded_fallback_answer_from_messages(
+            messages,
+            required_tool_call_ids=required_tool_call_ids,
+        )
+        _record_trace_step(
+            trace_recorder,
+            step_type="final_answer",
+            output_json={"content": final_text},
+        )
+        _save_trace_checkpoint(
+            trace_recorder,
+            query=query,
+            effective_query=self._effective_query,
+            iteration=iteration,
+            messages=[*synthesis_messages, forced_response],
+            runner_state={
+                "timed_out_tools": self._timed_out_tools,
+                "open_kb_document_counts": self._open_kb_document_counts,
+                "document_windows_by_file": self._document_windows_by_file,
+            },
+            resume_status="completed",
+            phase="completed",
+        )
+        _finish_trace(trace_recorder, "success")
+        yield agent_status_event("generating answer")
+        yield token_event(final_text)
+        yield done_event()
 
     def _stream_from_messages(
         self,
@@ -1378,6 +1578,7 @@ class LangChainAgentRunner:
                         "open_kb_document_counts": self._open_kb_document_counts,
                         "document_windows_by_file": self._document_windows_by_file,
                     },
+                    phase="pending_tools" if tool_calls else "model_response",
                 )
                 if self._force_answer_with_available_evidence:
                     tool_calls = []
@@ -1437,6 +1638,7 @@ class LangChainAgentRunner:
                             "document_windows_by_file": self._document_windows_by_file,
                         },
                         resume_status="completed",
+                        phase="completed",
                     )
                     _finish_trace(trace_recorder, "success")
                     logger.info("[agent] done")
@@ -1639,6 +1841,7 @@ class LangChainAgentRunner:
                             "open_kb_document_counts": self._open_kb_document_counts,
                             "document_windows_by_file": self._document_windows_by_file,
                         },
+                        phase="tool_result",
                     )
 
                     if (
@@ -1737,6 +1940,7 @@ class LangChainAgentRunner:
                                 "document_windows_by_file": self._document_windows_by_file,
                             },
                             resume_status="completed",
+                            phase="completed",
                         )
                         _finish_trace(trace_recorder, "success")
                         logger.info(
@@ -1838,6 +2042,7 @@ class LangChainAgentRunner:
                             "document_windows_by_file": self._document_windows_by_file,
                         },
                         resume_status="completed",
+                        phase="completed",
                     )
                     _finish_trace(trace_recorder, "success")
                     yield agent_status_event("generating answer")

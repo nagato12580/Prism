@@ -250,6 +250,25 @@ def test_answer_stream_uses_existing_trace_checkpoint_on_resume(monkeypatch):
     assert json.loads(lines[0])["data"] == "resumed"
 
 
+def test_answer_stream_resume_missing_checkpoint_emits_done(monkeypatch):
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            return None
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history: {"groups": [], "kb_specs": [], "reasoning": ""},
+    )
+
+    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-missing"))
+
+    assert [json.loads(line)["type"] for line in lines] == ["error", "done"]
+
+
 def test_answer_stream_classifies_with_recent_five_turns(monkeypatch):
     classified = {}
     history = [
