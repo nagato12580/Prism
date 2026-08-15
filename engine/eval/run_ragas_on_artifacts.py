@@ -1,6 +1,8 @@
 import argparse
 import csv
 import json
+import math
+import numbers
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -89,10 +91,12 @@ def run_ragas_report(
     evaluator = evaluator or _default_ragas_evaluator
 
     raw_scores: list[dict[str, Any]] = []
+    evaluator_failed = False
     if ragas_rows:
         try:
             raw_scores = evaluator(ragas_rows, judge_model)
         except Exception as exc:
+            evaluator_failed = True
             failures.extend(
                 {
                     "query_id": str(artifact.get("query_id") or ""),
@@ -103,11 +107,20 @@ def run_ragas_report(
 
     thresholds = _load_thresholds(thresholds_path)
     run_dir = artifacts_path.parent
+    score_by_id, alignment_failures = (
+        ({}, []) if evaluator_failed else _align_scores(valid_artifacts, raw_scores)
+    )
+    failures.extend(alignment_failures)
     failure_by_id = {
         str(failure.get("query_id") or ""): str(failure.get("reason") or "")
         for failure in failures
+        if failure.get("query_id")
     }
-    score_by_id = _scores_by_query_id(valid_artifacts, raw_scores)
+    general_failures = [
+        str(failure.get("reason") or "")
+        for failure in failures
+        if not failure.get("query_id")
+    ]
 
     detailed: list[dict[str, Any]] = []
     low_scores: list[dict[str, Any]] = []
@@ -123,6 +136,9 @@ def run_ragas_report(
                 if not _missing_required_fields(artifact)
                 else "ragas_skipped"
             )
+        elif query_id in failure_by_id:
+            tags.append("ragas_failed")
+        tags.extend(_threshold_tags(scores, thresholds))
         tags = _dedupe(tags)
 
         for tag in tags:
@@ -134,7 +150,7 @@ def run_ragas_report(
             "question_type": artifact.get("metadata", {}).get("question_type", ""),
             "status": artifact.get("metadata", {}).get("status", ""),
             "bad_case_tags": ",".join(tags),
-            "failure": failure_by_id.get(query_id, ""),
+            "failure": failure_by_id.get(query_id, "; ".join(general_failures)),
             **scores,
         }
         detailed.append(row)
@@ -162,7 +178,7 @@ def run_ragas_report(
         "failures": failures,
     }
     (run_dir / "ragas_summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
+        _json_dumps(summary),
         encoding="utf-8",
     )
     return summary
@@ -191,22 +207,33 @@ def _default_ragas_evaluator(
     rows: list[dict[str, Any]],
     judge_model: str | None,
 ) -> list[dict[str, Any]]:
-    from datasets import Dataset
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-    from ragas import evaluate
-    from ragas.metrics import (
-        Faithfulness,
-        LLMContextPrecisionWithoutReference,
-        LLMContextRecall,
-        ResponseRelevancy,
-    )
+    try:
+        from datasets import Dataset
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+        from ragas import evaluate
+        from ragas.metrics import (
+            Faithfulness,
+            LLMContextRecall,
+            ResponseRelevancy,
+        )
+        try:
+            from ragas.metrics import LLMContextPrecisionWithReference
+        except ImportError:
+            from ragas.metrics import (
+                LLMContextPrecisionWithoutReference as LLMContextPrecisionWithReference,
+            )
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Missing optional Ragas evaluation dependencies. "
+            "Install them with `pip install -r requirements-eval.txt`."
+        ) from exc
 
     llm = ChatOpenAI(model=judge_model) if judge_model else None
     embeddings = OpenAIEmbeddings() if judge_model else None
     metrics = [
         Faithfulness(),
         ResponseRelevancy(),
-        LLMContextPrecisionWithoutReference(),
+        LLMContextPrecisionWithReference(),
         LLMContextRecall(),
     ]
     result = evaluate(
@@ -233,15 +260,50 @@ def _missing_required_fields(artifact: dict[str, Any]) -> list[str]:
     return missing
 
 
-def _scores_by_query_id(
+def _align_scores(
     artifacts: list[dict[str, Any]],
     raw_scores: list[dict[str, Any]],
-) -> dict[str, dict[str, float]]:
+) -> tuple[dict[str, dict[str, float]], list[dict[str, str]]]:
     scores: dict[str, dict[str, float]] = {}
-    for artifact, raw_score in zip(artifacts, raw_scores, strict=False):
+    failures: list[dict[str, str]] = []
+
+    matched_count = min(len(artifacts), len(raw_scores))
+    for artifact, raw_score in zip(
+        artifacts[:matched_count],
+        raw_scores[:matched_count],
+        strict=True,
+    ):
         query_id = str(artifact.get("query_id") or "")
-        scores[query_id] = normalize_metric_row(raw_score)
-    return scores
+        normalized = normalize_metric_row(raw_score)
+        scores[query_id] = normalized
+        missing_metrics = _missing_finite_metrics(raw_score)
+        if missing_metrics:
+            failures.append(
+                {
+                    "query_id": query_id,
+                    "reason": "missing finite metrics: " + ", ".join(missing_metrics),
+                }
+            )
+
+    for artifact in artifacts[matched_count:]:
+        failures.append(
+            {
+                "query_id": str(artifact.get("query_id") or ""),
+                "reason": "ragas returned no score row",
+            }
+        )
+
+    extra_count = len(raw_scores) - len(artifacts)
+    if extra_count > 0:
+        suffix = "row" if extra_count == 1 else "rows"
+        failures.append(
+            {
+                "query_id": "",
+                "reason": f"ragas returned {extra_count} extra score {suffix}",
+            }
+        )
+
+    return scores, failures
 
 
 def _load_thresholds(path: Path | None) -> dict[str, float]:
@@ -253,6 +315,15 @@ def _load_thresholds(path: Path | None) -> dict[str, float]:
         for metric, threshold in raw.items()
         if _is_number(threshold)
     }
+
+
+def _threshold_tags(scores: dict[str, float], thresholds: dict[str, float]) -> list[str]:
+    tags: list[str] = []
+    for metric, threshold in thresholds.items():
+        value = scores.get(metric)
+        if value is not None and value < threshold:
+            tags.append(f"below_threshold:{metric}")
+    return tags
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -297,7 +368,7 @@ def _write_bad_case(
         "",
         "## Scores",
         "",
-        json.dumps(scores, ensure_ascii=False, indent=2),
+        _json_dumps(scores),
         "",
         "## Answer",
         "",
@@ -319,7 +390,7 @@ def _write_bad_case(
         "",
         "## Metadata",
         "",
-        json.dumps(artifact.get("metadata", {}), ensure_ascii=False, indent=2),
+        _json_dumps(artifact.get("metadata", {})),
     ]
     (bad_dir / f"{query_id}_ragas_bad_case.md").write_text(
         "\n".join(content),
@@ -351,7 +422,46 @@ def _safe_filename(value: str) -> str:
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return (
+        isinstance(value, numbers.Real)
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _missing_finite_metrics(row: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for metric in METRIC_NAMES:
+        if metric in row and not _is_number(row[metric]):
+            missing.append(metric)
+    if (
+        "response_relevancy" not in row
+        and "answer_relevancy" in row
+        and not _is_number(row["answer_relevancy"])
+    ):
+        missing.append("response_relevancy")
+    return missing
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(
+        _json_safe(value),
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    )
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+        return value if math.isfinite(float(value)) else None
+    return value
 
 
 if __name__ == "__main__":
