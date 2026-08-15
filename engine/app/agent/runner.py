@@ -1244,9 +1244,84 @@ class LangChainAgentRunner:
                 effective_query=self._effective_query,
                 active_continuation=self._active_continuation,
             )
+        except Exception as exc:
+            logger.exception(
+                "[agent] error message=%s",
+                quoted(str(exc), limit=300),
+            )
+            _record_trace_step(
+                trace_recorder,
+                step_type="error",
+                output_json={"message": str(exc)},
+                status="error",
+            )
+            _finish_trace(trace_recorder, "error")
+            yield error_event(str(exc))
+            logger.info("[agent] done")
+            yield done_event()
+            return
+
+        yield from self._stream_from_messages(
+            query=query,
+            messages=messages,
+            start_iteration=1,
+            trace_recorder=trace_recorder,
+            is_first_exchange=is_first_exchange,
+        )
+
+    def resume_stream(
+        self,
+        checkpoint: dict[str, Any],
+        *,
+        trace_recorder: Any | None = None,
+    ):
+        restored = _state_from_checkpoint(checkpoint)
+        if restored is None:
+            yield error_event("Cannot resume agent run: checkpoint is missing or malformed.")
+            yield done_event()
+            return
+        messages, state = restored
+        self._pending_clarify = None
+        self._has_grounding_evidence = False
+        self._force_answer_with_available_evidence = False
+        self._forced_answer_text = None
+        self._ungrounded_insufficient_results = 0
+        self._active_continuation = None
+        self._resume_consumed = False
+        self._effective_objective_source = "checkpoint"
+        self._effective_query = state.get("effective_query") or state.get("query") or ""
+        self._timed_out_tools = set(state.get("timed_out_tools") or set())
+        self._open_kb_document_counts = dict(state.get("open_kb_document_counts") or {})
+        self._document_windows_by_file = dict(state.get("document_windows_by_file") or {})
+        query = state.get("query") or self._effective_query
+        start_iteration = int(state.get("iteration") or 0) + 1
+        logger.info(
+            "[agent] resume query=%s checkpoint_iteration=%s message_count=%s",
+            quoted(query),
+            state.get("iteration"),
+            len(messages),
+        )
+        yield from self._stream_from_messages(
+            query=query,
+            messages=messages,
+            start_iteration=start_iteration,
+            trace_recorder=trace_recorder,
+            is_first_exchange=False,
+        )
+
+    def _stream_from_messages(
+        self,
+        *,
+        query: str,
+        messages: list[Any],
+        start_iteration: int,
+        trace_recorder: Any | None = None,
+        is_first_exchange: bool = False,
+    ):
+        try:
             model = self.model.bind_tools(self.tools) if self.tools else self.model
 
-            for iteration in range(1, self.max_iterations + 1):
+            for iteration in range(start_iteration, self.max_iterations + 1):
                 logger.info(
                     "[agent] model_invoke iteration=%s message_count=%s",
                     iteration,

@@ -512,6 +512,15 @@ class FakeEvidenceModel:
         return FakeToolCall(content="Final answer")
 
 
+class FakeResumeModel:
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        assert isinstance(messages[-1], ToolMessage)
+        return FakeToolCall(content="Resumed final answer")
+
+
 class FakeDuplicateToolModel:
     def __init__(self):
         self.calls = 0
@@ -928,6 +937,44 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
     ]
     assert recorder.steps[3]["evidence_items"] == tool_result["data"]["evidence_items"]
     assert recorder.finished_status == "success"
+
+
+def test_runner_resumes_from_checkpoint_messages():
+    checkpoint = runner_mod._checkpoint_from_state(
+        query="How?",
+        effective_query="How?",
+        iteration=1,
+        messages=[
+            SystemMessage(content="system"),
+            HumanMessage(content="How?"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "name": "knowledge_search",
+                        "args": {"query": "same"},
+                    }
+                ],
+            ),
+            ToolMessage(
+                content='{"status":"success","summary":"cached"}',
+                tool_call_id="call-1",
+            ),
+        ],
+        runner_state={
+            "timed_out_tools": [],
+            "open_kb_document_counts": {},
+            "document_windows_by_file": {},
+        },
+    )
+    runner = LangChainAgentRunner(model=FakeResumeModel(), tools=[FakeEvidenceTool()])
+    lines = list(runner.resume_stream(checkpoint, trace_recorder=FakeTraceRecorder()))
+
+    events = [json.loads(line) for line in lines]
+    assert events[-2]["type"] == "token"
+    assert events[-2]["data"] == "Resumed final answer"
+    assert events[-1]["type"] == "done"
 
 
 def test_runner_reuses_successful_tool_result_for_duplicate_call():

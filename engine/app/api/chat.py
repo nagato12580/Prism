@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     topic_id: Optional[str] = None
     session_id: Optional[str] = None
     user_message_id: Optional[str] = None
+    resume_trace_id: Optional[str] = None
     source_types: Optional[list[str]] = None
     deep_search_enabled: bool = False
     deep_search_depth: Literal["quick", "standard", "deep"] = "standard"
@@ -67,6 +68,7 @@ def chat_answer(
             rag_max_iterations=req.rag_max_iterations,
             session_id=req.session_id,
             user_message_id=req.user_message_id,
+            resume_trace_id=req.resume_trace_id,
             knowledge_scope=knowledge_scope,
         ):
             yield line

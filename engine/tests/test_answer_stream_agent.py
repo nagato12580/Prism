@@ -209,6 +209,47 @@ def test_answer_stream_delegates_to_agent_runner(monkeypatch):
     assert captured["deep_search_depth"] == "standard"
 
 
+def test_answer_stream_uses_existing_trace_checkpoint_on_resume(monkeypatch):
+    checkpoint = {
+        "version": 1,
+        "query": "How?",
+        "effective_query": "How?",
+        "iteration": 1,
+        "messages": [
+            {"type": "system", "content": "system"},
+            {"type": "human", "content": "How?"},
+        ],
+        "tool_state": {},
+    }
+    calls = []
+
+    class FakeRecorder:
+        @classmethod
+        def load_checkpoint(cls, trace_id):
+            calls.append(("load", trace_id))
+            return checkpoint
+
+    class FakeRunner:
+        def resume_stream(self, loaded_checkpoint, trace_recorder=None):
+            calls.append(("resume", loaded_checkpoint, trace_recorder))
+            yield json.dumps({"type": "token", "data": "resumed"}) + "\n"
+            yield json.dumps({"type": "done", "data": {}}) + "\n"
+
+    monkeypatch.setattr(answer, "AgentTraceRecorder", FakeRecorder)
+    monkeypatch.setattr(answer, "build_agent_runner", lambda **kwargs: FakeRunner())
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history: {"groups": [], "kb_specs": [], "reasoning": ""},
+    )
+
+    lines = list(answer.answer_stream("How?", [], resume_trace_id="trace-resume"))
+
+    assert calls[0] == ("load", "trace-resume")
+    assert calls[1][0] == "resume"
+    assert json.loads(lines[0])["data"] == "resumed"
+
+
 def test_answer_stream_classifies_with_recent_five_turns(monkeypatch):
     classified = {}
     history = [

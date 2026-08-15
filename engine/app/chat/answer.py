@@ -703,6 +703,7 @@ def answer_stream(
     session_id: str | None = None,
     user_message_id: str | None = None,
     knowledge_scope: Any | None = None,
+    resume_trace_id: str | None = None,
 ):
     history = history or []
     db_session = _Session() if knowledge_scope is not None else None
@@ -765,6 +766,15 @@ def answer_stream(
             tool_groups=tool_groups,
         )
         logger.info("[chat] runner_ready")
+        if resume_trace_id:
+            checkpoint = AgentTraceRecorder.load_checkpoint(resume_trace_id)
+            if checkpoint is None:
+                yield error_event("Cannot resume agent run: checkpoint not found or already completed.")
+                return
+            yield from runner.resume_stream(checkpoint, trace_recorder=None)
+            logger.info("[chat] resume_stream_complete trace_id=%s", resume_trace_id)
+            return
+
         trace_recorder = None
         try:
             candidate_recorder = AgentTraceRecorder(
