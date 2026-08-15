@@ -1416,7 +1416,11 @@ class LangChainAgentRunner:
                             if isinstance(candidate, dict) and isinstance(
                                 candidate.get("output_json"), dict
                             ):
-                                cached_tool_result = candidate
+                                candidate_status = str(
+                                    candidate["output_json"].get("status") or "success"
+                                ).lower()
+                                if candidate_status == "success":
+                                    cached_tool_result = candidate
 
                     dedupe_key = None
                     if cached_tool_result is not None:
@@ -1428,7 +1432,10 @@ class LangChainAgentRunner:
                         payload = _enrich_payload_for_model(cached_payload)
                         result_text = json.dumps(payload, ensure_ascii=False)
                         status = str(cached_output.get("status") or "success")
-                        latency_ms = 0
+                        try:
+                            latency_ms = int(cached_output.get("latency_ms") or 0)
+                        except (TypeError, ValueError):
+                            latency_ms = 0
                         dedupe_key = cached_tool_result.get("dedupe_key")
                     else:
                         result_text, payload, status, latency_ms = self._invoke_tool(
@@ -1489,6 +1496,7 @@ class LangChainAgentRunner:
                             "trace_steps": trace_steps,
                             "evidence_items": evidence_items,
                             "payload": payload,
+                            "latency_ms": latency_ms,
                         },
                         status=status,
                         tool_name=name,

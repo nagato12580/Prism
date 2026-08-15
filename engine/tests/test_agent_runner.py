@@ -935,6 +935,7 @@ def test_runner_reuses_successful_tool_result_for_duplicate_call():
     tool = CountingEvidenceTool()
     recorder = FakeTraceRecorder()
     cached = {}
+    cached_latency_ms = 12
 
     def find_successful_tool_result(*, tool_name, args):
         key = (tool_name, json.dumps(args, sort_keys=True))
@@ -949,9 +950,11 @@ def test_runner_reuses_successful_tool_result_for_duplicate_call():
                 kwargs["tool_name"],
                 json.dumps(kwargs["input_json"]["args"], sort_keys=True),
             )
+            output_json = json.loads(json.dumps(kwargs["output_json"]))
+            output_json["latency_ms"] = cached_latency_ms
             cached[key] = {
                 "dedupe_key": kwargs["dedupe_key"],
-                "output_json": kwargs["output_json"],
+                "output_json": output_json,
             }
         return f"step-{len(recorder.steps)}"
 
@@ -963,7 +966,19 @@ def test_runner_reuses_successful_tool_result_for_duplicate_call():
 
     assert tool.calls == 1
     assert event_types(lines).count("tool_result") == 2
-    assert any(step.get("input_json", {}).get("reused") is True for step in recorder.steps)
+    tool_result_events = [
+        json.loads(line)["data"] for line in lines if json.loads(line)["type"] == "tool_result"
+    ]
+    assert tool_result_events[1]["latency_ms"] == cached_latency_ms
+    assert tool_result_events[1]["status"] == tool_result_events[0]["status"]
+    assert tool_result_events[1]["summary"] == tool_result_events[0]["summary"]
+    assert tool_result_events[1]["evidence_items"] == tool_result_events[0]["evidence_items"]
+
+    tool_result_steps = [
+        step for step in recorder.steps if step["step_type"] == "tool_result"
+    ]
+    assert tool_result_steps[1]["input_json"]["reused"] is True
+    assert tool_result_steps[1]["latency_ms"] == cached_latency_ms
 
 
 class FakeCheckpointTool:
