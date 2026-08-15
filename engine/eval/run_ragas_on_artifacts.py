@@ -3,6 +3,7 @@ import csv
 import json
 import math
 import numbers
+import os
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -243,25 +244,27 @@ def _default_ragas_evaluator(
             "`pip install -r requirements-eval.txt`."
         ) from exc
 
-    llm = ChatOpenAI(model=judge_model) if judge_model else None
-    embeddings = OpenAIEmbeddings() if judge_model else None
+    llm = ChatOpenAI(**_llm_kwargs(judge_model)) if judge_model else None
+    embeddings = OpenAIEmbeddings(**_embedding_kwargs()) if judge_model else None
     scores_by_index: list[dict[str, Any]] = [{} for _ in rows]
 
     metric_specs = [
-        (Faithfulness, lambda row: _has_response(row) and _has_contexts(row)),
-        (ResponseRelevancy, lambda row: _has_response(row)),
+        (Faithfulness, {}, lambda row: _has_response(row) and _has_contexts(row)),
+        (ResponseRelevancy, {"strictness": 1}, lambda row: _has_response(row)),
         (
             ContextPrecisionMetric,
+            {},
             lambda row: _has_contexts(row)
             and (not context_precision_needs_reference or _has_reference(row)),
         ),
         (
             LLMContextRecall,
+            {},
             lambda row: _has_contexts(row) and _has_reference(row),
         ),
     ]
 
-    for metric_factory, predicate in metric_specs:
+    for metric_factory, metric_kwargs, predicate in metric_specs:
         selected = [
             (index, row)
             for index, row in enumerate(rows)
@@ -272,7 +275,7 @@ def _default_ragas_evaluator(
 
         result = evaluate(
             Dataset.from_list([row for _, row in selected]),
-            metrics=[metric_factory()],
+            metrics=[metric_factory(**metric_kwargs)],
             llm=llm,
             embeddings=embeddings,
         )
@@ -312,6 +315,26 @@ def _has_contexts(row: dict[str, Any]) -> bool:
 
 def _has_reference(row: dict[str, Any]) -> bool:
     return bool(str(row.get("reference") or "").strip())
+
+
+def _embedding_kwargs() -> dict[str, str]:
+    kwargs = {}
+    if model := os.getenv("EMBEDDING_MODEL"):
+        kwargs["model"] = model
+    if base_url := os.getenv("EMBEDDING_API_BASE"):
+        kwargs["base_url"] = base_url
+    if api_key := os.getenv("EMBEDDING_API_KEY"):
+        kwargs["api_key"] = api_key
+    return kwargs
+
+
+def _llm_kwargs(judge_model: str) -> dict[str, str]:
+    kwargs = {"model": judge_model}
+    if base_url := os.getenv("LLM_API_BASE"):
+        kwargs["base_url"] = base_url
+    if api_key := os.getenv("LLM_API_KEY"):
+        kwargs["api_key"] = api_key
+    return kwargs
 
 
 def _align_scores(

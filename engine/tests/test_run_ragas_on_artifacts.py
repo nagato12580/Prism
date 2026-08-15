@@ -1,5 +1,7 @@
 import json
 import math
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -480,6 +482,97 @@ def test_run_ragas_report_evaluates_response_relevancy_without_contexts_or_refer
     assert "q1" in detailed
     assert "0.88" in detailed
     assert "retrieval_failure" in detailed
+
+
+def test_default_evaluator_uses_single_response_relevancy_sample(monkeypatch):
+    captured_strictness = []
+    captured_embedding_kwargs = []
+    captured_chat_kwargs = []
+
+    datasets_module = types.ModuleType("datasets")
+    langchain_openai_module = types.ModuleType("langchain_openai")
+    ragas_module = types.ModuleType("ragas")
+    ragas_metrics_module = types.ModuleType("ragas.metrics")
+
+    class Dataset:
+        @classmethod
+        def from_list(cls, rows):
+            return rows
+
+    class ChatOpenAI:
+        def __init__(self, **kwargs):
+            captured_chat_kwargs.append(kwargs)
+            self.kwargs = kwargs
+
+    class OpenAIEmbeddings:
+        def __init__(self, **kwargs):
+            captured_embedding_kwargs.append(kwargs)
+
+    class Faithfulness:
+        pass
+
+    class LLMContextRecall:
+        pass
+
+    class LLMContextPrecisionWithReference:
+        pass
+
+    class ResponseRelevancy:
+        def __init__(self, strictness=3):
+            captured_strictness.append(strictness)
+
+    def evaluate(dataset, metrics, **kwargs):
+        return [{"answer_relevancy": 0.5}]
+
+    datasets_module.Dataset = Dataset
+    langchain_openai_module.ChatOpenAI = ChatOpenAI
+    langchain_openai_module.OpenAIEmbeddings = OpenAIEmbeddings
+    ragas_module.evaluate = evaluate
+    ragas_metrics_module.Faithfulness = Faithfulness
+    ragas_metrics_module.LLMContextRecall = LLMContextRecall
+    ragas_metrics_module.LLMContextPrecisionWithReference = (
+        LLMContextPrecisionWithReference
+    )
+    ragas_metrics_module.ResponseRelevancy = ResponseRelevancy
+
+    monkeypatch.setitem(sys.modules, "datasets", datasets_module)
+    monkeypatch.setitem(sys.modules, "langchain_openai", langchain_openai_module)
+    monkeypatch.setitem(sys.modules, "ragas", ragas_module)
+    monkeypatch.setitem(sys.modules, "ragas.metrics", ragas_metrics_module)
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.setenv("EMBEDDING_API_BASE", "https://embedding.example/v1")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embedding-key")
+    monkeypatch.setenv("LLM_API_BASE", "https://chat.example/v1")
+    monkeypatch.setenv("LLM_API_KEY", "chat-key")
+
+    scores = _default_ragas_evaluator(
+        [
+            {
+                "user_input": "q",
+                "response": "a",
+                "retrieved_contexts": [],
+                "reference": "",
+            }
+        ],
+        "judge-model",
+    )
+
+    assert captured_strictness == [1]
+    assert captured_chat_kwargs == [
+        {
+            "model": "judge-model",
+            "base_url": "https://chat.example/v1",
+            "api_key": "chat-key",
+        }
+    ]
+    assert captured_embedding_kwargs == [
+        {
+            "model": "BAAI/bge-m3",
+            "base_url": "https://embedding.example/v1",
+            "api_key": "embedding-key",
+        }
+    ]
+    assert scores == [{"answer_relevancy": 0.5}]
 
 
 def test_default_evaluator_reports_missing_optional_dependencies(monkeypatch):
