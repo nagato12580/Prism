@@ -1053,6 +1053,35 @@ def _record_trace_step(trace_recorder: Any | None, **kwargs: Any) -> None:
         )
 
 
+def _save_trace_checkpoint(
+    trace_recorder: Any | None,
+    *,
+    query: str,
+    effective_query: str,
+    iteration: int,
+    messages: list[Any],
+    runner_state: dict[str, Any],
+    resume_status: str = "checkpointed",
+) -> None:
+    if trace_recorder is None or not hasattr(trace_recorder, "save_checkpoint"):
+        return
+    try:
+        checkpoint = _checkpoint_from_state(
+            query=query,
+            effective_query=effective_query,
+            iteration=iteration,
+            messages=messages,
+            runner_state=runner_state,
+        )
+        trace_recorder.save_checkpoint(checkpoint, resume_status=resume_status)
+    except Exception as exc:
+        logger.warning(
+            "[agent] trace_checkpoint_failed status=%s error=%s",
+            resume_status,
+            quoted(str(exc), limit=300),
+        )
+
+
 def _finish_trace(trace_recorder: Any | None, status: str) -> None:
     if trace_recorder is None:
         return
@@ -1242,6 +1271,7 @@ class LangChainAgentRunner:
                 response = active_model.invoke(messages)
                 tool_calls = getattr(response, "tool_calls", None) or []
                 text = _message_content(response)
+                messages_with_response = [*messages, response]
                 _record_trace_step(
                     trace_recorder,
                     step_type="model_response",
@@ -1261,6 +1291,18 @@ class LangChainAgentRunner:
                         for call in tool_calls
                     )
                     or "none",
+                )
+                _save_trace_checkpoint(
+                    trace_recorder,
+                    query=query,
+                    effective_query=self._effective_query,
+                    iteration=iteration,
+                    messages=messages_with_response,
+                    runner_state={
+                        "timed_out_tools": self._timed_out_tools,
+                        "open_kb_document_counts": self._open_kb_document_counts,
+                        "document_windows_by_file": self._document_windows_by_file,
+                    },
                 )
                 if self._force_answer_with_available_evidence:
                     tool_calls = []
@@ -1308,12 +1350,25 @@ class LangChainAgentRunner:
                         step_type="final_answer",
                         output_json=final_output,
                     )
+                    _save_trace_checkpoint(
+                        trace_recorder,
+                        query=query,
+                        effective_query=self._effective_query,
+                        iteration=iteration,
+                        messages=messages_with_response,
+                        runner_state={
+                            "timed_out_tools": self._timed_out_tools,
+                            "open_kb_document_counts": self._open_kb_document_counts,
+                            "document_windows_by_file": self._document_windows_by_file,
+                        },
+                        resume_status="completed",
+                    )
                     _finish_trace(trace_recorder, "success")
                     logger.info("[agent] done")
                     yield done_event()
                     return
 
-                messages.append(response)
+                messages = messages_with_response
                 for tool_call in tool_calls:
                     name = str(_call_value(tool_call, "name", ""))
                     tool_call_id = _resolved_tool_call_id(tool_call)
@@ -1435,6 +1490,18 @@ class LangChainAgentRunner:
                         tool_call_id,
                         _message_role_summary(messages),
                     )
+                    _save_trace_checkpoint(
+                        trace_recorder,
+                        query=query,
+                        effective_query=self._effective_query,
+                        iteration=iteration,
+                        messages=messages,
+                        runner_state={
+                            "timed_out_tools": self._timed_out_tools,
+                            "open_kb_document_counts": self._open_kb_document_counts,
+                            "document_windows_by_file": self._document_windows_by_file,
+                        },
+                    )
 
                     if (
                         status == "success"
@@ -1518,6 +1585,19 @@ class LangChainAgentRunner:
                             trace_recorder,
                             step_type="final_answer",
                             output_json={"content": final_text},
+                        )
+                        _save_trace_checkpoint(
+                            trace_recorder,
+                            query=query,
+                            effective_query=self._effective_query,
+                            iteration=iteration,
+                            messages=[*synthesis_messages, forced_response],
+                            runner_state={
+                                "timed_out_tools": self._timed_out_tools,
+                                "open_kb_document_counts": self._open_kb_document_counts,
+                                "document_windows_by_file": self._document_windows_by_file,
+                            },
+                            resume_status="completed",
                         )
                         _finish_trace(trace_recorder, "success")
                         logger.info(
@@ -1606,6 +1686,19 @@ class LangChainAgentRunner:
                         trace_recorder,
                         step_type="final_answer",
                         output_json={"content": final_text},
+                    )
+                    _save_trace_checkpoint(
+                        trace_recorder,
+                        query=query,
+                        effective_query=self._effective_query,
+                        iteration=iteration,
+                        messages=[*synthesis_messages, forced_response],
+                        runner_state={
+                            "timed_out_tools": self._timed_out_tools,
+                            "open_kb_document_counts": self._open_kb_document_counts,
+                            "document_windows_by_file": self._document_windows_by_file,
+                        },
+                        resume_status="completed",
                     )
                     _finish_trace(trace_recorder, "success")
                     yield agent_status_event("generating answer")

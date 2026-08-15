@@ -442,6 +442,8 @@ class FakeTraceRecorder:
     def __init__(self):
         self.steps = []
         self.finished_status = None
+        self.checkpoints = []
+        self.trace_id = "trace-test"
 
     def record_step(self, **kwargs):
         self.steps.append(kwargs)
@@ -449,6 +451,15 @@ class FakeTraceRecorder:
 
     def finish(self, status):
         self.finished_status = status
+
+    def save_checkpoint(self, checkpoint, *, resume_status="checkpointed"):
+        self.checkpoints.append(
+            {"checkpoint": checkpoint, "resume_status": resume_status}
+        )
+        return True
+
+    def find_successful_tool_result(self, *args, **kwargs):
+        return None
 
 
 class FakeEvidenceTool:
@@ -886,6 +897,109 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
     ]
     assert recorder.steps[3]["evidence_items"] == tool_result["data"]["evidence_items"]
     assert recorder.finished_status == "success"
+
+
+class FakeCheckpointTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "sufficient",
+                "summary": "Checkpoint evidence.",
+                "evidence_items": [
+                    {
+                        "evidence_id": "ev-checkpoint",
+                        "chunk_id": "chunk-checkpoint",
+                        "source_id": "source-checkpoint",
+                        "display_title": "Checkpoint title",
+                        "excerpt": "Checkpoint excerpt",
+                    }
+                ],
+            }
+        )
+
+
+class FakeCheckpointModel:
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_checkpoint",
+                        "name": "knowledge_search",
+                        "args": {"query": "checkpoint query"},
+                    }
+                ],
+            )
+        return AIMessage(content="Checkpoint final answer")
+
+
+def test_runner_saves_checkpoint_after_model_response_and_tool_result():
+    recorder = FakeTraceRecorder()
+    runner = LangChainAgentRunner(
+        model=FakeCheckpointModel(),
+        tools=[FakeCheckpointTool()],
+    )
+
+    list(
+        runner.stream(
+            "How?",
+            [{"role": "user", "content": "previous"}],
+            trace_recorder=recorder,
+        )
+    )
+
+    assert len(recorder.checkpoints) >= 3
+    checkpointed = [
+        item["checkpoint"]
+        for item in recorder.checkpoints
+        if item["resume_status"] == "checkpointed"
+    ]
+    completed = [
+        item["checkpoint"]
+        for item in recorder.checkpoints
+        if item["resume_status"] == "completed"
+    ]
+    assert checkpointed
+    assert completed
+
+    for item in recorder.checkpoints:
+        payload = item["checkpoint"]
+        json.dumps(payload)
+        assert payload["version"] == 1
+        assert payload["query"] == "How?"
+        assert payload["effective_query"] == "How?"
+        assert "iteration" in payload
+        assert isinstance(payload["messages"], list)
+        assert set(payload["tool_state"]) == {
+            "timed_out_tools",
+            "open_kb_document_counts",
+            "document_windows_by_file",
+        }
+
+    assert any(
+        any(
+            message["type"] == "ai"
+            and message["tool_calls"]
+            and message["tool_calls"][0]["id"] == "call_checkpoint"
+            for message in checkpoint["messages"]
+        )
+        for checkpoint in checkpointed
+    )
+    assert any(
+        any(message["type"] == "tool" for message in checkpoint["messages"])
+        for checkpoint in checkpointed
+    )
+    assert recorder.checkpoints[-1]["resume_status"] == "completed"
 
 
 def test_runner_preserves_graph_explanations_in_tool_message_payload():
