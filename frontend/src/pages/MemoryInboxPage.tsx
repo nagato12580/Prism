@@ -51,6 +51,7 @@ export function MemoryInboxPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [supersededStatementId, setSupersededStatementId] = useState<Record<string, string>>({})
+  const [reviewingDraftIds, setReviewingDraftIds] = useState<Set<string>>(() => new Set())
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -123,21 +124,30 @@ export function MemoryInboxPage() {
   }
 
   const review = async (draft: MemoryDraft, action: 'confirm' | 'reject' | 'supersede') => {
+    if (reviewingDraftIds.has(draft.id)) return
     setError(null)
+    let targetId = ''
+    if (action === 'supersede') {
+      targetId = (supersededStatementId[draft.id] || draft.conflict_ids[0] || '').trim()
+      if (!targetId) {
+        setError('Supersede requires an existing statement id.')
+        return
+      }
+    }
+    setReviewingDraftIds((current) => new Set(current).add(draft.id))
     try {
       if (action === 'confirm') await memoryApi.confirmDraft(draft.id)
       else if (action === 'reject') await memoryApi.rejectDraft(draft.id)
-      else {
-        const targetId = (supersededStatementId[draft.id] || draft.conflict_ids[0] || '').trim()
-        if (!targetId) {
-          setError('Supersede requires an existing statement id.')
-          return
-        }
-        await memoryApi.supersedeDraft(draft.id, targetId)
-      }
+      else await memoryApi.supersedeDraft(draft.id, targetId)
       await loadDrafts()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReviewingDraftIds((current) => {
+        const next = new Set(current)
+        next.delete(draft.id)
+        return next
+      })
     }
   }
 
@@ -233,7 +243,9 @@ export function MemoryInboxPage() {
 
       <section className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-[var(--prism-line)] bg-white">
         <div className="grid gap-3 p-3">
-        {filtered.map((draft) => (
+        {filtered.map((draft) => {
+          const reviewing = reviewingDraftIds.has(draft.id)
+          return (
           <article key={draft.id} className="rounded-lg border border-[var(--prism-line)] bg-white p-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
@@ -263,15 +275,17 @@ export function MemoryInboxPage() {
                   <button
                     type="button"
                     onClick={() => review(draft, 'confirm')}
-                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-medium text-white"
+                    disabled={reviewing}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-medium text-white disabled:opacity-50"
                   >
-                    <Check size={14} />
+                    {reviewing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                     Confirm
                   </button>
                   <button
                     type="button"
                     onClick={() => review(draft, 'reject')}
-                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--prism-line)] bg-white px-3 text-xs font-medium text-slate-600"
+                    disabled={reviewing}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--prism-line)] bg-white px-3 text-xs font-medium text-slate-600 disabled:opacity-50"
                   >
                     <X size={14} />
                     Reject
@@ -292,7 +306,8 @@ export function MemoryInboxPage() {
                       <button
                         type="button"
                         onClick={() => review(draft, 'supersede')}
-                        className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-medium text-white"
+                        disabled={reviewing}
+                        className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-50"
                       >
                         <GitCompareArrows size={14} />
                         Supersede
@@ -303,7 +318,7 @@ export function MemoryInboxPage() {
               ) : null}
             </div>
           </article>
-        ))}
+        )})}
         {!loading && filtered.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--prism-line)] bg-white p-8 text-center text-xs text-slate-500">
             No memory drafts match the current filters.

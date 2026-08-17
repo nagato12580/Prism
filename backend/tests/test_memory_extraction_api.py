@@ -1,6 +1,7 @@
 import json
 
-from backend.app.models import ChatMessage, ChatSession, MemoryDraft
+from backend.app.models import ChatMessage, ChatSession, MemoryDraft, MemoryStatement
+from backend.app.security.actor import ActorContext
 from backend.app.services import memory_extraction as svc
 
 
@@ -261,6 +262,35 @@ def test_count_drafts_returns_count(client):
     assert "count" in data
     assert data["count"] >= 1
     assert "by_risk" in data
+
+
+def test_confirm_draft_is_idempotent_after_success(db_session):
+    from backend.app.api.memories import confirm_memory_draft
+
+    content = "用户的论文是《Hierarchical Anchoring for Geometry-Semantics Collaborative Multi-View Clustering》。"
+    draft = MemoryDraft(
+        user_id="default-user",
+        draft_type="statement",
+        payload={
+            "content": content,
+            "statement_type": "fact",
+            "temporal_type": "stable",
+            "importance": 0.9,
+        },
+        decision_hint="review",
+        risk_level="medium",
+        confidence=0.9,
+    )
+    db_session.add(draft)
+    db_session.commit()
+    actor = ActorContext(actor_id="default-user", tenant_id="default-user")
+
+    first = confirm_memory_draft(draft.id, db_session, actor)
+    second = confirm_memory_draft(draft.id, db_session, actor)
+
+    assert second.statement.id == first.statement.id
+    statements = db_session.query(MemoryStatement).filter(MemoryStatement.content == content).all()
+    assert len(statements) == 1
 
 
 def test_trigger_scheduled_extraction_returns_stats(client):

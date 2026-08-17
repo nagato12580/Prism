@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -133,6 +133,40 @@ def _statement_to_out(statement: MemoryStatement) -> MemoryStatementOut:
 def _ensure_draft_reviewable(draft: MemoryDraft) -> None:
     if draft.status != MemoryStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Memory draft has already been reviewed")
+
+
+def _confirmed_statement_for_draft(db: Session, draft: MemoryDraft) -> MemoryStatement | None:
+    payload = draft.payload or {}
+    content = payload.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    query = db.query(MemoryStatement).filter(
+        MemoryStatement.user_id == draft.user_id,
+        MemoryStatement.content == content.strip(),
+        MemoryStatement.status == MemoryStatus.CONFIRMED,
+    )
+    if draft.source_id:
+        query = query.filter(MemoryStatement.source_id == draft.source_id)
+    return query.order_by(MemoryStatement.created_at.asc()).first()
+
+
+def _claim_draft_for_review(db: Session, draft: MemoryDraft) -> bool:
+    reviewed_at = local_now()
+    result = db.execute(
+        update(MemoryDraft)
+        .where(
+            MemoryDraft.id == draft.id,
+            MemoryDraft.user_id == draft.user_id,
+            MemoryDraft.status == MemoryStatus.DRAFT,
+        )
+        .values(status=MemoryStatus.CONFIRMED, reviewed_at=reviewed_at)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        return False
+    draft.status = MemoryStatus.CONFIRMED
+    draft.reviewed_at = reviewed_at
+    return True
 
 
 def _index_statement_vector(statement: MemoryStatement) -> None:
@@ -278,10 +312,15 @@ def confirm_memory_draft(
     actor: ActorContext = Depends(get_actor_context),
 ):
     draft = _get_draft_or_404(draft_id, db, actor.actor_id)
-    _ensure_draft_reviewable(draft)
     statement = _statement_from_draft(draft)
-    draft.status = MemoryStatus.CONFIRMED
-    draft.reviewed_at = local_now()
+    if not _claim_draft_for_review(db, draft):
+        db.refresh(draft)
+        if draft.status == MemoryStatus.CONFIRMED:
+            existing = _confirmed_statement_for_draft(db, draft)
+            if existing is not None:
+                return MemoryDraftConfirmOut(draft=_draft_to_out(draft), statement=_statement_to_out(existing))
+        _ensure_draft_reviewable(draft)
+
     db.add(statement)
     db.flush()
     _index_statement_vector(statement)
