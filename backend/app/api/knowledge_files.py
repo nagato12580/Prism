@@ -1,9 +1,11 @@
 # backend/app/api/knowledge_files.py
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from uuid import uuid4
 
@@ -24,6 +26,7 @@ from backend.app.services.knowledge_uploads import (
     UploadRequest,
 )
 from backend.app.services.personal_inbox import (
+    archive_personal_inbox_files,
     delete_personal_inbox_file_cascade,
     is_personal_inbox_asset_unit_file,
 )
@@ -44,6 +47,12 @@ class FileMetadataUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, min_length=1, max_length=255)
     relative_path: str | None = Field(default=None, max_length=1024)
+
+
+class ArchiveFilesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_uids: list[str] = Field(min_length=1, max_length=200)
+    target_kb_uid: str = Field(min_length=1, max_length=64)
 
 
 def _get_storage() -> LocalFileStorage:
@@ -137,6 +146,28 @@ def _can_preview_original_as_text(file_row: KnowledgeFile) -> bool:
     return any(filename.endswith(ext) for ext in TEXT_PREVIEW_EXTENSIONS)
 
 
+def _file_list_cursor(file_row: KnowledgeFile) -> str:
+    updated_at = file_row.updated_at or datetime.min
+    return f"{updated_at.isoformat()}|{file_row.file_uid}"
+
+
+def _apply_file_list_cursor(query, cursor: str):
+    try:
+        updated_at_raw, file_uid = cursor.split("|", 1)
+        updated_at = datetime.fromisoformat(updated_at_raw)
+    except ValueError:
+        return query.filter(KnowledgeFile.file_uid > cursor)
+    return query.filter(
+        or_(
+            KnowledgeFile.updated_at < updated_at,
+            and_(
+                KnowledgeFile.updated_at == updated_at,
+                KnowledgeFile.file_uid > file_uid,
+            ),
+        )
+    )
+
+
 @router.post("", status_code=202)
 def upload_file(
     kb_uid: str,
@@ -210,7 +241,7 @@ def list_files(
         tenant_id=actor.tenant_id, kb_uid=kb_uid, deleted_at=None
     )
     if cursor:
-        query = query.filter(KnowledgeFile.file_uid > cursor)
+        query = _apply_file_list_cursor(query, cursor)
     if relative_path:
         query = query.filter(KnowledgeFile.relative_path.startswith(relative_path))
     if media_type:
@@ -221,7 +252,7 @@ def list_files(
         query = query.filter(KnowledgeFile.index_status == index_status)
     if graph_status:
         query = query.filter(KnowledgeFile.graph_status == graph_status)
-    files = query.order_by(KnowledgeFile.file_uid.asc()).limit(limit + 1).all()
+    files = query.order_by(KnowledgeFile.updated_at.desc(), KnowledgeFile.file_uid.asc()).limit(limit + 1).all()
     has_more = len(files) > limit
     files = files[:limit]
     return {
@@ -230,7 +261,44 @@ def list_files(
             for f in files
         ],
         "total": len(files),
-        "next_cursor": files[-1].file_uid if has_more else None,
+        "next_cursor": _file_list_cursor(files[-1]) if has_more else None,
+    }
+
+
+@router.post("/archive")
+def archive_files(
+    kb_uid: str,
+    body: ArchiveFilesRequest,
+    actor: ActorContext = Depends(get_actor_context),
+    db: Session = Depends(get_db),
+):
+    policy = KnowledgeAccessPolicy(db)
+    try:
+        policy.require_edit(actor, kb_uid)
+        policy.require_contribute(actor, body.target_kb_uid)
+    except KnowledgeNotFound:
+        raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", "Knowledge base not found")
+    except KnowledgeAccessDenied:
+        raise ApiProblem(403, "KNOWLEDGE_ACCESS_DENIED", "Access denied")
+
+    try:
+        moved = archive_personal_inbox_files(
+            db,
+            tenant_id=actor.tenant_id,
+            source_kb_uid=kb_uid,
+            target_kb_uid=body.target_kb_uid,
+            file_uids=body.file_uids,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("File not found"):
+            raise ApiProblem(404, "FILE_NOT_FOUND", message)
+        if "Target knowledge base not found" in message:
+            raise ApiProblem(404, "KNOWLEDGE_BASE_NOT_FOUND", message)
+        raise ApiProblem(400, "INVALID_ARCHIVE_REQUEST", message)
+    return {
+        "items": [_public_file(file_row) for file_row in moved],
+        "total": len(moved),
     }
 
 

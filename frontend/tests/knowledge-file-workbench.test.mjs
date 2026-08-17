@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -14,6 +14,7 @@ function read(rel) {
 async function loadPreviewContent() {
   const outDir = mkdtempSync(join(tmpdir(), 'prism-preview-content-'))
   try {
+    writeFileSync(resolve(outDir, 'package.json'), '{"type":"module"}\n')
     execFileSync(
       process.execPath,
       [
@@ -124,6 +125,39 @@ test('KnowledgeFilesPage exposes independent manual stage actions', () => {
   assert.match(page, /filesApi[\s\S]*?\.graph\(/)
   assert.match(page, /file\.parse_status\s*===\s*'succeeded'\s*&&\s*!isRunningStage\(file\.index_status\)/)
   assert.match(page, /file\.parse_status\s*===\s*'succeeded'\s*&&\s*!isRunningStage\(file\.graph_status\)/)
+})
+
+test('KnowledgeFilesPage exposes select-all bulk file actions', () => {
+  const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+
+  assert.match(page, /selectedFileUids/)
+  assert.match(page, /aria-label="选择所有文档"/)
+  assert.match(page, /批量向量化/)
+  assert.match(page, /批量图抽取/)
+  assert.match(page, /批量删除/)
+  assert.match(page, /nextCursor/)
+  assert.match(page, /loadAllFiles/)
+  assert.match(page, /listFiles\(cursor,\s*500\)/)
+  assert.match(page, /triggerBulkIndex/)
+  assert.match(page, /const triggerFile = targets\[0\]/)
+  assert.match(page, /submitting per file creates duplicate full-KB rebuild jobs/)
+  assert.match(page, /triggerBulkGraph/)
+  assert.match(page, /BulkDeleteConfirm/)
+})
+
+test('KnowledgeFilesPage exposes personal inbox archive actions', () => {
+  const page = read('src/features/knowledge/pages/KnowledgeFilesPage.tsx')
+  const filesApi = read('src/features/knowledge/api/files.ts')
+
+  assert.match(filesApi, /archive\(kbUid:\s*string/)
+  assert.match(filesApi, /target_kb_uid/)
+  assert.match(page, /kb\?\.system_type\s*===\s*'personal_inbox'/)
+  assert.match(page, /整理到知识库/)
+  assert.match(page, /label="整理"/)
+  assert.match(page, /ArchiveFilesDialog/)
+  assert.match(page, /knowledgeBasesApi\.list/)
+  assert.match(page, /can_contribute/)
+  assert.match(page, /filesApi\.archive/)
 })
 
 test('KnowledgeShell includes a subdued back action near the knowledge title', () => {

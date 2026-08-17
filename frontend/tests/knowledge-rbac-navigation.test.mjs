@@ -19,6 +19,7 @@ assert.match(indexPage, /团队库/, 'Knowledge index should show managed team l
 assert.match(indexPage, /can_delete/, 'Delete affordance should be capability-driven.')
 assert.match(indexPage, /requestTransfer/, 'Personal libraries should expose transfer request action.')
 assert.match(indexPage, /withdrawTransfer/, 'Pending transfer libraries should expose withdraw action.')
+assert.doesNotMatch(indexPage, /个人随手记/, 'Knowledge index should not expose the old personal inbox label.')
 
 const shell = readFileSync(resolve(root, 'src/features/knowledge/components/KnowledgeShell.tsx'), 'utf8')
 

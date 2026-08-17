@@ -78,6 +78,10 @@ _FIELD_WEIGHTS = {
 }
 
 
+def _ctx_actor_id(ctx: ToolContext) -> str:
+    return str(getattr(ctx.knowledge_scope, "actor_id", "") or "default-user")
+
+
 class AssetSearchInput(BaseModel):
     query: str = Field(..., description="Natural-language query for confirmed personal assets.")
     limit: int = Field(10, ge=1, le=30, description="Maximum number of assets to return.")
@@ -202,12 +206,12 @@ def _asset_to_source(
     }
 
 
-def _query_assets(query: str, limit: int) -> list[tuple[PersonalAssetItem, float, list[str], list[str]]]:
+def _query_assets(query: str, limit: int, *, user_id: str = "default-user") -> list[tuple[PersonalAssetItem, float, list[str], list[str]]]:
     terms = _query_terms(query)
     db = _Session()
     try:
         stmt = db.query(PersonalAssetItem).filter(
-            PersonalAssetItem.user_id == "default-user",
+            PersonalAssetItem.user_id == user_id,
             PersonalAssetItem.status == "confirmed",
         )
         candidates = stmt.order_by(PersonalAssetItem.updated_at.desc()).limit(max(limit * 8, 80)).all()
@@ -225,7 +229,7 @@ def _query_assets(query: str, limit: int) -> list[tuple[PersonalAssetItem, float
 def _build_asset_search(ctx: ToolContext) -> StructuredTool:
     def run(query: str, limit: int = 10) -> str:
         terms = _query_terms(query)
-        matches = _query_assets(query, limit)
+        matches = _query_assets(query, limit, user_id=_ctx_actor_id(ctx))
         sources = [_asset_to_source(asset, score, matched_terms, reasons) for asset, score, matched_terms, reasons in matches]
         ctx.citations.extend(sources)
         ctx.stats_holder["asset_search"] = {"hit_count": len(sources), "query_terms": terms}
@@ -262,7 +266,7 @@ def _build_asset_search(ctx: ToolContext) -> StructuredTool:
 
 def _build_asset_overview(ctx: ToolContext) -> StructuredTool:
     def run(query: str = "", limit: int = 50) -> str:
-        matches = _query_assets(query, limit)
+        matches = _query_assets(query, limit, user_id=_ctx_actor_id(ctx))
         assets = [asset for asset, _, _, _ in matches]
         category_counts = Counter(asset.category or "uncategorized" for asset in assets)
         tag_counts: Counter[str] = Counter()
@@ -308,6 +312,7 @@ def _build_asset_overview(ctx: ToolContext) -> StructuredTool:
 
 def _build_asset_related(ctx: ToolContext) -> StructuredTool:
     def run(query: str, asset_id: str | None = None, limit: int = 10) -> str:
+        actor_id = _ctx_actor_id(ctx)
         db = _Session()
         try:
             related_assets: list[PersonalAssetItem] = []
@@ -315,7 +320,7 @@ def _build_asset_related(ctx: ToolContext) -> StructuredTool:
                 relation_rows = (
                     db.query(AssetRelation)
                     .filter(
-                        AssetRelation.user_id == "default-user",
+                        AssetRelation.user_id == actor_id,
                         AssetRelation.from_asset_id == asset_id,
                         AssetRelation.status == "confirmed",
                     )
@@ -326,14 +331,18 @@ def _build_asset_related(ctx: ToolContext) -> StructuredTool:
                 if target_ids:
                     related_assets.extend(
                         db.query(PersonalAssetItem)
-                        .filter(PersonalAssetItem.id.in_(target_ids), PersonalAssetItem.status == "confirmed")
+                        .filter(
+                            PersonalAssetItem.user_id == actor_id,
+                            PersonalAssetItem.id.in_(target_ids),
+                            PersonalAssetItem.status == "confirmed",
+                        )
                         .all()
                     )
 
             remaining = max(0, limit - len(related_assets))
             if remaining:
                 seen = {asset.id for asset in related_assets}
-                for asset, _, _, _ in _query_assets(query, remaining):
+                for asset, _, _, _ in _query_assets(query, remaining, user_id=actor_id):
                     if asset.id not in seen:
                         related_assets.append(asset)
                         seen.add(asset.id)
@@ -470,6 +479,7 @@ def _build_capture_thought(ctx: ToolContext) -> StructuredTool:
                 raw_source_type="chat",
                 raw_metadata={"entrypoint": "chat_capture"},
                 parsed=parsed,
+                user_id=_ctx_actor_id(ctx),
             )
         finally:
             db.close()

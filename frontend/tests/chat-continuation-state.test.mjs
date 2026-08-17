@@ -197,7 +197,7 @@ test('buildAgentHistory filters before indexing and adds continuation only to th
   ])
 })
 
-test('finds latest resumable assistant message by trace id', () => {
+test('finds only the actively streaming resumable assistant message by trace id', () => {
   const { latestResumableAssistant } = chatContinuationModule
   assert.equal(typeof latestResumableAssistant, 'function')
 
@@ -212,13 +212,14 @@ test('finds latest resumable assistant message by trace id', () => {
     traceId: 'trace-new',
   })
   assert.equal(latestResumableAssistant([{ id: 'a3', role: 'assistant', content: 'done', streaming: false }]), undefined)
-  assert.deepEqual(latestResumableAssistant([
+  assert.equal(latestResumableAssistant([
     { id: 'u2', role: 'user', content: 'question' },
     { id: 'a4', role: 'assistant', content: 'stopped', streaming: false, traceId: 'trace-stopped', agentStatus: 'interrupted' },
-  ]), {
-    messageId: 'a4',
-    traceId: 'trace-stopped',
-  })
+  ]), undefined)
+  assert.equal(latestResumableAssistant([
+    { id: 'u4', role: 'user', content: 'question' },
+    { id: 'a6', role: 'assistant', content: 'failed', streaming: false, traceId: 'trace-failed', agentStatus: 'error' },
+  ]), undefined)
   assert.equal(latestResumableAssistant([
     { id: 'u3', role: 'user', content: 'question' },
     { id: 'a5', role: 'assistant', content: 'done', streaming: false, traceId: 'trace-done', agentStatus: 'done' },

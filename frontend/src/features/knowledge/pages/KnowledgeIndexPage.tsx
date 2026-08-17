@@ -18,7 +18,7 @@ function canDeleteKb(kb: KnowledgeBase) {
 }
 
 function systemKbLabel(kb: KnowledgeBase) {
-  if (kb.system_type === 'personal_inbox') return '个人随手记'
+  if (kb.system_type === 'personal_inbox') return '未归档知识'
   return '系统知识库'
 }
 

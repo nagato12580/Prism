@@ -15,7 +15,7 @@ from backend.app.models.knowledge_types import StageStatus, uuid4_str
 from backend.app.services.entity_extraction import extract_entity_candidates_from_text
 from backend.app.services.graph_facts import GraphFactScope, GraphFactWriter
 from backend.app.config import settings
-from backend.app.services.knowledge_jobs import JobCommand, KnowledgeJobService
+from backend.app.services.knowledge_jobs import InvalidJobTransition, JobCommand, KnowledgeJobService
 from backend.app.storage.files import LocalFileStorage
 from engine.app.indexing.publisher import GenerationPublisher, mark_kb_index_complete
 from engine.app.indexing.profiles import DEFAULT_PROFILE
@@ -484,7 +484,7 @@ def handle_index(
     *,
     publisher_factory=_build_generation_publisher,
 ) -> dict:
-    lease = timedelta(seconds=300)
+    lease = timedelta(seconds=3600)
     job = job_svc.claim(job_id, worker_id, lease)
     if job is None:
         return {"status": "skipped"}
@@ -560,11 +560,21 @@ def handle_index(
             kb_file.graph_status = StageStatus.SUCCEEDED.value
             kb_file.graph_error = None
         db_session.commit()
-        job_svc.succeed(
-            job_id,
-            worker_id,
-            {"generation": generation, "row_count": result.row_count},
-        )
+        try:
+            job_svc.succeed(
+                job_id,
+                worker_id,
+                {"generation": generation, "row_count": result.row_count},
+            )
+        except InvalidJobTransition as exc:
+            logger.warning(
+                "knowledge index job finalization skipped after successful side effects "
+                "job_id=%s kb_uid=%s file_uid=%s error=%s",
+                job_id,
+                getattr(job, "kb_uid", None),
+                getattr(job, "file_uid", None),
+                exc,
+            )
         return {
             "status": "completed",
             "generation": generation,
@@ -624,7 +634,7 @@ def handle_graph(
     db_session,
     job_svc: KnowledgeJobService,
 ) -> dict:
-    lease = timedelta(seconds=300)
+    lease = timedelta(seconds=3600)
     job = job_svc.claim(job_id, worker_id, lease)
     if job is None:
         return {"status": "skipped"}

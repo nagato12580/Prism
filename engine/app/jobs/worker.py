@@ -34,6 +34,7 @@ ACTIVE_STATUSES = {"queued", "processing"}
 NEEDS_REPUBLISH_STAGES = {"created", "retry", "recovered"}
 EVALUATION_REAPER_INTERVAL_SECONDS = 30
 _EVALUATION_REAPER_LOCK = threading.Lock()
+RECOVERABLE_TYPED_JOB_TYPES = {"parse", "delete", "index", "graph"}
 
 
 class _MissingExternalIndex:
@@ -323,6 +324,94 @@ def recover_expired_evaluation_jobs():
         return _recover_expired_evaluation_jobs()
     finally:
         _EVALUATION_REAPER_LOCK.release()
+
+
+def recover_expired_typed_jobs():
+    """Requeue typed file jobs whose worker lease expired.
+
+    These jobs can spend several minutes in external indexing or graph work.
+    If the worker is restarted or the lease expires before completion, leaving
+    them in running would make the UI poll forever.
+    """
+    now = local_now()
+    db = _Session()
+    recovered_ids = []
+    try:
+        jobs = (
+            db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.job_type.in_(RECOVERABLE_TYPED_JOB_TYPES),
+                KnowledgeJob.status.in_({"claimed", "running"}),
+                KnowledgeJob.lease_expires_at.is_not(None),
+                KnowledgeJob.lease_expires_at <= now,
+            )
+            .order_by(KnowledgeJob.created_at.asc(), KnowledgeJob.id.asc())
+            .with_for_update()
+            .all()
+        )
+        for job in jobs:
+            job.status = "queued"
+            job.stage = "recovered"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.heartbeat_at = now
+            job.available_at = now
+            recovered_ids.append(job.id)
+        db.commit()
+        for job_id in recovered_ids:
+            job = db.get(KnowledgeJob, job_id)
+            _publish_job_and_mark_enqueued(db, job)
+        return len(recovered_ids)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def recover_orphaned_typed_jobs(active_worker_ids):
+    """Requeue typed file jobs owned by a previous worker process.
+
+    Startup can happen while a long typed job still has a valid lease from the
+    old container. The old process is gone, so waiting for the full lease makes
+    the UI show running until expiry.
+    """
+    active_worker_ids = set(active_worker_ids or ())
+    now = local_now()
+    db = _Session()
+    recovered_ids = []
+    try:
+        jobs = (
+            db.query(KnowledgeJob)
+            .filter(
+                KnowledgeJob.job_type.in_(RECOVERABLE_TYPED_JOB_TYPES),
+                KnowledgeJob.status.in_({"claimed", "running"}),
+                KnowledgeJob.lease_owner.is_not(None),
+            )
+            .order_by(KnowledgeJob.created_at.asc(), KnowledgeJob.id.asc())
+            .with_for_update()
+            .all()
+        )
+        for job in jobs:
+            if job.lease_owner in active_worker_ids:
+                continue
+            job.status = "queued"
+            job.stage = "recovered"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.heartbeat_at = now
+            job.available_at = now
+            recovered_ids.append(job.id)
+        db.commit()
+        for job_id in recovered_ids:
+            job = db.get(KnowledgeJob, job_id)
+            _publish_job_and_mark_enqueued(db, job)
+        return len(recovered_ids)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _lock_reaper_topic(db, candidate):
@@ -730,7 +819,17 @@ class KnowledgeWorkerManager:
     def start(self):
         if self._threads:
             return
+        ingest_worker_ids = [
+            _worker_id(f"ingest-{index}")
+            for index in range(max(1, settings.KNOWLEDGE_INGEST_WORKERS))
+        ]
+        governance_worker_ids = [
+            _worker_id(f"governance-{index}")
+            for index in range(max(1, settings.KNOWLEDGE_GOVERNANCE_WORKERS))
+        ]
         recover_stale_jobs()
+        recover_orphaned_typed_jobs({*ingest_worker_ids, *governance_worker_ids})
+        recover_expired_typed_jobs()
         recover_expired_evaluation_jobs()
         republish_due_queued_jobs()
         self._client = redis_queue.redis_client()
@@ -742,8 +841,7 @@ class KnowledgeWorkerManager:
         )
         self._threads.append(reaper)
         reaper.start()
-        for index in range(max(1, settings.KNOWLEDGE_INGEST_WORKERS)):
-            worker_id = _worker_id(f"ingest-{index}")
+        for index, worker_id in enumerate(ingest_worker_ids):
             thread = threading.Thread(
                 target=self._loop,
                 args=(settings.KNOWLEDGE_INGEST_QUEUE, run_ingest_queue_job, worker_id),
@@ -752,8 +850,7 @@ class KnowledgeWorkerManager:
             )
             self._threads.append(thread)
             thread.start()
-        for index in range(max(1, settings.KNOWLEDGE_GOVERNANCE_WORKERS)):
-            worker_id = _worker_id(f"governance-{index}")
+        for index, worker_id in enumerate(governance_worker_ids):
             thread = threading.Thread(
                 target=self._loop,
                 args=(settings.KNOWLEDGE_GOVERNANCE_QUEUE, run_governance_job, worker_id),
@@ -802,6 +899,7 @@ class KnowledgeWorkerManager:
     def _evaluation_reaper_loop(self):
         while not self._stop.wait(EVALUATION_REAPER_INTERVAL_SECONDS):
             try:
+                recover_expired_typed_jobs()
                 recover_expired_evaluation_jobs()
                 republish_due_queued_jobs()
             except Exception as exc:

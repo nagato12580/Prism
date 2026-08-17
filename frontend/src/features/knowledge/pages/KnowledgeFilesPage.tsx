@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import {
   FileText,
@@ -10,12 +11,14 @@ import {
   Eye,
   Zap,
   Network,
+  Archive,
 } from 'lucide-react'
-import type { KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
+import { knowledgeBasesApi, type KnowledgeBase } from '@/features/knowledge/api/knowledgeBases'
 import { filesApi, type KnowledgeFile, type FileListParams } from '@/features/knowledge/api/files'
 import { jobsApi, isTerminalJobStatus } from '@/features/knowledge/api/jobs'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Dialog } from '@/components/ui/Dialog'
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateView'
 import { FileUploadPanel } from '@/features/knowledge/components/FileUploadPanel'
 import { DocumentDrawer } from '@/features/knowledge/components/DocumentDrawer'
@@ -39,34 +42,54 @@ export function KnowledgeFilesPage() {
   const { kb } = useOutletContext<Ctx>()
   const [searchParams, setSearchParams] = useSearchParams()
   const [items, setItems] = useState<KnowledgeFile[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [drawerFile, setDrawerFile] = useState<KnowledgeFile | null>(null)
+  const [selectedFileUids, setSelectedFileUids] = useState<string[]>([])
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [archiveFiles, setArchiveFiles] = useState<KnowledgeFile[] | null>(null)
   const pollTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   const kbUid = kb?.kb_uid ?? ''
   const statusFilter = searchParams.get('status') ?? ''
+  const isPersonalInboxKb = kb?.system_type === 'personal_inbox'
+
+  const listFiles = useCallback(
+    (cursor?: string, limit = 100) => {
+      const params: FileListParams = { limit }
+      if (cursor) params.cursor = cursor
+      if (statusFilter) {
+        // Map UI filter to parse/index status filters the backend accepts.
+        if (statusFilter === 'succeeded') params.index_status = 'succeeded'
+        else if (statusFilter === 'failed') params.index_status = 'failed'
+        else params.index_status = 'running'
+      }
+      return filesApi.list(kbUid, params)
+    },
+    [kbUid, statusFilter],
+  )
 
   const load = useCallback(() => {
     if (!kbUid) return
     setLoading(true)
     setError(null)
-    const params: FileListParams = { limit: 100 }
-    if (statusFilter) {
-      // Map UI filter to parse/index status filters the backend accepts.
-      if (statusFilter === 'succeeded') params.index_status = 'succeeded'
-      else if (statusFilter === 'failed') params.index_status = 'failed'
-      else params.index_status = 'running'
-    }
-    filesApi
-      .list(kbUid, params)
-      .then((res) => setItems(res.items))
+    listFiles()
+      .then((res) => {
+        setItems(res.items)
+        setNextCursor(res.next_cursor)
+      })
       .catch((e) => setError(e))
       .finally(() => setLoading(false))
-  }, [kbUid, statusFilter])
+  }, [kbUid, listFiles])
 
   useEffect(load, [load])
+
+  useEffect(() => {
+    const visibleFileUids = new Set(items.map((item) => item.file_uid))
+    setSelectedFileUids((current) => current.filter((fileUid) => visibleFileUids.has(fileUid)))
+  }, [items])
 
   // After upload completes, refresh the list once (no aggressive polling).
   const onUploadDone = useCallback(() => {
@@ -157,11 +180,7 @@ export function KnowledgeFilesPage() {
 
   const triggerGraph = (file: KnowledgeFile) => {
     if (!kbUid) return
-    setItems((current) =>
-      current.map((row) =>
-        row.parse_status === 'succeeded' ? { ...row, graph_status: 'running' } : row,
-      ),
-    )
+    setItems((current) => updateFileStage(current, file.file_uid, 'graph_status', 'running'))
     filesApi
       .graph(kbUid, file.file_uid)
       .then((job) => watchJob(job.id))
@@ -169,6 +188,118 @@ export function KnowledgeFilesPage() {
         setItems((current) => updateFileStage(current, file.file_uid, 'graph_status', 'failed'))
         setError(e)
       })
+  }
+
+  const selectedFiles = useMemo(() => {
+    const selected = new Set(selectedFileUids)
+    return items.filter((file) => selected.has(file.file_uid))
+  }, [items, selectedFileUids])
+
+  const selectedIndexableFiles = selectedFiles.filter(canIndexFile)
+  const selectedGraphableFiles = selectedFiles.filter(canGraphFile)
+  const allVisibleSelected = items.length > 0 && !nextCursor && selectedFileUids.length === items.length
+
+  const loadAllFiles = async () => {
+    if (!nextCursor) return items
+    const allFiles = [...items]
+    let cursor: string | null = nextCursor
+    while (cursor) {
+      const res = await listFiles(cursor, 500)
+      allFiles.push(...res.items)
+      cursor = res.next_cursor
+    }
+    setItems(allFiles)
+    setNextCursor(null)
+    return allFiles
+  }
+
+  const toggleSelectAll = async () => {
+    if (allVisibleSelected) {
+      setSelectedFileUids([])
+      return
+    }
+    setError(null)
+    try {
+      const allFiles = await loadAllFiles()
+      setSelectedFileUids(allFiles.map((file) => file.file_uid))
+    } catch (e) {
+      setError(e)
+    }
+  }
+
+  const toggleSelectFile = (fileUid: string) => {
+    setSelectedFileUids((current) =>
+      current.includes(fileUid)
+        ? current.filter((selectedFileUid) => selectedFileUid !== fileUid)
+        : [...current, fileUid],
+    )
+  }
+
+  const triggerBulkIndex = () => {
+    if (!kbUid || selectedIndexableFiles.length === 0) return
+    const targets = selectedIndexableFiles
+    const triggerFile = targets[0]
+    setItems((current) =>
+      targets.reduce(
+        (next, file) => updateFileStage(next, file.file_uid, 'index_status', 'running'),
+        current,
+      ),
+    )
+    // The backend index job rebuilds the whole KB generation. One trigger file
+    // is enough; submitting per file creates duplicate full-KB rebuild jobs.
+    filesApi
+      .index(kbUid, triggerFile.file_uid)
+      .then((job) => watchJob(job.id))
+      .catch((e) => {
+        setItems((current) =>
+          targets.reduce(
+            (next, file) => updateFileStage(next, file.file_uid, 'index_status', 'failed'),
+            current,
+          ),
+        )
+        setError(e)
+      })
+  }
+
+  const triggerBulkGraph = () => {
+    if (!kbUid || selectedGraphableFiles.length === 0) return
+    const targets = selectedGraphableFiles
+    setItems((current) =>
+      targets.reduce(
+        (next, file) => updateFileStage(next, file.file_uid, 'graph_status', 'running'),
+        current,
+      ),
+    )
+    Promise.allSettled(
+      targets.map((file) =>
+        filesApi.graph(kbUid, file.file_uid).then((job) => {
+          watchJob(job.id)
+          return job
+        }),
+      ),
+    ).then((results) => {
+      const failed = results.filter((result) => result.status === 'rejected')
+      if (failed.length > 0) {
+        setItems((current) =>
+          targets.reduce(
+            (next, file) => updateFileStage(next, file.file_uid, 'graph_status', 'failed'),
+            current,
+          ),
+        )
+        setError(new Error(`${failed.length} 个文件图抽取任务提交失败`))
+      }
+    })
+  }
+
+  const openBulkArchive = () => {
+    if (!isPersonalInboxKb || selectedFiles.length === 0) return
+    setArchiveFiles(selectedFiles)
+  }
+
+  const onArchiveDone = () => {
+    setArchiveFiles(null)
+    setSelectedFileUids([])
+    load()
   }
 
   const [confirmDelete, setConfirmDelete] = useState<KnowledgeFile | null>(null)
@@ -181,6 +312,27 @@ export function KnowledgeFilesPage() {
         setConfirmDelete(null)
       })
       .catch((e) => setError(e))
+  }
+
+  const deleteSelectedFiles = () => {
+    if (!kbUid || selectedFiles.length === 0) return
+    const targets = selectedFiles
+    Promise.allSettled(
+      targets.map((file) =>
+        filesApi.remove(kbUid, file.file_uid).then((job) => {
+          watchJob(job.id)
+          return job
+        }),
+      ),
+    ).then((results) => {
+      setConfirmBulkDelete(false)
+      setSelectedFileUids([])
+      const failed = results.filter((result) => result.status === 'rejected')
+      if (failed.length > 0) {
+        setError(new Error(`${failed.length} 个文件删除任务提交失败`))
+      }
+      load()
+    })
   }
 
   const downloadFile = (file: KnowledgeFile) => {
@@ -250,6 +402,54 @@ export function KnowledgeFilesPage() {
         />
       ) : null}
 
+      {selectedFiles.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2">
+          <span className="text-xs font-medium text-slate-500">
+            已选择 {selectedFiles.length} 个文档
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={triggerBulkIndex}
+              disabled={!kb?.can_contribute || selectedIndexableFiles.length === 0}
+              title={!kb?.can_contribute ? '需要贡献者以上权限' : '对已解析文档批量向量化'}
+            >
+              <Zap size={14} /> 批量向量化
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={triggerBulkGraph}
+              disabled={!kb?.can_edit || selectedGraphableFiles.length === 0}
+              title={!kb?.can_edit ? '需要编辑权限' : '对已解析文档批量图抽取'}
+            >
+              <Network size={14} /> 批量图抽取
+            </Button>
+            {isPersonalInboxKb ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={openBulkArchive}
+                disabled={!kb?.can_edit}
+                title={!kb?.can_edit ? '需要编辑权限' : '整理到知识库'}
+              >
+                <Archive size={14} /> 整理到知识库
+              </Button>
+            ) : null}
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={!kb?.can_edit}
+              title={!kb?.can_edit ? '需要编辑权限' : '删除已选择文档'}
+            >
+              <Trash2 size={14} /> 批量删除
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {loading ? (
         <LoadingState label="加载文件…" />
       ) : error ? (
@@ -277,6 +477,15 @@ export function KnowledgeFilesPage() {
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="border-b border-[var(--prism-line)] bg-slate-50/60 text-xs text-slate-500">
                 <tr>
+                  <th className="w-10 px-4 py-2.5 font-medium">
+                    <input
+                      type="checkbox"
+                      aria-label="选择所有文档"
+                      checked={allVisibleSelected}
+                      onChange={() => void toggleSelectAll()}
+                      className="h-4 w-4 rounded border-slate-300 text-[var(--prism-blue)] focus:ring-[var(--prism-blue)]"
+                    />
+                  </th>
                   <th className="px-4 py-2.5 font-medium">文件名</th>
                   <th className="px-3 py-2.5 font-medium">类型</th>
                   <th className="px-3 py-2.5 font-medium">大小</th>
@@ -291,13 +500,17 @@ export function KnowledgeFilesPage() {
                   <FileRow
                     key={file.file_uid}
                     file={file}
+                    selected={selectedFileUids.includes(file.file_uid)}
                     canContribute={!!kb?.can_contribute}
                     canEdit={!!kb?.can_edit}
+                    canArchive={isPersonalInboxKb && !!kb?.can_edit}
+                    onSelect={() => toggleSelectFile(file.file_uid)}
                     onPreview={() => setDrawerFile(file)}
                     onDownload={() => downloadFile(file)}
                     onParse={() => triggerParse(file)}
                     onIndex={() => triggerIndex(file)}
                     onGraph={() => triggerGraph(file)}
+                    onArchive={() => setArchiveFiles([file])}
                     onDelete={() => setConfirmDelete(file)}
                   />
                 ))}
@@ -318,6 +531,24 @@ export function KnowledgeFilesPage() {
           onConfirm={deleteFile}
         />
       ) : null}
+
+      {confirmBulkDelete ? (
+        <BulkDeleteConfirm
+          files={selectedFiles}
+          onCancel={() => setConfirmBulkDelete(false)}
+          onConfirm={deleteSelectedFiles}
+        />
+      ) : null}
+
+      {archiveFiles ? (
+        <ArchiveFilesDialog
+          sourceKbUid={kbUid}
+          files={archiveFiles}
+          onClose={() => setArchiveFiles(null)}
+          onDone={onArchiveDone}
+          onError={setError}
+        />
+      ) : null}
     </div>
   )
 }
@@ -333,31 +564,48 @@ function isPersonalInboxDerivedFile(file: KnowledgeFile) {
 
 function FileRow({
   file,
+  selected,
   canContribute,
   canEdit,
+  canArchive,
+  onSelect,
   onPreview,
   onDownload,
   onParse,
   onIndex,
   onGraph,
+  onArchive,
   onDelete,
 }: {
   file: KnowledgeFile
+  selected: boolean
   canContribute: boolean
   canEdit: boolean
+  canArchive: boolean
+  onSelect: () => void
   onPreview: () => void
   onDownload: () => void
   onParse: () => void
   onIndex: () => void
   onGraph: () => void
+  onArchive: () => void
   onDelete: () => void
 }) {
   const sizeKb = Math.max(1, Math.round(file.size_bytes / 1024))
   const canParse = !isRunningStage(file.parse_status)
-  const canIndex = file.parse_status === 'succeeded' && !isRunningStage(file.index_status)
-  const canGraph = file.parse_status === 'succeeded' && !isRunningStage(file.graph_status)
+  const canIndex = canIndexFile(file)
+  const canGraph = canGraphFile(file)
   return (
     <tr className="border-b border-[var(--prism-line)] last:border-0 hover:bg-slate-50/40">
+      <td className="px-4 py-2.5">
+        <input
+          type="checkbox"
+          aria-label={`选择文档 ${file.original_filename}`}
+          checked={selected}
+          onChange={onSelect}
+          className="h-4 w-4 rounded border-slate-300 text-[var(--prism-blue)] focus:ring-[var(--prism-blue)]"
+        />
+      </td>
       <td className="px-4 py-2.5">
         <button
           type="button"
@@ -404,6 +652,11 @@ function FileRow({
           <IconBtn label="图谱" onClick={onGraph} disabled={!canEdit || !canGraph}>
             <Network size={14} />
           </IconBtn>
+          {canArchive ? (
+            <IconBtn label="整理" onClick={onArchive}>
+              <Archive size={14} />
+            </IconBtn>
+          ) : null}
           <IconBtn label="删除" danger onClick={onDelete} disabled={!canEdit}>
             <Trash2 size={14} />
           </IconBtn>
@@ -435,6 +688,14 @@ function StageBadge({ status }: { status: string }) {
 
 function isRunningStage(status: string) {
   return status === 'running' || status === 'queued' || status === 'claimed'
+}
+
+function canIndexFile(file: KnowledgeFile) {
+  return file.parse_status === 'succeeded' && !isRunningStage(file.index_status)
+}
+
+function canGraphFile(file: KnowledgeFile) {
+  return file.parse_status === 'succeeded' && !isRunningStage(file.graph_status)
 }
 
 function StageErrorText({ message }: { message: string }) {
@@ -490,7 +751,11 @@ function DeleteConfirm({
 }) {
   const [busy, setBusy] = useState(false)
   const cascadesToPersonalAssetUnit = isPersonalInboxDerivedFile(file)
-  return (
+  // Render through a portal: the MainLayout content wrapper has `backdrop-blur`,
+  // whose backdrop-filter makes `position: fixed` relative to that wrapper instead
+  // of the viewport. Without the portal, the overlay centers against the whole
+  // (tall, scrollable) file list and the dialog can be pushed below the fold.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
       <div className="w-full max-w-md rounded-2xl border border-[var(--prism-line)] bg-white p-5 shadow-2xl">
         <h3 className="text-sm font-semibold text-slate-900">删除文件</h3>
@@ -499,7 +764,7 @@ function DeleteConfirm({
         </p>
         {cascadesToPersonalAssetUnit ? (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-            这是个人随手记派生文件。删除该文件也会删除对应的个人知识单元，并清理不再被引用的来源碎片。
+            这是未归档知识派生文件。删除该文件也会删除对应的个人知识单元，并清理不再被引用的来源碎片。
           </div>
         ) : null}
         <div className="mt-4 flex justify-end gap-2">
@@ -518,6 +783,140 @@ function DeleteConfirm({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
+  )
+}
+
+function BulkDeleteConfirm({
+  files,
+  onCancel,
+  onConfirm,
+}: {
+  files: KnowledgeFile[]
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const derivedCount = files.filter(isPersonalInboxDerivedFile).length
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-[var(--prism-line)] bg-white p-5 shadow-2xl">
+        <h3 className="text-sm font-semibold text-slate-900">批量删除文件</h3>
+        <p className="mt-2 text-sm text-slate-600">
+          确认删除已选择的 {files.length} 个文档？该操作会移除对应分块、索引和图谱引用，不可恢复。
+        </p>
+        {derivedCount > 0 ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            其中 {derivedCount} 个是未归档知识派生文件。删除这些文件也会删除对应的个人知识单元，并清理不再被引用的来源碎片。
+          </div>
+        ) : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>
+            取消
+          </Button>
+          <Button
+            variant="danger"
+            loading={busy}
+            onClick={() => {
+              setBusy(true)
+              onConfirm()
+            }}
+          >
+            <Trash2 size={14} /> 确认删除
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function ArchiveFilesDialog({
+  sourceKbUid,
+  files,
+  onClose,
+  onDone,
+  onError,
+}: {
+  sourceKbUid: string
+  files: KnowledgeFile[]
+  onClose: () => void
+  onDone: () => void
+  onError: (error: unknown) => void
+}) {
+  const [targets, setTargets] = useState<KnowledgeBase[]>([])
+  const [targetKbUid, setTargetKbUid] = useState('')
+  const [loadingTargets, setLoadingTargets] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setLoadingTargets(true)
+    knowledgeBasesApi.list({ limit: 200 })
+      .then((res) => {
+        if (!active) return
+        const options = res.items.filter(
+          (item) => item.kb_uid !== sourceKbUid && !item.is_system && item.system_type !== 'personal_inbox' && item.can_contribute,
+        )
+        setTargets(options)
+        setTargetKbUid(options[0]?.kb_uid ?? '')
+      })
+      .catch(onError)
+      .finally(() => {
+        if (active) setLoadingTargets(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [sourceKbUid, onError])
+
+  const submit = () => {
+    if (!targetKbUid || files.length === 0) return
+    setBusy(true)
+    filesApi.archive(sourceKbUid, files.map((file) => file.file_uid), targetKbUid)
+      .then(onDone)
+      .catch(onError)
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Dialog open onClose={onClose} title="整理到知识库" width="sm">
+      <div className="flex flex-col gap-3">
+        <div className="text-sm text-slate-600">
+          将已选择的 {files.length} 个文档移动到目标知识库。
+        </div>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          目标知识库
+          <select
+            value={targetKbUid}
+            onChange={(event) => setTargetKbUid(event.target.value)}
+            disabled={loadingTargets || busy || targets.length === 0}
+            className="h-9 rounded-lg border border-[var(--prism-line)] bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {targets.map((target) => (
+              <option key={target.kb_uid} value={target.kb_uid}>
+                {target.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {loadingTargets ? (
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <Loader2 size={13} className="animate-spin" /> 加载知识库…
+          </div>
+        ) : targets.length === 0 ? (
+          <div className="text-xs text-amber-700">暂无可整理到的知识库。</div>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button variant="primary" onClick={submit} loading={busy} disabled={!targetKbUid || targets.length === 0}>
+            <Archive size={14} /> 确认整理
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   )
 }

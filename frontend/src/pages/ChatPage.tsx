@@ -281,12 +281,6 @@ export function ChatPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
 
-  useEffect(() => {
-    return () => {
-      activeStreamRef.current?.stop()
-    }
-  }, [])
-
   // 页面加载：恢复最近会话
   useEffect(() => {
     let cancelled = false
@@ -916,12 +910,12 @@ export function ChatPage() {
   }
 
   return (
-    <div className="grid h-full min-h-0 w-full gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-      <aside className="flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white shadow-[0_18px_48px_-40px_rgba(15,23,42,0.35)]">
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 px-4">
+    <div className="grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden lg:grid-rows-none lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-4">
+      <aside className="flex h-28 max-h-28 min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_18px_48px_-40px_rgba(15,23,42,0.35)] lg:h-auto lg:max-h-none lg:rounded-2xl">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 px-3 lg:h-16 lg:px-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-950">会话</h2>
-            <p className="mt-0.5 text-xs text-slate-400">多轮问答状态</p>
+            <p className="mt-0.5 hidden text-xs text-slate-400 lg:block">多轮问答状态</p>
           </div>
           <button
             type="button"
@@ -934,8 +928,9 @@ export function ChatPage() {
         </div>
 
         <div
+          data-mobile-conversation-strip
           data-scroll-region="conversation-list"
-          className="min-h-0 flex-1 overflow-y-auto p-3"
+          className="mobile-conversation-strip min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-2 lg:overflow-x-hidden lg:overflow-y-auto lg:p-3"
         >
           {sessionsLoading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-xs text-slate-400">
@@ -947,18 +942,18 @@ export function ChatPage() {
               暂无会话，发送第一条消息开始
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="flex min-w-max gap-2 lg:block lg:min-w-0 lg:space-y-2">
               {sessions.map((session) => {
                 const active = currentSessionId === session.id
                 const time = formatSessionTime(session.updated_at)
                 const editing = editingSessionId === session.id
                 return (
-                  <div key={session.id} className="group relative">
+                  <div key={session.id} className="group relative w-40 shrink-0 sm:w-48 lg:w-auto lg:shrink">
                     {editing ? (
                       <form
                         onSubmit={(e) => saveSessionTitle(session.id, e)}
                         className={cn(
-                          'w-full rounded-xl border p-3 text-left transition focus-within:ring-2 focus-within:ring-[var(--prism-cyan)]',
+                          'w-full rounded-xl border p-2 text-left transition focus-within:ring-2 focus-within:ring-[var(--prism-cyan)] lg:p-3',
                           active
                             ? 'border-blue-200 bg-blue-50 shadow-sm'
                             : 'border-slate-200 bg-white',
@@ -994,7 +989,7 @@ export function ChatPage() {
                         type="button"
                         onClick={() => switchSession(session.id)}
                         className={cn(
-                          'w-full rounded-xl border p-3 pr-16 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)]',
+                          'w-full rounded-xl border p-2 pr-12 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--prism-cyan)] lg:p-3 lg:pr-16',
                           active
                             ? 'border-blue-200 bg-blue-50 shadow-sm'
                             : 'border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white',
@@ -1022,7 +1017,7 @@ export function ChatPage() {
                       <button
                         type="button"
                         onClick={(e) => startEditingSessionTitle(session.id, session.title, e)}
-                        className="absolute right-8 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-blue-50 hover:text-[var(--prism-blue)] group-hover:flex"
+                        className="absolute right-8 top-2 flex h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-blue-50 hover:text-[var(--prism-blue)] lg:pointer-events-none lg:opacity-0 lg:group-hover:pointer-events-auto lg:group-hover:opacity-100"
                         aria-label={`编辑 ${session.title}`}
                       >
                         <Pencil size={13} />
@@ -1032,7 +1027,7 @@ export function ChatPage() {
                       <button
                         type="button"
                         onClick={(e) => deleteSession(session.id, e)}
-                        className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-red-50 hover:text-red-500 group-hover:flex"
+                        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-slate-300 transition hover:bg-red-50 hover:text-red-500 lg:pointer-events-none lg:opacity-0 lg:group-hover:pointer-events-auto lg:group-hover:opacity-100"
                         aria-label={`删除 ${session.title}`}
                       >
                         <X size={13} />
@@ -1046,15 +1041,15 @@ export function ChatPage() {
         </div>
       </aside>
 
-      <section className="prism-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
+      <section className="prism-panel flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-xl lg:rounded-2xl">
         <div
           data-scroll-region="message-list"
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8"
+          className="min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto px-2 py-3 sm:px-6 sm:py-5 lg:px-8"
         >
           {messages.length === 0 ? (
             <EmptyState onStarterPrompt={sendMessage} disabled={sending} />
           ) : (
-            <div className="space-y-5">
+            <div className="w-full min-w-0 space-y-4 sm:space-y-5">
               {messages.map((msg) => (
                 <MessageBlock
                   key={msg.id}
@@ -1102,13 +1097,13 @@ export function ChatPage() {
 
         {/* 输入区域：输入框 + 内嵌工具栏 */}
         <form
-          className="shrink-0 bg-white/90 p-3 sm:p-4"
+          className="w-full min-w-0 shrink-0 bg-white/90 p-2 sm:p-4"
           onSubmit={(e) => {
             e.preventDefault()
             sendMessage()
           }}
         >
-          <div className="flex flex-col rounded-xl border border-[var(--prism-line)] bg-white shadow-[0_14px_34px_-28px_rgba(16,24,40,0.6)] focus-within:border-blue-200 focus-within:ring-2 focus-within:ring-cyan-100">
+          <div className="flex w-full min-w-0 flex-col rounded-xl border border-[var(--prism-line)] bg-white shadow-[0_14px_34px_-28px_rgba(16,24,40,0.6)] focus-within:border-blue-200 focus-within:ring-2 focus-within:ring-cyan-100">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -1121,30 +1116,32 @@ export function ChatPage() {
               placeholder="输入问题，Prism 会检索知识库后回答"
               disabled={sending}
               rows={2}
-              className="max-h-36 min-h-[3rem] resize-none border-0 bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
+              className="max-h-28 min-h-[2.75rem] w-full min-w-0 resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60 sm:max-h-36 sm:min-h-[3rem] sm:py-2.5"
             />
-            <div className="flex items-center gap-2 border-t border-slate-100 px-2 py-1.5">
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 border-t border-slate-100 px-2 py-1.5 sm:flex-nowrap">
               {/* 知识库选择（可选多选） */}
-              <div className="relative" ref={topicPickerRef}>
+              <div className="relative min-w-0 max-w-full flex-[1_1_100%] sm:flex-none" ref={topicPickerRef}>
                 <button
                   type="button"
                   onClick={handleOpenTopicPicker}
                   className={cn(
-                    'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
+                    'inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
                     selectedTopicIds.length > 0
                       ? 'border-blue-200 bg-blue-50 text-[var(--prism-blue)]'
                       : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-[var(--prism-blue)]',
                   )}
                 >
-                  <Library size={12} />
-                  {selectedTopicIds.length > 0
-                    ? selectedTopicNames.join(', ')
-                    : '知识库（可选）'}
+                  <Library size={12} className="shrink-0" />
+                  <span className="min-w-0 truncate">
+                    {selectedTopicIds.length > 0
+                      ? selectedTopicNames.join(', ')
+                      : '知识库（可选）'}
+                  </span>
                   <ChevronDown size={10} className={cn('transition', showTopicPicker && 'rotate-180')} />
                 </button>
 
                 {showTopicPicker && (
-                  <div className="absolute bottom-full left-0 z-30 mb-1 w-52 rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)]">
+                  <div className="absolute bottom-full left-0 z-30 mb-1 w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-[var(--prism-line)] bg-white p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] sm:w-52">
                     {loadingTopics ? (
                       <div className="flex items-center gap-2 px-2 py-3 text-[11px] text-slate-400">
                         <Loader2 size={12} className="animate-spin" />
@@ -1189,7 +1186,7 @@ export function ChatPage() {
               </div>
 
               {/* 右侧间距 + 清除按钮 */}
-              <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+              <div className="flex max-w-full shrink-0 items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
                 <button
                   type="button"
                   onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
@@ -1230,9 +1227,9 @@ export function ChatPage() {
               </div>
 
               <label
-                title="开启后，本次问答会额外搜索你的个人随手记。默认关闭。"
+                title="开启后，本次问答会额外搜索你的未归档文件。默认关闭。"
                 className={cn(
-                  'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition',
+                  'inline-flex h-7 max-w-full shrink items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition',
                   includePersonalInbox
                     ? 'border-cyan-200 bg-cyan-50 text-cyan-700'
                     : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:text-cyan-700',
@@ -1244,10 +1241,10 @@ export function ChatPage() {
                   checked={includePersonalInbox}
                   onChange={(e) => setIncludePersonalInbox(e.target.checked)}
                 />
-                包含个人随手记
+                <span className="min-w-0 truncate">包含未归档文件</span>
               </label>
 
-              <div className="flex-1" />
+              <div className="hidden flex-1 sm:block" />
               {selectedTopicIds.length > 0 && (
                 <button
                   type="button"
@@ -1264,7 +1261,7 @@ export function ChatPage() {
                 aria-label="语音记录"
                 onClick={() => setShowVoice((value) => !value)}
                 className={cn(
-                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition',
+                  'ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:ml-0',
                   showVoice
                     ? 'border-red-200 bg-red-50 text-red-600'
                     : 'border-[var(--prism-line)] bg-white text-slate-500 hover:border-blue-200 hover:text-[var(--prism-blue)]',
@@ -1456,12 +1453,12 @@ function MessageBlock({
 
   return (
     <>
-    <div className={cn('flex min-w-0', isUser ? 'justify-end' : 'justify-start')}>
-      <div className={cn('min-w-0 max-w-[92%] sm:max-w-[78%]', isUser ? 'text-right' : 'text-left')}>
+    <div className={cn('flex min-w-0 w-full overflow-hidden', isUser ? 'justify-end' : 'justify-start')}>
+      <div className={cn('min-w-0 max-w-[min(100%,42rem)] sm:max-w-[78%]', isUser ? 'text-right' : 'text-left')}>
         {!isUser && <ThinkingPanel msg={msg} />}
         <div
           className={cn(
-            'min-w-0 break-words rounded-2xl px-4 py-3 text-sm leading-6',
+            'min-w-0 max-w-full overflow-hidden break-words rounded-2xl px-3 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] sm:px-4 sm:py-3',
             isUser
               ? 'rounded-br-md bg-[var(--prism-blue)] text-white shadow-sm'
               : 'rounded-bl-md border border-[var(--prism-line)] bg-white text-slate-800 shadow-[0_16px_34px_-30px_rgba(16,24,40,0.7)]',
@@ -1469,7 +1466,7 @@ function MessageBlock({
           )}
         >
           {isUser ? (
-            <p className="whitespace-pre-wrap text-left">{msg.content}</p>
+            <p className="whitespace-pre-wrap break-words text-left [overflow-wrap:anywhere]">{msg.content}</p>
           ) : (
             <>
               {msg.toolRuns && msg.toolRuns.length > 0 && <ToolProcess runs={msg.toolRuns} />}
@@ -1483,7 +1480,7 @@ function MessageBlock({
         </div>
 
         {!isUser && msg.sources && msg.sources.length > 0 && !msg.streaming && (
-          <div className="mt-2 text-left">
+          <div className="mt-2 min-w-0 max-w-full text-left">
             <button
               type="button"
               onClick={onToggleSources}
@@ -1497,15 +1494,15 @@ function MessageBlock({
             </button>
 
             {sourcesOpen && (
-              <div className="mt-2 grid gap-2">
+              <div className="mt-2 grid min-w-0 gap-2">
                 {msg.sources.map((source, index) => (
                   <button
                     type="button"
                     key={`${source.display_type || source.source_kind || 'source'}-${source.display_id || source.source_id || source.chunk_id || source.item_id}-${index}`}
                     onClick={() => setOpenEvidence(source)}
-                    className="w-full rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-left text-xs text-slate-600 shadow-sm transition hover:border-blue-200 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+                    className="w-full min-w-0 overflow-hidden rounded-lg border border-[var(--prism-line)] bg-white px-3 py-2.5 text-left text-xs text-slate-600 shadow-sm transition hover:border-blue-200 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
                   >
-                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate font-semibold text-slate-800">
                           {sourceDisplayTitle(source)}
@@ -1514,17 +1511,17 @@ function MessageBlock({
                           {source.display_id || source.item_id || source.source_id}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                      <div className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
                           {sourceDisplayLabel(source)}
                         </span>
                         {source.raw_score != null ? (
-                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
+                          <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--prism-blue)]">
                             原始分数 {formatScore(source.raw_score)}
                           </span>
                         ) : null}
                         {source.score != null ? (
-                          <span className="rounded-full bg-violet-50 px-2 py-0.5 font-mono text-[10px] font-medium text-violet-600">
+                          <span className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 font-mono text-[10px] font-medium text-violet-600">
                             相关度 {formatScore(source.score)}
                           </span>
                         ) : null}
@@ -1551,7 +1548,7 @@ function MessageBlock({
 function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) {
   if (isError) {
     return (
-      <div className="flex min-w-0 items-start gap-2 text-left">
+      <div className="flex min-w-0 max-w-full items-start gap-2 text-left">
         <AlertTriangle className="mt-0.5 shrink-0" size={17} />
         <p className="min-w-0 whitespace-pre-wrap break-words">{msg.content}</p>
       </div>
@@ -1560,7 +1557,7 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
 
   if (!msg.content && msg.streaming) {
     return (
-      <div className="flex items-center gap-2 text-slate-500">
+      <div className="flex min-w-0 max-w-full items-center gap-2 text-slate-500">
         <span
           className="h-2 w-2 rounded-full bg-[var(--prism-cyan)]"
           style={{ animation: 'prism-pulse 1s ease-in-out infinite' }}
@@ -1571,7 +1568,7 @@ function AssistantContent({ msg, isError }: { msg: Message; isError: boolean }) 
   }
 
   return (
-    <div className="markdown-body min-w-0 max-w-full overflow-x-auto text-left">
+    <div className="markdown-body chat-message-content min-w-0 max-w-full overflow-x-auto break-words text-left [overflow-wrap:anywhere]">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
       {msg.streaming && (
         <span
@@ -1617,7 +1614,7 @@ function EvidenceMetadata({ evidence }: { evidence: EvidenceItem }) {
   if (!graph_explain && graph_path.length === 0 && !evidence_type) return null
 
   return (
-    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
+    <div className="mt-2 min-w-0 max-w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
       {evidence_type && (
         <div className="font-medium text-slate-600">
           {formatEvidenceTypeLabel(evidence_type)}
@@ -1635,7 +1632,7 @@ function EvidenceMetadata({ evidence }: { evidence: EvidenceItem }) {
           {graphPathLabels(graph_path).map((label, index) => (
             <span
               key={`${evidence.evidence_id}-graph_path-${index}`}
-              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600"
+              className="max-w-full truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600"
             >
               {label}
             </span>
@@ -1652,13 +1649,13 @@ function ToolEvidenceList({ runs }: { runs: ToolRun[] }) {
   if (evidenceItems.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2">
+    <div className="mb-3 min-w-0 max-w-full space-y-2 overflow-hidden">
       {evidenceItems.slice(0, 3).map((evidence) => (
         <div
           key={evidence.evidence_id}
-          className="rounded-lg border border-[var(--prism-line)] bg-white/80 px-3 py-2 text-xs text-slate-600"
+          className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[var(--prism-line)] bg-white/80 px-3 py-2 text-xs text-slate-600"
         >
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="truncate font-medium text-slate-700">
                 {evidence.display_title || evidence.source_id || evidence.evidence_id}
@@ -1704,11 +1701,11 @@ function ThinkingPanel({ msg }: { msg: Message }) {
   if ((!steps || steps.length === 0) && (!runs || runs.length === 0)) return null
 
   return (
-    <div className="mb-1.5 text-left">
+    <div className="mb-1.5 min-w-0 max-w-full text-left">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+        className="inline-flex max-w-full items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
       >
         {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         {expanded ? '收起思考过程' : '查看思考过程'}
@@ -1717,17 +1714,17 @@ function ThinkingPanel({ msg }: { msg: Message }) {
         )}
       </button>
       {expanded && (
-        <div className="mt-1 rounded-lg border border-[var(--prism-line)] bg-slate-50/70 px-3 py-2">
+        <div className="mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-[var(--prism-line)] bg-slate-50/70 px-2 py-2 sm:px-3">
           {steps && steps.length > 0 ? (
             <div className="space-y-1.5">
               {steps.map((step, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs">
+                <div key={i} className="flex min-w-0 items-start gap-2 text-xs">
                   <span className="mt-0.5 shrink-0 text-slate-400">
                     {stepIcon(step.agent || step.tool || runs?.[0]?.tool || '', step.status)}
                   </span>
-                  <span className="min-w-0 flex-1 text-slate-700">{step.label}</span>
+                  <span className="min-w-0 flex-1 break-words text-slate-700 [overflow-wrap:anywhere]">{step.label}</span>
                   {step.detail && (
-                    <span className="max-w-40 shrink-0 truncate text-slate-400 sm:max-w-64">
+                    <span className="max-w-24 shrink truncate text-slate-400 sm:max-w-64">
                       {step.iteration ? `#${step.iteration} ` : ''}{step.agent ? `${step.agent} · ` : ''}{step.detail}
                     </span>
                   )}
@@ -1742,13 +1739,13 @@ function ThinkingPanel({ msg }: { msg: Message }) {
           ) : (
             <div className="space-y-1.5">
               {runs?.map((run) => (
-                <div key={run.id} className="flex items-start gap-2 text-xs">
+                <div key={run.id} className="flex min-w-0 items-start gap-2 text-xs">
                   <span className="mt-0.5 shrink-0 text-slate-400">
                     {stepIcon(run.tool)}
                   </span>
-                  <span className="min-w-0 flex-1 text-slate-700">{toolLabel(run.tool)}</span>
+                  <span className="min-w-0 flex-1 break-words text-slate-700 [overflow-wrap:anywhere]">{toolLabel(run.tool)}</span>
                   {run.query && (
-                    <span className="max-w-32 shrink-0 truncate text-slate-400 sm:max-w-48">
+                    <span className="max-w-24 shrink truncate text-slate-400 sm:max-w-48">
                       {run.query}
                     </span>
                   )}
@@ -1769,12 +1766,12 @@ function ThinkingPanel({ msg }: { msg: Message }) {
 
 function ToolProcess({ runs }: { runs: ToolRun[] }) {
   return (
-    <div className="mb-3 flex flex-wrap gap-2 text-xs">
+    <div className="mb-3 flex min-w-0 max-w-full flex-wrap gap-2 overflow-hidden text-xs">
       {runs.map((run) => (
         <span
           key={run.id}
           className={cn(
-            'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium',
+            'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium',
             run.status === 'running' && 'border-blue-100 bg-blue-50 text-blue-700',
             run.status === 'success' && 'border-emerald-100 bg-emerald-50 text-emerald-700',
             run.status === 'error' && 'border-red-100 bg-red-50 text-red-700'
@@ -1782,10 +1779,10 @@ function ToolProcess({ runs }: { runs: ToolRun[] }) {
           title={run.summary || run.query}
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-          <span className="max-w-28 truncate sm:max-w-36">{toolLabel(run.tool)}</span>
+          <span className="min-w-0 max-w-24 truncate sm:max-w-36">{toolLabel(run.tool)}</span>
           {run.status === 'running' && <span className="shrink-0">运行中</span>}
           {run.summary && (
-            <span className="min-w-0 max-w-40 truncate text-slate-500 sm:max-w-56">
+            <span className="min-w-0 max-w-28 truncate text-slate-500 sm:max-w-56">
               {run.summary}
             </span>
           )}
@@ -1803,8 +1800,8 @@ function ClarifyCard({
   onSelect: (option: ClarifyOption) => void
 }) {
   return (
-    <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2.5 text-left">
-      <p className="text-sm font-medium leading-6 text-amber-950">{clarify.question}</p>
+    <div className="mt-3 min-w-0 max-w-full overflow-hidden rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2.5 text-left">
+      <p className="break-words text-sm font-medium leading-6 text-amber-950 [overflow-wrap:anywhere]">{clarify.question}</p>
       {clarify.options.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {clarify.options.map((option) => (

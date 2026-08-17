@@ -582,7 +582,7 @@ def build_agent_runner(
 
     # --- Path A: Knowledge group + authorized scope (six-tool KB path) ------
     allowed_kb_uids = getattr(knowledge_scope, "allowed_kb_uids", None)
-    if has_knowledge and knowledge_scope is not None and allowed_kb_uids:
+    if has_knowledge and knowledge_scope is not None and allowed_kb_uids is not None:
         ctx = ToolContext(
             db=db_session,
             trace_id=trace_id or getattr(knowledge_scope, "run_id", None),
@@ -641,7 +641,7 @@ def build_agent_runner(
         )
 
     # --- Path C: No knowledge group (record / memory / common only) ----------
-    ctx = ToolContext(**ctx_kwargs)
+    ctx = ToolContext(knowledge_scope=knowledge_scope, **ctx_kwargs)
     tools = build_tools_by_groups(ctx, tool_groups, deep_search_enabled=deep_search_enabled)
     system_prompt = compose_system_prompt_with_groups(AGENT_SYSTEM_PROMPT, tool_groups)
     return LangChainAgentRunner(

@@ -146,6 +146,19 @@ def _authorize_resume_request(db: Session, actor: ActorContext, req: ChatAnswerR
         raise HTTPException(status_code=403, detail="access denied to chat message")
 
 
+def _sign_run_scope(actor: ActorContext, allowed_kb_uids: list[str]) -> str:
+    scope = AuthorizedKnowledgeScope(
+        actor_id=actor.actor_id,
+        tenant_id=actor.tenant_id,
+        allowed_kb_uids=tuple(allowed_kb_uids),
+        run_id=f"{actor.actor_id}:{int(time.time() * 1000)}",
+        expires_at=int(time.time()) + _SCOPE_TTL_SECONDS,
+    )
+    if not settings.KNOWLEDGE_SCOPE_SECRET:
+        raise HTTPException(status_code=503, detail="knowledge scope signing is not configured")
+    return sign_scope(scope, settings.KNOWLEDGE_SCOPE_SECRET)
+
+
 @router.post("/answer")
 async def chat_answer_proxy(
     req: ChatAnswerRequest,
@@ -165,29 +178,19 @@ async def chat_answer_proxy(
         if personal_inbox.kb_uid not in allowed_kb_uids:
             allowed_kb_uids.append(personal_inbox.kb_uid)
         db.commit()
+    signed_token = _sign_run_scope(actor, allowed_kb_uids)
     if not allowed_kb_uids:
-        # No KB authorized — forward to engine without a knowledge scope.
-        # The engine will classify intent and mount only non-knowledge tools.
+        # No KB authorized — still forward a signed actor scope so non-knowledge
+        # tools such as capture_thought bind writes to the current user.
         payload = _public_payload(req)
 
         async def stream() -> AsyncIterator[bytes]:
-            async for chunk in stream_engine_answer("", payload):
+            async for chunk in stream_engine_answer(signed_token, payload):
                 if await request.is_disconnected():
                     break
                 yield chunk
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
-
-    scope = AuthorizedKnowledgeScope(
-        actor_id=actor.actor_id,
-        tenant_id=actor.tenant_id,
-        allowed_kb_uids=tuple(allowed_kb_uids),
-        run_id=f"{actor.actor_id}:{int(time.time() * 1000)}",
-        expires_at=int(time.time()) + _SCOPE_TTL_SECONDS,
-    )
-    if not settings.KNOWLEDGE_SCOPE_SECRET:
-        raise HTTPException(status_code=503, detail="knowledge scope signing is not configured")
-    signed_token = sign_scope(scope, settings.KNOWLEDGE_SCOPE_SECRET)
 
     payload = _public_payload(req)
 

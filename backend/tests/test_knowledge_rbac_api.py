@@ -31,6 +31,18 @@ def test_list_hides_unowned_personal_kb(client, db_session):
     assert hidden.kb_uid not in ids
 
 
+def test_list_shows_owned_personal_inbox_system_kb(client, db_session):
+    response = client.get("/api/v1/knowledge-bases", headers=auth_headers("alice"))
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    inbox_items = [item for item in items if item["system_type"] == "personal_inbox"]
+    assert len(inbox_items) == 1
+    assert inbox_items[0]["name"] == "未归档知识"
+    assert inbox_items[0]["is_system"] is True
+    assert inbox_items[0]["delete_disabled"] is True
+
+
 def test_transfer_accept_flow(client, db_session):
     seed_team_admin(db_session)
     topic = seed_topic(db_session, owner="alice")

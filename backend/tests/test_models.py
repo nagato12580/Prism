@@ -120,7 +120,7 @@ def test_knowledge_topic_system_flags(db_session):
     topic = KnowledgeTopic(
         tenant_id="tenant-a",
         owner_user_id="user-a",
-        name="个人随手记",
+        name="未归档知识",
         system_type="personal_inbox",
         is_system=True,
         delete_disabled=True,
@@ -399,7 +399,7 @@ def test_auto_migrate_adds_missing_agent_trace_indexes(monkeypatch):
             return []
 
         def get_indexes(self, table_name):
-            if table_name in {"agent_trace", "agent_trace_step"}:
+            if table_name in {"agent_trace", "agent_trace_step", "chat_message"}:
                 return []
             table = Base.metadata.tables[table_name]
             return [{"name": index.name} for index in table.indexes if index.name]
@@ -428,6 +428,7 @@ def test_auto_migrate_adds_missing_agent_trace_indexes(monkeypatch):
     auto_migrate_module.auto_migrate(Base, FakeEngine())
 
     expected_index_names = {
+        "ix_chat_message_session_created_id",
         "ix_agent_trace_resume_status",
         "ix_agent_trace_resume_status_started_at",
         "ix_agent_trace_step_dedupe_key",

@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -28,6 +29,15 @@ def _capture_tool():
     return next(t for t in build_enabled_tools(ctx) if t.name == "capture_thought")
 
 
+def _capture_tool_for_actor(actor_id):
+    ctx = ToolContext(
+        citations=[],
+        stats_holder={},
+        knowledge_scope=SimpleNamespace(actor_id=actor_id),
+    )
+    return next(t for t in build_enabled_tools(ctx) if t.name == "capture_thought")
+
+
 def test_capture_thought_creates_pending_review_item(monkeypatch):
     Session = _session_factory()
     monkeypatch.setattr(asset_tools, "_Session", Session)
@@ -42,6 +52,17 @@ def test_capture_thought_creates_pending_review_item(monkeypatch):
     assert row.status == "pending_review"
     assert row.source_type == "chat"
     assert row.raw_metadata == {"entrypoint": "chat_capture"}
+
+
+def test_capture_thought_binds_item_to_authorized_actor(monkeypatch):
+    Session = _session_factory()
+    monkeypatch.setattr(asset_tools, "_Session", Session)
+    monkeypatch.setattr(asset_tools, "_normalize_capture_with_llm", lambda text, title="": None)
+
+    payload = json.loads(_capture_tool_for_actor("alice").invoke({"text": "记录一条用户归属测试", "title": None}))
+
+    row = Session().query(PersonalAssetItem).filter_by(id=payload["item_id"]).one()
+    assert row.user_id == "alice"
 
 
 def test_capture_thought_normalizes_to_markdown(monkeypatch):

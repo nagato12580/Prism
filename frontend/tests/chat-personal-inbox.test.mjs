@@ -103,3 +103,14 @@ assert.match(
   /buildChatRequestPayload\(\{/,
   'ChatPage should use the tested payload helper for the fetch body.',
 )
+
+assert.match(
+  chatPage,
+  /包含未归档文件/,
+  'ChatPage should label the personal inbox toggle as unarchived files.',
+)
+assert.doesNotMatch(
+  chatPage,
+  /包含个人随手记/,
+  'ChatPage should not expose the old personal note wording.',
+)

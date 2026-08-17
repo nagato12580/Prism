@@ -1,6 +1,6 @@
 # prism/backend/app/models/chat.py
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.mysql import JSON, CHAR
 from sqlalchemy.orm import relationship
 from ..database import Base
@@ -31,6 +31,9 @@ class ChatSession(Base):
 
 class ChatMessage(Base):
     __tablename__ = "chat_message"
+    __table_args__ = (
+        Index("ix_chat_message_session_created_id", "session_id", "created_at", "id"),
+    )
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     session_id = Column(CHAR(36), ForeignKey("chat_session.id", ondelete="CASCADE"), nullable=False)

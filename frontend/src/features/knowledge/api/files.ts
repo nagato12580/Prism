@@ -55,6 +55,11 @@ export interface FileMetadataUpdate {
   relative_path?: string
 }
 
+export interface ArchiveFilesResponse {
+  items: KnowledgeFile[]
+  total: number
+}
+
 export interface FileListParams {
   cursor?: string
   limit?: number
@@ -107,6 +112,16 @@ export const filesApi = {
     return requestJSON<KnowledgeFile>(
       `/knowledge-bases/${encodeURIComponent(kbUid)}/files/${encodeURIComponent(fileUid)}`,
       { method: 'PATCH', body: JSON.stringify(data) },
+    )
+  },
+
+  archive(kbUid: string, fileUids: string[], targetKbUid: string): Promise<ArchiveFilesResponse> {
+    return requestJSON<ArchiveFilesResponse>(
+      `/knowledge-bases/${encodeURIComponent(kbUid)}/files/archive`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ file_uids: fileUids, target_kb_uid: targetKbUid }),
+      },
     )
   },
 

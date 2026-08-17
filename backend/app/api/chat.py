@@ -131,7 +131,7 @@ def list_messages(
 ):
     session = _get_owned_session(db, session_id, actor)
     return db.query(ChatMessage).filter(ChatMessage.session_id == session_id)\
-        .order_by(ChatMessage.created_at).all()
+        .order_by(ChatMessage.created_at, ChatMessage.id).all()
 
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageOut)
@@ -198,7 +198,7 @@ def generate_title(
     messages = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.created_at)
+        .order_by(ChatMessage.created_at, ChatMessage.id)
         .limit(2)
         .all()
     )

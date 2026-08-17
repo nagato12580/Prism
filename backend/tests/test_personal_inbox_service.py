@@ -48,7 +48,7 @@ def test_ensure_personal_inbox_kb_is_idempotent(db_session):
     second = ensure_personal_inbox_kb(db_session, tenant_id="tenant-a", owner_user_id="user-a")
 
     assert first.kb_uid == second.kb_uid
-    assert first.name == "个人随手记"
+    assert first.name == "未归档知识"
     assert first.system_type == "personal_inbox"
     assert first.is_system is True
     assert first.delete_disabled is True
@@ -113,6 +113,120 @@ def test_ensure_personal_inbox_kb_allows_same_owner_across_tenants(db_session):
     assert second.system_type == "personal_inbox"
     assert second.is_system is True
     assert second.delete_disabled is True
+
+
+def test_archive_personal_inbox_files_moves_file_and_parsed_rows(db_session):
+    from backend.app.models import KnowledgeChunk, KnowledgeFile, KnowledgeItem, KnowledgeTopic, PersonalAssetUnit
+    from backend.app.services.personal_inbox import (
+        PERSONAL_ASSET_UNIT_SOURCE_KIND,
+        PERSONAL_INBOX_SYSTEM_TYPE,
+        archive_personal_inbox_files,
+    )
+
+    source = KnowledgeTopic(
+        kb_uid="inbox-kb",
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        name="未归档知识",
+        system_type=PERSONAL_INBOX_SYSTEM_TYPE,
+        is_system=True,
+        delete_disabled=True,
+    )
+    target = KnowledgeTopic(
+        kb_uid="target-kb",
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        name="产品文档",
+    )
+    item = KnowledgeItem(
+        id="item-a",
+        tenant_id="tenant-a",
+        kb_uid=source.kb_uid,
+        title="Inbox Item",
+    )
+    file_row = KnowledgeFile(
+        file_uid="file-a",
+        tenant_id="tenant-a",
+        user_id="alice",
+        kb_uid=source.kb_uid,
+        item_id=item.id,
+        original_filename="Inbox.md",
+        relative_path="personal-inbox",
+        media_type="document",
+        mime_type="text/markdown",
+        content_sha256="a" * 64,
+        size_bytes=12,
+        source_kind=PERSONAL_ASSET_UNIT_SOURCE_KIND,
+        source_id="unit-a",
+        system_type=PERSONAL_INBOX_SYSTEM_TYPE,
+    )
+    chunk = KnowledgeChunk(
+        id="chunk-a",
+        tenant_id="tenant-a",
+        kb_uid=source.kb_uid,
+        file_uid=file_row.file_uid,
+        item_id=item.id,
+        chunk_text="content",
+        chunk_type="child",
+    )
+    unit = PersonalAssetUnit(
+        id="unit-a",
+        user_id="alice",
+        title="Inbox Item",
+        status="confirmed",
+    )
+    db_session.add_all([source, target, item, file_row, chunk, unit])
+    db_session.commit()
+
+    moved = archive_personal_inbox_files(
+        db_session,
+        tenant_id="tenant-a",
+        source_kb_uid=source.kb_uid,
+        target_kb_uid=target.kb_uid,
+        file_uids=[file_row.file_uid],
+    )
+
+    assert [row.file_uid for row in moved] == ["file-a"]
+    assert db_session.query(KnowledgeFile).filter_by(kb_uid=source.kb_uid, deleted_at=None).count() == 0
+    moved_file = db_session.query(KnowledgeFile).filter_by(kb_uid=target.kb_uid, file_uid="file-a").one()
+    assert moved_file.system_type is None
+    assert moved_file.source_kind is None
+    assert moved_file.source_id is None
+    assert db_session.get(KnowledgeItem, item.id).kb_uid == target.kb_uid
+    assert db_session.get(KnowledgeChunk, chunk.id).kb_uid == target.kb_uid
+    assert db_session.get(PersonalAssetUnit, unit.id).status == "archived"
+
+
+def test_archive_personal_inbox_files_rejects_non_inbox_files(db_session):
+    from backend.app.models import KnowledgeFile, KnowledgeTopic
+    from backend.app.services.personal_inbox import archive_personal_inbox_files
+
+    source = KnowledgeTopic(kb_uid="source-kb", tenant_id="tenant-a", owner_user_id="alice", name="普通库")
+    target = KnowledgeTopic(kb_uid="target-kb", tenant_id="tenant-a", owner_user_id="alice", name="目标库")
+    file_row = KnowledgeFile(
+        file_uid="file-a",
+        tenant_id="tenant-a",
+        user_id="alice",
+        kb_uid=source.kb_uid,
+        original_filename="Normal.md",
+        media_type="document",
+        mime_type="text/markdown",
+        content_sha256="b" * 64,
+        size_bytes=12,
+    )
+    db_session.add_all([source, target, file_row])
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="Only personal inbox files can be archived"):
+        archive_personal_inbox_files(
+            db_session,
+            tenant_id="tenant-a",
+            source_kb_uid=source.kb_uid,
+            target_kb_uid=target.kb_uid,
+            file_uids=[file_row.file_uid],
+        )
+
+    assert db_session.query(KnowledgeFile).filter_by(kb_uid=source.kb_uid, file_uid="file-a").one()
 
 
 def test_sync_confirmed_unit_creates_single_markdown_file(db_session, tmp_path, monkeypatch):

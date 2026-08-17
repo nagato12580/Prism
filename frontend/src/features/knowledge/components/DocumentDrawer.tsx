@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Download, FileText, Loader2 } from 'lucide-react'
 import { filesApi, type KnowledgeFile } from '@/features/knowledge/api/files'
+import { knowledgeBaseGraphApi } from '@/features/knowledge/api/graph'
+import { KnowledgeGraphPage as UnifiedGraphBrowser } from '@/pages/KnowledgeGraphPage'
 import { ApiProblem } from '@/features/knowledge/api/client'
 import { Dialog } from '@/components/ui/Dialog'
 import { Tabs } from '@/components/ui/Tabs'
@@ -21,7 +23,7 @@ export function DocumentDrawer({
   file: KnowledgeFile
   onClose: () => void
 }) {
-  const [view, setView] = useState<'original' | 'markdown' | 'chunks' | 'history'>('markdown')
+  const [view, setView] = useState<'original' | 'markdown' | 'chunks' | 'history' | 'graph'>('markdown')
   const [preview, setPreview] = useState<PreviewContent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<unknown>(null)
@@ -56,6 +58,20 @@ export function DocumentDrawer({
       .catch((e) => setError(e))
   }
 
+  // Graph scoped to this single document: the backend subgraph query filters
+  // ScopedSource rows by file_uid and returns only the entities mentioned in
+  // this document plus the edges among them. This is the "meta 过滤" the drawer
+  // graph relies on — the current document's file_uid as the graph filter key.
+  const graphLoader = useMemo(
+    () => (params: { view: 'entity' | 'source'; q?: string; limit?: number }) =>
+      knowledgeBaseGraphApi.get(kbUid, {
+        view: params.view,
+        limit: params.limit,
+        file_uids: [file.file_uid],
+      }),
+    [kbUid, file.file_uid],
+  )
+
   return (
     <Dialog
       open
@@ -84,12 +100,22 @@ export function DocumentDrawer({
           { key: 'markdown', label: '正文' },
           { key: 'original', label: '原文件' },
           { key: 'chunks', label: '分块' },
+          { key: 'graph', label: '图谱' },
           { key: 'history', label: '处理历史' },
         ]}
         active={view}
         onChange={(k) => setView(k as typeof view)}
       />
 
+      {view === 'graph' ? (
+        <div className="mt-3 h-[55vh] min-h-0 overflow-hidden rounded-lg border border-[var(--prism-line)]">
+          <UnifiedGraphBrowser
+            key={file.file_uid}
+            loader={graphLoader}
+            className="h-[55vh]"
+          />
+        </div>
+      ) : (
       <div className="mt-3 max-h-[60vh] overflow-y-auto rounded-lg border border-[var(--prism-line)] bg-slate-50/40 p-4">
         {view === 'original' ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-slate-500">
@@ -130,6 +156,7 @@ export function DocumentDrawer({
           </div>
         )}
       </div>
+      )}
     </Dialog>
   )
 }

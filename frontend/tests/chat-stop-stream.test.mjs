@@ -18,6 +18,12 @@ assert.match(
   'ChatPage should expose a stopStreaming handler that aborts the active stream.',
 )
 
+assert.doesNotMatch(
+  chatPage,
+  /return\s+\(\)\s*=>\s*\{\s*activeStreamRef\.current\?\.stop\(\)\s*\}/,
+  'Navigating away from ChatPage should not abort the active stream; only the explicit stop button should.',
+)
+
 assert.match(
   chatPage,
   /activeStreamRef\.current = \{[\s\S]*controller:\s*streamAbortController,[\s\S]*stop:\s*\(\)\s*=> \{[\s\S]*streamStoppedByUser = true[\s\S]*streamAbortController\.abort\(\)[\s\S]*\}/,

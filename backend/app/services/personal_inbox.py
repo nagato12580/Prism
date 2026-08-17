@@ -15,8 +15,10 @@ from backend.app.models import (
     EntityAlias,
     EntityMention,
     EntityRelation,
+    KnowledgeChunk,
     KnowledgeEntity,
     KnowledgeFile,
+    KnowledgeItem,
     KnowledgeTopic,
     PersonalAssetItem,
     PersonalAssetUnit,
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from backend.app.services.graph_client import GraphClient
 
-PERSONAL_INBOX_NAME = "个人随手记"
+PERSONAL_INBOX_NAME = "未归档知识"
 PERSONAL_INBOX_SYSTEM_TYPE = "personal_inbox"
 PERSONAL_ASSET_UNIT_SOURCE_KIND = "personal_asset_unit"
 
@@ -114,6 +116,7 @@ def ensure_personal_inbox_kb(
 
 
 def _normalize_personal_inbox_topic(topic: KnowledgeTopic, *, tenant_id: str) -> None:
+    topic.name = PERSONAL_INBOX_NAME
     topic.user_id = tenant_id
     topic.system_type = PERSONAL_INBOX_SYSTEM_TYPE
     topic.is_system = True
@@ -342,6 +345,117 @@ def delete_personal_inbox_file_cascade(
         commit=False,
     )
     return job
+
+
+def archive_personal_inbox_files(
+    db: Session,
+    *,
+    tenant_id: str,
+    source_kb_uid: str,
+    target_kb_uid: str,
+    file_uids: list[str],
+) -> list[KnowledgeFile]:
+    if source_kb_uid == target_kb_uid:
+        raise ValueError("Target knowledge base must be different from source")
+    if not file_uids:
+        raise ValueError("At least one file is required")
+
+    source = (
+        db.query(KnowledgeTopic)
+        .filter_by(tenant_id=tenant_id, kb_uid=source_kb_uid, deleted_at=None)
+        .one_or_none()
+    )
+    if source is None or source.system_type != PERSONAL_INBOX_SYSTEM_TYPE:
+        raise ValueError("Only personal inbox files can be archived")
+
+    target = (
+        db.query(KnowledgeTopic)
+        .filter_by(tenant_id=tenant_id, kb_uid=target_kb_uid, deleted_at=None)
+        .one_or_none()
+    )
+    if target is None:
+        raise ValueError("Target knowledge base not found")
+    if target.system_type == PERSONAL_INBOX_SYSTEM_TYPE:
+        raise ValueError("Target knowledge base must not be personal inbox")
+
+    unique_file_uids = list(dict.fromkeys(file_uids))
+    files = (
+        db.query(KnowledgeFile)
+        .filter(
+            KnowledgeFile.tenant_id == tenant_id,
+            KnowledgeFile.kb_uid == source_kb_uid,
+            KnowledgeFile.file_uid.in_(unique_file_uids),
+            KnowledgeFile.deleted_at.is_(None),
+        )
+        .all()
+    )
+    found_uids = {row.file_uid for row in files}
+    missing = [file_uid for file_uid in unique_file_uids if file_uid not in found_uids]
+    if missing:
+        raise ValueError(f"File not found: {missing[0]}")
+
+    for file_row in files:
+        if file_row.system_type != PERSONAL_INBOX_SYSTEM_TYPE:
+            raise ValueError("Only personal inbox files can be archived")
+
+    moved_item_ids = [row.item_id for row in files if row.item_id]
+    archived_unit_ids = [
+        row.source_id
+        for row in files
+        if row.source_kind == PERSONAL_ASSET_UNIT_SOURCE_KIND and row.source_id
+    ]
+    now = local_now()
+    for file_row in files:
+        file_row.kb_uid = target_kb_uid
+        file_row.topic_id = target.id
+        file_row.system_type = None
+        file_row.source_kind = None
+        file_row.source_id = None
+        file_row.updated_at = now
+
+    if moved_item_ids:
+        (
+            db.query(KnowledgeItem)
+            .filter(
+                KnowledgeItem.tenant_id == tenant_id,
+                KnowledgeItem.id.in_(moved_item_ids),
+            )
+            .update({KnowledgeItem.kb_uid: target_kb_uid, KnowledgeItem.updated_at: now}, synchronize_session=False)
+        )
+        (
+            db.query(KnowledgeChunk)
+            .filter(
+                KnowledgeChunk.tenant_id == tenant_id,
+                KnowledgeChunk.item_id.in_(moved_item_ids),
+            )
+            .update({KnowledgeChunk.kb_uid: target_kb_uid}, synchronize_session=False)
+        )
+    (
+        db.query(KnowledgeChunk)
+        .filter(
+            KnowledgeChunk.tenant_id == tenant_id,
+            KnowledgeChunk.file_uid.in_(unique_file_uids),
+        )
+        .update({KnowledgeChunk.kb_uid: target_kb_uid}, synchronize_session=False)
+    )
+    if archived_unit_ids:
+        (
+            db.query(PersonalAssetUnit)
+            .filter(
+                PersonalAssetUnit.user_id == source.owner_user_id,
+                PersonalAssetUnit.id.in_(archived_unit_ids),
+                PersonalAssetUnit.status == "confirmed",
+            )
+            .update(
+                {PersonalAssetUnit.status: "archived", PersonalAssetUnit.updated_at: now},
+                synchronize_session=False,
+            )
+        )
+
+    db.commit()
+    for file_row in files:
+        db.refresh(file_row)
+    return sorted(files, key=lambda row: unique_file_uids.index(row.file_uid))
 
 
 def purge_personal_asset_unit_graph_artifacts(

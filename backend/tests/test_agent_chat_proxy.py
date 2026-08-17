@@ -7,11 +7,15 @@ rejected with 403 before Engine is contacted.
 """
 
 import base64
+import asyncio
 import json
 
+import pytest
+from fastapi import HTTPException
 import backend.app.api.agent_chat_proxy as proxy_module
 from backend.app.api.agent_chat_proxy import ChatAnswerRequest
 from backend.app.models import ChatMessage, ChatSession, KnowledgeTopic
+from backend.app.security.actor import ActorContext
 
 
 def _seed_owned_kb(db, kb_uid, owner="default-user", tenant="default-user"):
@@ -51,6 +55,27 @@ def _decoded_scope_payload(signed_token):
     return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
 
 
+class _FakeRequest:
+    async def is_disconnected(self):
+        return False
+
+
+async def _call_chat_proxy(db, payload, *, actor_id="default-user", tenant_id=None):
+    response = await proxy_module.chat_answer_proxy(
+        ChatAnswerRequest(**payload),
+        _FakeRequest(),
+        actor=ActorContext(actor_id=actor_id, tenant_id=tenant_id or actor_id),
+        db=db,
+    )
+    async for _chunk in response.body_iterator:
+        pass
+    return response
+
+
+def _post_and_drain_chat_stream(db, *, json, actor_id="default-user", tenant_id=None):
+    return asyncio.run(_call_chat_proxy(db, json, actor_id=actor_id, tenant_id=tenant_id))
+
+
 def test_chat_answer_request_schema_has_no_secrets():
     fields = set(ChatAnswerRequest.model_fields)
     assert "query" in fields
@@ -76,7 +101,7 @@ def test_chat_answer_request_defaults_allow_multi_step_knowledge_synthesis():
     assert req.deep_search_depth == "standard"
 
 
-def test_backend_proxy_forwards_deep_search_depth_controls(client, db_session, monkeypatch):
+def test_backend_proxy_forwards_deep_search_depth_controls(db_session, monkeypatch):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")
     captured = {}
@@ -87,8 +112,8 @@ def test_backend_proxy_forwards_deep_search_depth_controls(client, db_session, m
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_and_drain_chat_stream(
+        db_session,
         json={
             "query": "hi",
             "kb_uids": ["kb-a"],
@@ -103,7 +128,8 @@ def test_backend_proxy_forwards_deep_search_depth_controls(client, db_session, m
     assert captured["payload"]["deep_search_depth"] == "deep"
 
 
-def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, db_session, monkeypatch):
+def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(db_session, monkeypatch):
+    _enable_scope_secret(monkeypatch)
     _seed_chat_turn(db_session)
     captured = {}
 
@@ -114,8 +140,8 @@ def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, db_session, 
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_and_drain_chat_stream(
+        db_session,
         json={
             "query": "continue",
             "history": [],
@@ -127,13 +153,43 @@ def test_chat_proxy_forwards_resume_trace_id_with_owner_ids(client, db_session, 
     )
 
     assert response.status_code == 200
-    assert captured["token"] == ""
+    scope = _decoded_scope_payload(captured["token"])
+    assert scope["actor_id"] == "default-user"
+    assert scope["allowed_kb_uids"] == []
     assert captured["payload"]["resume_trace_id"] == "trace-resume"
     assert captured["payload"]["session_id"] == "session-a"
     assert captured["payload"]["user_message_id"] == "message-a"
 
 
-def test_chat_proxy_rejects_resume_for_other_users_session(client, db_session, monkeypatch):
+def test_chat_proxy_signs_actor_scope_without_kbs(db_session, monkeypatch):
+    _enable_scope_secret(monkeypatch)
+    captured = {}
+
+    async def fake_stream(signed_token, payload):
+        captured["token"] = signed_token
+        captured["payload"] = payload
+        yield b'{"type":"done","data":{}}\n'
+
+    monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
+
+    response = _post_and_drain_chat_stream(
+        db_session,
+        actor_id="alice",
+        tenant_id="alice",
+        json={"query": "帮我记录一下：今天完成了用户绑定修复", "kb_uids": []},
+    )
+
+    assert response.status_code == 200
+    scope = _decoded_scope_payload(captured["token"])
+    assert scope["actor_id"] == "alice"
+    assert scope["tenant_id"] == "alice"
+    assert scope["allowed_kb_uids"] == []
+    forwarded = str(captured["payload"]).lower()
+    assert "actor_id" not in forwarded
+    assert "tenant_id" not in forwarded
+
+
+def test_chat_proxy_rejects_resume_for_other_users_session(db_session, monkeypatch):
     _seed_chat_turn(db_session, user_id="alice")
     captured = {}
 
@@ -143,23 +199,25 @@ def test_chat_proxy_rejects_resume_for_other_users_session(client, db_session, m
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
-        headers={"X-Prism-Actor": "bob", "X-Prism-Tenant": "bob"},
-        json={
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_call_chat_proxy(
+            db_session,
+            {
             "query": "continue",
             "resume_trace_id": "trace-resume",
             "session_id": "session-a",
             "user_message_id": "message-a",
             "kb_uids": [],
-        },
-    )
+            },
+            actor_id="bob",
+            tenant_id="bob",
+        ))
 
-    assert response.status_code == 403
+    assert exc.value.status_code == 403
     assert captured == {}
 
 
-def test_chat_proxy_rejects_resume_with_wrong_user_message(client, db_session, monkeypatch):
+def test_chat_proxy_rejects_resume_with_wrong_user_message(db_session, monkeypatch):
     _seed_chat_turn(db_session)
     db_session.add(
         ChatMessage(
@@ -178,22 +236,23 @@ def test_chat_proxy_rejects_resume_with_wrong_user_message(client, db_session, m
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
-        json={
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_call_chat_proxy(
+            db_session,
+            {
             "query": "continue",
             "resume_trace_id": "trace-resume",
             "session_id": "session-a",
             "user_message_id": "assistant-a",
             "kb_uids": [],
-        },
-    )
+            },
+        ))
 
-    assert response.status_code == 403
+    assert exc.value.status_code == 403
     assert captured == {}
 
 
-def test_backend_proxy_signs_only_authorized_kbs(client, db_session, monkeypatch):
+def test_backend_proxy_signs_only_authorized_kbs(db_session, monkeypatch):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")
     _seed_owned_kb(db_session, "kb-forbidden", owner="someone-else")
@@ -206,16 +265,14 @@ def test_backend_proxy_signs_only_authorized_kbs(client, db_session, monkeypatch
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
-        json={"query": "x", "kb_uids": ["kb-a", "kb-forbidden"]},
-    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_call_chat_proxy(db_session, {"query": "x", "kb_uids": ["kb-a", "kb-forbidden"]}))
 
-    assert response.status_code == 403
+    assert exc.value.status_code == 403
     assert calls == []
 
 
-def test_backend_proxy_forwards_authorized_kbs_with_signed_scope(client, db_session, monkeypatch):
+def test_backend_proxy_forwards_authorized_kbs_with_signed_scope(db_session, monkeypatch):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")
 
@@ -228,7 +285,7 @@ def test_backend_proxy_forwards_authorized_kbs_with_signed_scope(client, db_sess
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post("/api/v1/chat/answer", json={"query": "hi", "kb_uids": ["kb-a"]})
+    response = _post_and_drain_chat_stream(db_session, json={"query": "hi", "kb_uids": ["kb-a"]})
 
     assert response.status_code == 200
     assert captured["token"], "scope must be signed before forwarding"
@@ -239,7 +296,7 @@ def test_backend_proxy_forwards_authorized_kbs_with_signed_scope(client, db_sess
 
 
 def test_backend_proxy_forwards_public_continuation_history_without_scope_leaks(
-    client, db_session, monkeypatch
+    db_session, monkeypatch
 ):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")
@@ -267,8 +324,8 @@ def test_backend_proxy_forwards_public_continuation_history_without_scope_leaks(
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_and_drain_chat_stream(
+        db_session,
         json={"query": "next", "kb_uids": ["kb-a"], "history": history},
     )
 
@@ -281,7 +338,7 @@ def test_backend_proxy_forwards_public_continuation_history_without_scope_leaks(
     assert captured["token"]
 
 
-def test_chat_proxy_appends_personal_inbox_scope_when_requested(client, db_session, monkeypatch):
+def test_chat_proxy_appends_personal_inbox_scope_when_requested(db_session, monkeypatch):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")
     captured = {}
@@ -293,8 +350,8 @@ def test_chat_proxy_appends_personal_inbox_scope_when_requested(client, db_sessi
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_and_drain_chat_stream(
+        db_session,
         json={"query": "hi", "kb_uids": ["kb-a"], "include_personal_inbox": True},
     )
 
@@ -313,7 +370,7 @@ def test_chat_proxy_appends_personal_inbox_scope_when_requested(client, db_sessi
 
 
 def test_chat_proxy_does_not_append_personal_inbox_scope_by_default(
-    client, db_session, monkeypatch
+    db_session, monkeypatch
 ):
     _enable_scope_secret(monkeypatch)
     _seed_owned_kb(db_session, "kb-a")
@@ -326,7 +383,7 @@ def test_chat_proxy_does_not_append_personal_inbox_scope_by_default(
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post("/api/v1/chat/answer", json={"query": "hi", "kb_uids": ["kb-a"]})
+    response = _post_and_drain_chat_stream(db_session, json={"query": "hi", "kb_uids": ["kb-a"]})
 
     assert response.status_code == 200
     scope = _decoded_scope_payload(captured["token"])
@@ -335,7 +392,7 @@ def test_chat_proxy_does_not_append_personal_inbox_scope_by_default(
 
 
 def test_chat_proxy_ignores_frontend_supplied_personal_inbox_when_switch_is_false(
-    client, db_session, monkeypatch
+    db_session, monkeypatch
 ):
     from backend.app.services.personal_inbox import ensure_personal_inbox_kb
 
@@ -356,8 +413,8 @@ def test_chat_proxy_ignores_frontend_supplied_personal_inbox_when_switch_is_fals
 
     monkeypatch.setattr(proxy_module, "stream_engine_answer", fake_stream)
 
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_and_drain_chat_stream(
+        db_session,
         json={"query": "hi", "kb_uids": ["kb-a", personal_inbox.kb_uid]},
     )
 

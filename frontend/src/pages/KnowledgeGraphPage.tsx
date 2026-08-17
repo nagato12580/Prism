@@ -714,6 +714,8 @@ type KnowledgeGraphPageProps = {
   initialPayload?: UnifiedGraphPayload | null
   initialSelectedId?: string | null
   loader?: (params: { view: UnifiedGraphView; q?: string; limit?: number }) => Promise<UnifiedGraphPayload>
+  /** Extra root classes. `twMerge` dedupes so a passed height overrides the default. */
+  className?: string
 }
 
 function initialGraphView(initialPayload: UnifiedGraphPayload | null | undefined): UnifiedGraphView {
@@ -724,6 +726,7 @@ export function KnowledgeGraphPage({
   initialPayload = null,
   initialSelectedId = null,
   loader = unifiedGraphApi.get,
+  className,
 }: KnowledgeGraphPageProps) {
   const initialView = initialGraphView(initialPayload)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -1262,7 +1265,10 @@ export function KnowledgeGraphPage({
   const totalEdgeCount = payload?.stats.edge_count ?? 0
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] min-h-0 flex-col overflow-hidden" data-testid="unified-graph-page">
+    <div
+      className={cn('flex h-[calc(100vh-9rem)] min-h-0 flex-col overflow-hidden', className)}
+      data-testid="unified-graph-page"
+    >
       {error ? (
         <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
           {error}

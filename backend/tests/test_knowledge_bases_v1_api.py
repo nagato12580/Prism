@@ -44,10 +44,28 @@ def test_system_personal_inbox_kb_is_listed_for_fresh_actor(client, db_session):
     ]
     assert len(personal_inbox_items) == 1
     item = personal_inbox_items[0]
+    assert item["name"] == "未归档知识"
     assert item["owner_user_id"] == "fresh-user"
     assert item["tenant_id"] == "fresh-tenant"
     assert item["is_system"] is True
     assert item["delete_disabled"] is True
+
+
+def test_list_knowledge_bases_includes_personal_inbox_system_kb(db_session):
+    from backend.app.api.knowledge_bases import list_knowledge_bases
+    from backend.app.security.actor import ActorContext
+
+    actor = ActorContext(actor_id="direct-user", tenant_id="direct-tenant")
+
+    response = list_knowledge_bases(actor=actor, db=db_session, cursor=None, limit=50)
+
+    inbox_items = [
+        item for item in response.items if item.system_type == "personal_inbox"
+    ]
+    assert len(inbox_items) == 1
+    assert inbox_items[0].name == "未归档知识"
+    assert inbox_items[0].is_system is True
+    assert inbox_items[0].delete_disabled is True
 
 
 def test_system_personal_inbox_kb_is_persisted_after_fresh_actor_list(tmp_path, monkeypatch):
@@ -198,7 +216,7 @@ def test_system_personal_inbox_kb_is_listed_with_flags(client, db_session):
     body = client.get("/api/v1/knowledge-bases").json()
     item = next(row for row in body["items"] if row["kb_uid"] == topic.kb_uid)
 
-    assert item["name"] == "个人随手记"
+    assert item["name"] == "未归档知识"
     assert item["system_type"] == "personal_inbox"
     assert item["is_system"] is True
     assert item["delete_disabled"] is True

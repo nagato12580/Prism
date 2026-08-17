@@ -41,6 +41,17 @@ def worker_session(monkeypatch):
     return Session
 
 
+@pytest.fixture(autouse=True)
+def offline_tiktoken(monkeypatch):
+    import tiktoken
+
+    monkeypatch.setattr(
+        tiktoken,
+        "get_encoding",
+        lambda name: type("Encoder", (), {"encode": lambda self, text: list(text or "")})(),
+    )
+
+
 def _topic(db, name="Worker Topic"):
     topic = KnowledgeTopic(
         tenant_id="tenant-test",
@@ -753,6 +764,8 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     import engine.app.jobs.worker as worker
 
     recovered = []
+    orphaned_recovered = []
+    typed_recovered = []
     evaluation_recovered = []
     republished = []
     started = []
@@ -772,6 +785,12 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
             self.join_timeout = timeout
 
     monkeypatch.setattr(worker, "recover_stale_jobs", lambda: recovered.append(True))
+    monkeypatch.setattr(
+        worker,
+        "recover_orphaned_typed_jobs",
+        lambda active_worker_ids: orphaned_recovered.append(tuple(active_worker_ids)),
+    )
+    monkeypatch.setattr(worker, "recover_expired_typed_jobs", lambda: typed_recovered.append(True))
     monkeypatch.setattr(worker, "recover_expired_evaluation_jobs", lambda: evaluation_recovered.append(True))
     monkeypatch.setattr(worker, "republish_due_queued_jobs", lambda: republished.append(True))
     monkeypatch.setattr(worker.redis_queue, "redis_client", lambda: "redis-client")
@@ -783,6 +802,10 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     manager.start()
 
     assert recovered == [True]
+    assert len(orphaned_recovered) == 1
+    assert len(orphaned_recovered[0]) == 2
+    assert all(worker_id.startswith(("ingest-0-", "governance-0-")) for worker_id in orphaned_recovered[0])
+    assert typed_recovered == [True]
     assert evaluation_recovered == [True]
     assert republished == [True]
     assert len(started) == 4
@@ -806,6 +829,55 @@ def test_worker_manager_starts_ingest_and_governance_workers(monkeypatch):
     )
 
 
+def test_recover_orphaned_typed_jobs_requeues_running_jobs_from_previous_process(worker_session, monkeypatch):
+    import engine.app.jobs.worker as worker
+
+    pushed = []
+    db = worker_session()
+    topic = _topic(db)
+    resource = _resource(db, topic)
+    orphan = _job(
+        db,
+        resource,
+        job_type="index",
+        status="running",
+        lease_owner="ingest-0-oldhost-oldrun",
+        lease_expires_at=local_now() + timedelta(hours=1),
+        heartbeat_at=local_now(),
+    )
+    active = _job(
+        db,
+        resource,
+        job_type="graph",
+        status="running",
+        lease_owner="ingest-0-current",
+        lease_expires_at=local_now() + timedelta(hours=1),
+        heartbeat_at=local_now(),
+    )
+    db.commit()
+    orphan_id = orphan.id
+    active_id = active.id
+    db.close()
+
+    monkeypatch.setattr(worker, "_publish_job", lambda job: pushed.append(job.id))
+
+    assert worker.recover_orphaned_typed_jobs({"ingest-0-current"}) == 1
+
+    db = worker_session()
+    try:
+        recovered = db.get(KnowledgeJob, orphan_id)
+        still_running = db.get(KnowledgeJob, active_id)
+        assert recovered.status == "queued"
+        assert recovered.stage == "enqueued"
+        assert recovered.lease_owner is None
+        assert recovered.lease_expires_at is None
+        assert pushed == [orphan_id]
+        assert still_running.status == "running"
+        assert still_running.lease_owner == "ingest-0-current"
+    finally:
+        db.close()
+
+
 def test_worker_manager_periodically_sweeps_expired_evaluations(monkeypatch):
     import time
     import engine.app.jobs.worker as worker
@@ -815,6 +887,8 @@ def test_worker_manager_periodically_sweeps_expired_evaluations(monkeypatch):
             time.sleep(0.005)
             return None
     monkeypatch.setattr(worker, "recover_stale_jobs", lambda: None)
+    monkeypatch.setattr(worker, "recover_orphaned_typed_jobs", lambda active_worker_ids: None)
+    monkeypatch.setattr(worker, "recover_expired_typed_jobs", lambda: None)
     monkeypatch.setattr(worker, "recover_expired_evaluation_jobs", lambda: sweeps.append(time.monotonic()))
     monkeypatch.setattr(worker, "republish_due_queued_jobs", lambda: None)
     monkeypatch.setattr(worker.redis_queue, "redis_client", lambda: Redis())

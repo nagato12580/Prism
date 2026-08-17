@@ -1,6 +1,7 @@
 # backend/tests/test_knowledge_files_v1_api.py
 import pytest
 from fastapi.testclient import TestClient
+from datetime import datetime, timedelta
 
 
 @pytest.fixture
@@ -51,6 +52,70 @@ def test_list_files_returns_empty_for_new_kb(client, file_headers):
     )
     assert resp.status_code == 200
     assert resp.json()["items"] == []
+
+
+def test_list_files_returns_recently_updated_files_first(db_session):
+    from backend.app.api.knowledge_files import list_files
+    from backend.app.models import KnowledgeFile, KnowledgeTopic
+    from backend.app.security.actor import ActorContext
+
+    now = datetime(2026, 8, 17, 12, 0, 0)
+    topic = KnowledgeTopic(
+        kb_uid="target-kb",
+        tenant_id="tenant-a",
+        owner_user_id="alice",
+        name="Target KB",
+    )
+    older_a = KnowledgeFile(
+        file_uid="00000000-0000-4000-8000-000000000001",
+        tenant_id="tenant-a",
+        user_id="alice",
+        kb_uid=topic.kb_uid,
+        original_filename="older-a.md",
+        media_type="document",
+        mime_type="text/markdown",
+        content_sha256="a" * 64,
+        size_bytes=12,
+        updated_at=now - timedelta(days=2),
+    )
+    older_b = KnowledgeFile(
+        file_uid="00000000-0000-4000-8000-000000000002",
+        tenant_id="tenant-a",
+        user_id="alice",
+        kb_uid=topic.kb_uid,
+        original_filename="older-b.md",
+        media_type="document",
+        mime_type="text/markdown",
+        content_sha256="b" * 64,
+        size_bytes=12,
+        updated_at=now - timedelta(days=1),
+    )
+    moved = KnowledgeFile(
+        file_uid="ffffffff-ffff-4fff-8fff-ffffffffffff",
+        tenant_id="tenant-a",
+        user_id="alice",
+        kb_uid=topic.kb_uid,
+        original_filename="recently-moved.md",
+        media_type="document",
+        mime_type="text/markdown",
+        content_sha256="c" * 64,
+        size_bytes=12,
+        updated_at=now,
+    )
+    db_session.add_all([topic, older_a, older_b, moved])
+    db_session.commit()
+
+    body = list_files(
+        topic.kb_uid,
+        actor=ActorContext(actor_id="alice", tenant_id="tenant-a"),
+        db=db_session,
+        limit=2,
+    )
+
+    assert [item["original_filename"] for item in body["items"]] == [
+        "recently-moved.md",
+        "older-b.md",
+    ]
 
 
 def test_get_file_after_upload(client, file_headers):

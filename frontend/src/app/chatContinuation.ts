@@ -63,8 +63,7 @@ export function latestResumableAssistant(messages: Message[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     const traceId = typeof message.traceId === 'string' ? message.traceId.trim() : ''
-    const interrupted = message.agentStatus === 'interrupted' || message.agentStatus === 'error'
-    if (message.role === 'assistant' && traceId && (message.streaming || interrupted)) {
+    if (message.role === 'assistant' && traceId && message.streaming) {
       return { messageId: message.id, traceId }
     }
   }

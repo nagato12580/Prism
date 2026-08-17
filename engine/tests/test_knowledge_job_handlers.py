@@ -24,6 +24,17 @@ def handler_db():
     session.close()
 
 
+@pytest.fixture(autouse=True)
+def offline_tiktoken(monkeypatch):
+    import tiktoken
+
+    monkeypatch.setattr(
+        tiktoken,
+        "get_encoding",
+        lambda name: type("Encoder", (), {"encode": lambda self, text: list(text or "")})(),
+    )
+
+
 def test_handle_parse_creates_item_and_chunks(handler_db, tmp_path, monkeypatch):
     from engine.app.jobs import knowledge_handlers
     from engine.app.jobs.knowledge_handlers import handle_parse
@@ -350,6 +361,85 @@ def test_handle_index_builds_scoped_graph_generation_and_outbox(handler_db, monk
     ).count()
     assert event_count > 0
     assert handler_db.query(GraphProjectionReceipt).count() == event_count * 2
+
+
+def test_handle_index_does_not_poison_graph_errors_when_job_finalization_loses_lease(handler_db, monkeypatch):
+    from backend.app.models.knowledge_types import StageStatus
+    from backend.app.services.knowledge_jobs import InvalidJobTransition
+    import engine.app.jobs.knowledge_handlers as handlers
+
+    topic = KnowledgeTopic(
+        tenant_id="t1",
+        owner_user_id="u1",
+        name="Finalization Race KB",
+        active_index_generation=None,
+        active_graph_generation=None,
+    )
+    handler_db.add(topic)
+    handler_db.flush()
+    item = KnowledgeItem(tenant_id="t1", kb_uid=topic.kb_uid, title="Doc", content="body")
+    handler_db.add(item)
+    handler_db.flush()
+    file_row = KnowledgeFile(
+        tenant_id="t1",
+        kb_uid=topic.kb_uid,
+        file_uid="file-finalization-race",
+        original_filename="race.md",
+        item_id=item.id,
+        parse_status=StageStatus.SUCCEEDED.value,
+        index_status=StageStatus.PENDING.value,
+        graph_status=StageStatus.PENDING.value,
+        parsed_content_version=1,
+    )
+    handler_db.add(file_row)
+    handler_db.add(
+        KnowledgeChunk(
+            tenant_id="t1",
+            kb_uid=topic.kb_uid,
+            file_uid=file_row.file_uid,
+            item_id=item.id,
+            generation="1",
+            chunk_uid="child-finalization-race",
+            chunk_text="Alice studies graph retrieval at Example University.",
+            chunk_type="child",
+        )
+    )
+    handler_db.commit()
+    jobs = KnowledgeJobService(handler_db)
+    job = jobs.create(
+        JobCommand("index", "t1", topic.kb_uid, file_row.file_uid, {}),
+        "handle-index-finalization-race",
+    )
+    monkeypatch.setattr(handlers, "_new_index_generation", lambda: "race-generation")
+
+    class FakePublisher:
+        def build(self, kb_uid, generation, *, expected_old):
+            topic.active_index_generation = generation
+            handler_db.flush()
+            return type("Result", (), {"status": "succeeded", "row_count": 1, "error": None})()
+
+    original_succeed = jobs.succeed
+
+    def fail_succeed(*args, **kwargs):
+        original_succeed(*args, **kwargs)
+        raise InvalidJobTransition("Cannot update job after side effects committed")
+
+    monkeypatch.setattr(jobs, "succeed", fail_succeed)
+
+    result = handlers.handle_index(
+        job.id,
+        "w1",
+        handler_db,
+        jobs,
+        publisher_factory=lambda db: FakePublisher(),
+    )
+
+    handler_db.refresh(file_row)
+    assert result["status"] == "completed"
+    assert file_row.index_status == StageStatus.SUCCEEDED.value
+    assert file_row.index_error is None
+    assert file_row.graph_status == StageStatus.SUCCEEDED.value
+    assert file_row.graph_error is None
 
 
 def test_handle_graph_updates_only_requested_file_in_active_generation(handler_db, monkeypatch):

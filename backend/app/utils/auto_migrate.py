@@ -217,7 +217,8 @@ def _infer_default(col):
     if col.default is not None and getattr(col.default, "is_scalar", False):
         value = col.default.arg
         if isinstance(value, str):
-            return f" DEFAULT '{value.replace("'", "''")}'"
+            escaped_value = value.replace("'", "''")
+            return f" DEFAULT '{escaped_value}'"
         if isinstance(value, bool):
             return f" DEFAULT {int(value)}"
         if isinstance(value, (int, float)):

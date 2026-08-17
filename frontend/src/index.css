@@ -179,6 +179,40 @@ button:disabled {
   color: inherit;
 }
 
+.mobile-conversation-strip {
+  scrollbar-gutter: stable;
+}
+
+.mobile-conversation-strip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.mobile-conversation-strip::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.9);
+  border-radius: 999px;
+}
+
+.mobile-conversation-strip::-webkit-scrollbar-thumb {
+  background: rgba(21, 94, 239, 0.42);
+  border-radius: 999px;
+}
+
+.chat-message-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-message-content img,
+.chat-message-content video {
+  max-width: 100%;
+  height: auto;
+}
+
+.chat-message-content pre {
+  max-width: 100%;
+}
+
 @keyframes prism-pulse {
   0%,
   100% {

@@ -152,7 +152,7 @@ def test_cleanup_graph_step_removes_personal_asset_unit_legacy_graph_facts(db_se
         tenant_id="tenant-a",
         owner_user_id="alice",
         user_id="alice",
-        name="个人随手记",
+        name="未归档知识",
         system_type=PERSONAL_INBOX_SYSTEM_TYPE,
     )
     db_session.add(topic)
