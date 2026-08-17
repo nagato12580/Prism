@@ -552,6 +552,52 @@ class FakeEvidenceTool:
         )
 
 
+class FakeEnvelopeEvidenceTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return json.dumps(
+            {
+                "status": "ok",
+                "summary": "Envelope evidence.",
+                "data": {
+                    "evidence": [
+                        {
+                            "kb_uid": "kb-a",
+                            "file_uid": "file-a",
+                            "chunk_uid": "chunk-a",
+                            "display_title": "Doc",
+                            "excerpt": "Envelope context",
+                            "score": 0.8,
+                        }
+                    ]
+                },
+            }
+        )
+
+
+class FakeDictEnvelopeEvidenceTool:
+    name = "knowledge_search"
+
+    def invoke(self, args):
+        return {
+            "status": "ok",
+            "summary": "Dict envelope evidence.",
+            "data": {
+                "evidence": [
+                    {
+                        "kb_uid": "kb-a",
+                        "file_uid": "file-a",
+                        "chunk_uid": "chunk-dict",
+                        "display_title": "Doc",
+                        "excerpt": "Dict envelope context",
+                        "score": 0.7,
+                    }
+                ]
+            },
+        }
+
+
 class FakeEvidenceModel:
     def __init__(self):
         self.calls = 0
@@ -1031,6 +1077,58 @@ def test_runner_records_tool_trace_and_streams_evidence_items():
     ]
     assert recorder.steps[3]["evidence_items"] == tool_result["data"]["evidence_items"]
     assert recorder.finished_status == "success"
+
+
+def test_runner_projects_tool_envelope_evidence_to_evidence_items():
+    model = FakeEvidenceModel()
+    runner = LangChainAgentRunner(model=model, tools=[FakeEnvelopeEvidenceTool()])
+
+    lines = list(runner.stream("How?", []))
+    tool_result = next(
+        json.loads(line) for line in lines if json.loads(line)["type"] == "tool_result"
+    )
+
+    assert tool_result["data"]["evidence_items"] == [
+        {
+            "evidence_id": "document_chunk:chunk-a",
+            "source_kind": "document_chunk",
+            "source_id": "chunk-a",
+            "chunk_id": "chunk-a",
+            "file_uid": "file-a",
+            "kb_uid": "kb-a",
+            "display_title": "Doc",
+            "excerpt": "Envelope context",
+            "score": 0.8,
+            "retrieval_path": ["knowledge_search"],
+        }
+    ]
+
+
+def test_runner_projects_dict_tool_result_evidence_to_evidence_items():
+    model = FakeEvidenceModel()
+    runner = LangChainAgentRunner(model=model, tools=[FakeDictEnvelopeEvidenceTool()])
+
+    lines = list(runner.stream("How?", []))
+    tool_result = next(
+        json.loads(line) for line in lines if json.loads(line)["type"] == "tool_result"
+    )
+
+    assert tool_result["data"]["summary"] == "Dict envelope evidence."
+    assert tool_result["data"]["evidence_items"] == [
+        {
+            "evidence_id": "document_chunk:chunk-dict",
+            "source_kind": "document_chunk",
+            "source_id": "chunk-dict",
+            "chunk_id": "chunk-dict",
+            "file_uid": "file-a",
+            "kb_uid": "kb-a",
+            "display_title": "Doc",
+            "excerpt": "Dict envelope context",
+            "score": 0.7,
+            "retrieval_path": ["knowledge_search"],
+        }
+    ]
+    assert json.loads(model.seen_tool_content)["data"]["evidence"][0]["chunk_uid"] == "chunk-dict"
 
 
 def test_runner_resumes_from_checkpoint_messages():

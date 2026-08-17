@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "artifacts": "evaluation\\runs\\answer\\2026-08-15_161945\\answer_artifacts.jsonl",
+    "run_at": "2026-08-15T16:41:04.544331+00:00",
+    "judge_model": "deepseek-v4-flash",
+    "metric_names": [
+      "faithfulness",
+      "response_relevancy",
+      "context_precision",
+      "context_recall"
+    ],
+    "thresholds": {
+      "faithfulness": 0.8,
+      "response_relevancy": 0.75,
+      "context_precision": 0.65,
+      "context_recall": 0.65
+    },
+    "total": 3,
+    "evaluated": 3,
+    "failed": 3
+  },
+  "aggregates": {
+    "response_relevancy": {
+      "mean": 0.7948,
+      "median": 0.9379,
+      "min": 0.4572,
+      "max": 0.9894
+    }
+  },
+  "by_type": {
+    "unknown": {
+      "response_relevancy": {
+        "mean": 0.7948,
+        "median": 0.9379,
+        "min": 0.4572,
+        "max": 0.9894
+      }
+    }
+  },
+  "bad_case_counts": {
+    "retrieval_failure": 3,
+    "ragas_failed": 3,
+    "off_topic": 1,
+    "below_threshold:response_relevancy": 1
+  },
+  "failures": [
+    {
+      "query_id": "q001",
+      "reason": "missing finite metrics: faithfulness, context_precision, context_recall"
+    },
+    {
+      "query_id": "q002",
+      "reason": "missing finite metrics: faithfulness, context_precision, context_recall"
+    },
+    {
+      "query_id": "q003",
+      "reason": "missing finite metrics: faithfulness, context_precision, context_recall"
+    }
+  ]
+}

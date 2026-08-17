@@ -1,0 +1,4 @@
+﻿query_id,question,question_type,status,faithfulness,response_relevancy,context_precision,context_recall,bad_case_tags,failure
+q001,在RAG系统中，父子块之间的映射关系通常通过什么方式在工程落地中建立,,done,0.01818181818181818,0.840821299084435,0.0,0.0,"hallucination_risk,noisy_context,missing_context,below_threshold:faithfulness,below_threshold:context_precision,below_threshold:context_recall",
+q002,在Skill管理中，两阶段调用的第一阶段应检索多少个最相关的Skill,,done,0.7142857142857143,0.0,0.8666666666377778,0.0,"off_topic,missing_context,below_threshold:faithfulness,below_threshold:response_relevancy,below_threshold:context_recall",
+q003,What is the LLM-as-a-Judge evaluation method and how does it work,,done,0.0,0.3966213655578846,0.8333333332916666,0.0,"hallucination_risk,off_topic,missing_context,below_threshold:faithfulness,below_threshold:response_relevancy,below_threshold:context_recall",

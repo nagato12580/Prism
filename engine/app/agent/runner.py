@@ -630,6 +630,102 @@ def _normalized_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _evidence_items_from_tool_payload(
+    tool_name: str,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    evidence_items = payload.get("evidence_items")
+    if isinstance(evidence_items, list):
+        return evidence_items
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+
+    projected: list[dict[str, Any]] = []
+    evidence = data.get("evidence")
+    if isinstance(evidence, list):
+        for item in evidence:
+            if isinstance(item, dict):
+                projected_item = _project_query_evidence_item(tool_name, item)
+                if projected_item is not None:
+                    projected.append(projected_item)
+
+    matches = data.get("matches")
+    if isinstance(matches, list):
+        kb_uid = str(data.get("kb_uid") or "")
+        file_uid = str(data.get("file_uid") or "")
+        for index, match in enumerate(matches):
+            if not isinstance(match, dict):
+                continue
+            snippet = str(match.get("snippet") or "").strip()
+            if not snippet:
+                continue
+            line = match.get("line")
+            projected.append(
+                {
+                    "evidence_id": f"document_match:{kb_uid}:{file_uid}:{line or index}",
+                    "source_kind": "document_match",
+                    "source_id": file_uid,
+                    "chunk_id": "",
+                    "file_uid": file_uid,
+                    "kb_uid": kb_uid,
+                    "display_title": "",
+                    "excerpt": snippet,
+                    "score": None,
+                    "retrieval_path": [tool_name],
+                }
+            )
+
+    content = str(data.get("content") or "").strip()
+    if content:
+        kb_uid = str(data.get("kb_uid") or "")
+        file_uid = str(data.get("file_uid") or "")
+        offset = data.get("offset")
+        projected.append(
+            {
+                "evidence_id": f"document_window:{kb_uid}:{file_uid}:{offset or 0}",
+                "source_kind": "document_window",
+                "source_id": file_uid,
+                "chunk_id": "",
+                "file_uid": file_uid,
+                "kb_uid": kb_uid,
+                "display_title": "",
+                "excerpt": content,
+                "score": None,
+                "retrieval_path": [tool_name],
+            }
+        )
+
+    return projected or None
+
+
+def _project_query_evidence_item(
+    tool_name: str,
+    item: dict[str, Any],
+) -> dict[str, Any] | None:
+    excerpt = str(item.get("excerpt") or item.get("text") or item.get("snippet") or "").strip()
+    if not excerpt:
+        return None
+    chunk_id = str(item.get("chunk_uid") or item.get("chunk_id") or "")
+    source_id = str(item.get("source_id") or chunk_id or item.get("file_uid") or "")
+    evidence_id = str(item.get("evidence_id") or "")
+    if not evidence_id:
+        evidence_id = f"document_chunk:{source_id}" if source_id else "document_chunk"
+    return {
+        "evidence_id": evidence_id,
+        "source_kind": "document_chunk",
+        "source_id": source_id,
+        "chunk_id": chunk_id,
+        "file_uid": str(item.get("file_uid") or ""),
+        "kb_uid": str(item.get("kb_uid") or ""),
+        "display_title": str(item.get("display_title") or ""),
+        "excerpt": excerpt,
+        "score": item.get("score"),
+        "retrieval_path": [tool_name],
+    }
+
+
 def _decoded_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for message in messages:
@@ -1806,9 +1902,7 @@ class LangChainAgentRunner:
             trace_steps = payload.get("trace_steps")
             if not trace_steps and isinstance(stats, dict):
                 trace_steps = stats.get("deep_trace_steps") or stats.get("trace_steps")
-            evidence_items = payload.get("evidence_items")
-            if not isinstance(evidence_items, list):
-                evidence_items = None
+            evidence_items = _evidence_items_from_tool_payload(name, payload)
             has_meaningful_evidence = _payload_has_meaningful_evidence(payload)
             _record_trace_step(
                 trace_recorder,
@@ -1848,7 +1942,8 @@ class LangChainAgentRunner:
             )
 
             sources = payload.get("sources") or []
-            evidence = payload.get("evidence") or []
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            evidence = payload.get("evidence") or data.get("evidence") or []
             payload_status = str(payload.get("status") or "").lower()
             if (
                 status == "success"
@@ -2238,9 +2333,7 @@ class LangChainAgentRunner:
                     trace_steps = payload.get("trace_steps")
                     if not trace_steps and isinstance(stats, dict):
                         trace_steps = stats.get("deep_trace_steps") or stats.get("trace_steps")
-                    evidence_items = payload.get("evidence_items")
-                    if not isinstance(evidence_items, list):
-                        evidence_items = None
+                    evidence_items = _evidence_items_from_tool_payload(name, payload)
                     has_meaningful_evidence = _payload_has_meaningful_evidence(payload)
 
                     _record_trace_step(
@@ -2281,8 +2374,8 @@ class LangChainAgentRunner:
                     )
 
                     sources = payload.get("sources") or []
-                    evidence_items = payload.get("evidence_items")
-                    evidence = payload.get("evidence") or []
+                    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                    evidence = payload.get("evidence") or data.get("evidence") or []
                     payload_status = str(payload.get("status") or "").lower()
                     if (
                         status == "success"
@@ -2751,7 +2844,7 @@ class LangChainAgentRunner:
         else:
             try:
                 future = _TOOL_EXECUTOR.submit(tool.invoke, args)
-                result_text = future.result(timeout=self.tool_timeout_seconds)
+                result_value = future.result(timeout=self.tool_timeout_seconds)
             except TimeoutError:
                 future.cancel()
                 status = "error"
@@ -2772,12 +2865,24 @@ class LangChainAgentRunner:
                 )
 
         latency_ms = int((time.monotonic() - started) * 1000)
-        try:
-            payload = json.loads(result_text)
-        except Exception:
-            payload = {"summary": result_text}
+        if "result_value" in locals():
+            if isinstance(result_value, dict):
+                payload = result_value
+            elif isinstance(result_value, list):
+                payload = {"data": result_value}
+            else:
+                result_text = str(result_value)
+                try:
+                    payload = json.loads(result_text)
+                except Exception:
+                    payload = {"summary": result_text}
+        else:
+            try:
+                payload = json.loads(result_text)
+            except Exception:
+                payload = {"summary": result_text}
         if not isinstance(payload, dict):
-            payload = {"summary": result_text}
+            payload = {"summary": json.dumps(payload, ensure_ascii=False)}
         payload = _enrich_payload_for_model(payload)
         result_text = json.dumps(payload, ensure_ascii=False)
 

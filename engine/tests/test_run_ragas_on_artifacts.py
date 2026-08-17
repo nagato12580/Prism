@@ -85,6 +85,33 @@ def test_build_ragas_rows_includes_answer_when_contexts_and_reference_missing():
     ]
 
 
+def test_build_ragas_rows_sanitizes_control_characters_and_caps_contexts(monkeypatch):
+    monkeypatch.setenv("RAGAS_MAX_CONTEXTS", "2")
+    monkeypatch.setenv("RAGAS_MAX_CONTEXT_CHARS", "5")
+
+    rows, skipped = build_ragas_rows(
+        [
+            {
+                "query_id": "q1",
+                "question": "q\x00",
+                "answer": "a\x1f",
+                "retrieved_contexts": ["abcdef\x00", "ghijkl", "mnopqr"],
+                "reference": "ref\x00",
+            }
+        ]
+    )
+
+    assert skipped == []
+    assert rows == [
+        {
+            "user_input": "q",
+            "response": "a",
+            "retrieved_contexts": ["abcde", "ghijk"],
+            "reference": "ref",
+        }
+    ]
+
+
 def test_normalize_metric_row_maps_answer_relevancy_to_response_relevancy():
     normalized = normalize_metric_row({"faithfulness": 1.0, "answer_relevancy": 0.75})
 
@@ -493,6 +520,7 @@ def test_default_evaluator_uses_single_response_relevancy_sample(monkeypatch):
     langchain_openai_module = types.ModuleType("langchain_openai")
     ragas_module = types.ModuleType("ragas")
     ragas_metrics_module = types.ModuleType("ragas.metrics")
+    ragas_run_config_module = types.ModuleType("ragas.run_config")
 
     class Dataset:
         @classmethod
@@ -521,7 +549,12 @@ def test_default_evaluator_uses_single_response_relevancy_sample(monkeypatch):
         def __init__(self, strictness=3):
             captured_strictness.append(strictness)
 
+    class RunConfig:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
     def evaluate(dataset, metrics, **kwargs):
+        assert kwargs["run_config"].timeout == 600
         return [{"answer_relevancy": 0.5}]
 
     datasets_module.Dataset = Dataset
@@ -534,11 +567,13 @@ def test_default_evaluator_uses_single_response_relevancy_sample(monkeypatch):
         LLMContextPrecisionWithReference
     )
     ragas_metrics_module.ResponseRelevancy = ResponseRelevancy
+    ragas_run_config_module.RunConfig = RunConfig
 
     monkeypatch.setitem(sys.modules, "datasets", datasets_module)
     monkeypatch.setitem(sys.modules, "langchain_openai", langchain_openai_module)
     monkeypatch.setitem(sys.modules, "ragas", ragas_module)
     monkeypatch.setitem(sys.modules, "ragas.metrics", ragas_metrics_module)
+    monkeypatch.setitem(sys.modules, "ragas.run_config", ragas_run_config_module)
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     monkeypatch.setenv("EMBEDDING_API_BASE", "https://embedding.example/v1")
     monkeypatch.setenv("EMBEDDING_API_KEY", "embedding-key")
@@ -573,6 +608,96 @@ def test_default_evaluator_uses_single_response_relevancy_sample(monkeypatch):
         }
     ]
     assert scores == [{"answer_relevancy": 0.5}]
+
+
+def test_default_evaluator_retries_missing_metric_rows(monkeypatch):
+    evaluate_calls = []
+
+    datasets_module = types.ModuleType("datasets")
+    langchain_openai_module = types.ModuleType("langchain_openai")
+    ragas_module = types.ModuleType("ragas")
+    ragas_metrics_module = types.ModuleType("ragas.metrics")
+    ragas_run_config_module = types.ModuleType("ragas.run_config")
+
+    class Dataset:
+        @classmethod
+        def from_list(cls, rows):
+            return rows
+
+    class ChatOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+    class OpenAIEmbeddings:
+        def __init__(self, **kwargs):
+            pass
+
+    class Faithfulness:
+        pass
+
+    class LLMContextRecall:
+        pass
+
+    class LLMContextPrecisionWithReference:
+        pass
+
+    class ResponseRelevancy:
+        def __init__(self, strictness=3):
+            pass
+
+    class RunConfig:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+    def evaluate(dataset, metrics, **kwargs):
+        metric_name = type(metrics[0]).__name__
+        evaluate_calls.append((metric_name, len(dataset)))
+        if metric_name == "LLMContextPrecisionWithReference" and len(dataset) == 2:
+            return [{"llm_context_precision_with_reference": 0.5}, {}]
+        if metric_name == "LLMContextPrecisionWithReference":
+            return [{"llm_context_precision_with_reference": 0.75}]
+        return [{"faithfulness": 1.0} for _ in dataset]
+
+    datasets_module.Dataset = Dataset
+    langchain_openai_module.ChatOpenAI = ChatOpenAI
+    langchain_openai_module.OpenAIEmbeddings = OpenAIEmbeddings
+    ragas_module.evaluate = evaluate
+    ragas_metrics_module.Faithfulness = Faithfulness
+    ragas_metrics_module.LLMContextRecall = LLMContextRecall
+    ragas_metrics_module.LLMContextPrecisionWithReference = (
+        LLMContextPrecisionWithReference
+    )
+    ragas_metrics_module.ResponseRelevancy = ResponseRelevancy
+    ragas_run_config_module.RunConfig = RunConfig
+
+    monkeypatch.setitem(sys.modules, "datasets", datasets_module)
+    monkeypatch.setitem(sys.modules, "langchain_openai", langchain_openai_module)
+    monkeypatch.setitem(sys.modules, "ragas", ragas_module)
+    monkeypatch.setitem(sys.modules, "ragas.metrics", ragas_metrics_module)
+    monkeypatch.setitem(sys.modules, "ragas.run_config", ragas_run_config_module)
+    monkeypatch.setenv("RAGAS_METRIC_RETRIES", "1")
+
+    scores = _default_ragas_evaluator(
+        [
+            {
+                "user_input": "q1",
+                "response": "a1",
+                "retrieved_contexts": ["ctx1"],
+                "reference": "ref1",
+            },
+            {
+                "user_input": "q2",
+                "response": "a2",
+                "retrieved_contexts": ["ctx2"],
+                "reference": "ref2",
+            },
+        ],
+        "judge-model",
+    )
+
+    assert scores[0]["llm_context_precision_with_reference"] == 0.5
+    assert scores[1]["llm_context_precision_with_reference"] == 0.75
+    assert ("LLMContextPrecisionWithReference", 1) in evaluate_calls
 
 
 def test_default_evaluator_reports_missing_optional_dependencies(monkeypatch):

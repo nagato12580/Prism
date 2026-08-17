@@ -5,6 +5,7 @@ import math
 import numbers
 import os
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,9 @@ METRIC_NAMES = (
     "context_precision",
     "context_recall",
 )
+DEFAULT_RAGAS_MAX_CONTEXTS = 5
+DEFAULT_RAGAS_MAX_CONTEXT_CHARS = 1500
+DEFAULT_RAGAS_TIMEOUT_SECONDS = 600
 METRIC_ALIASES = {
     "faithfulness": ("faithfulness",),
     "response_relevancy": ("response_relevancy", "answer_relevancy"),
@@ -64,10 +68,12 @@ def build_ragas_rows(
 
         rows.append(
             {
-                "user_input": artifact.get("question", ""),
-                "response": artifact.get("answer", ""),
-                "retrieved_contexts": artifact.get("retrieved_contexts") or [],
-                "reference": artifact.get("reference", ""),
+                "user_input": _sanitize_ragas_text(artifact.get("question", "")),
+                "response": _sanitize_ragas_text(artifact.get("answer", "")),
+                "retrieved_contexts": _bounded_ragas_contexts(
+                    artifact.get("retrieved_contexts") or []
+                ),
+                "reference": _sanitize_ragas_text(artifact.get("reference", "")),
             }
         )
 
@@ -224,6 +230,7 @@ def _default_ragas_evaluator(
         from datasets import Dataset
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
         from ragas import evaluate
+        from ragas.run_config import RunConfig
         from ragas.metrics import Faithfulness, LLMContextRecall, ResponseRelevancy
         try:
             from ragas.metrics import LLMContextPrecisionWithReference
@@ -246,25 +253,29 @@ def _default_ragas_evaluator(
 
     llm = ChatOpenAI(**_llm_kwargs(judge_model)) if judge_model else None
     embeddings = OpenAIEmbeddings(**_embedding_kwargs()) if judge_model else None
+    run_config = RunConfig(timeout=_ragas_timeout_seconds())
     scores_by_index: list[dict[str, Any]] = [{} for _ in rows]
 
     metric_specs = [
-        (Faithfulness, {}, lambda row: _has_response(row) and _has_contexts(row)),
-        (ResponseRelevancy, {"strictness": 1}, lambda row: _has_response(row)),
+        ("faithfulness", Faithfulness, {}, lambda row: _has_response(row) and _has_contexts(row)),
+        ("response_relevancy", ResponseRelevancy, {"strictness": 1}, lambda row: _has_response(row)),
         (
+            "context_precision",
             ContextPrecisionMetric,
             {},
             lambda row: _has_contexts(row)
             and (not context_precision_needs_reference or _has_reference(row)),
         ),
         (
+            "context_recall",
             LLMContextRecall,
             {},
             lambda row: _has_contexts(row) and _has_reference(row),
         ),
     ]
 
-    for metric_factory, metric_kwargs, predicate in metric_specs:
+    metric_retries = _positive_int_env("RAGAS_METRIC_RETRIES", 1)
+    for metric_name, metric_factory, metric_kwargs, predicate in metric_specs:
         selected = [
             (index, row)
             for index, row in enumerate(rows)
@@ -278,10 +289,35 @@ def _default_ragas_evaluator(
             metrics=[metric_factory(**metric_kwargs)],
             llm=llm,
             embeddings=embeddings,
+            run_config=run_config,
         )
         metric_scores = _ragas_result_to_rows(result)
         for (index, _), score in zip(selected, metric_scores, strict=False):
             scores_by_index[index].update(score)
+
+        missing_selected = [
+            (index, row)
+            for (index, row), score in zip(selected, metric_scores, strict=False)
+            if not _has_any_metric_score(score, METRIC_ALIASES[metric_name])
+        ]
+        for _attempt in range(metric_retries):
+            if not missing_selected:
+                break
+            still_missing = []
+            for index, row in missing_selected:
+                retry_result = evaluate(
+                    Dataset.from_list([row]),
+                    metrics=[metric_factory(**metric_kwargs)],
+                    llm=llm,
+                    embeddings=embeddings,
+                    run_config=run_config,
+                )
+                retry_scores = _ragas_result_to_rows(retry_result)
+                retry_score = retry_scores[0] if retry_scores else {}
+                scores_by_index[index].update(retry_score)
+                if not _has_any_metric_score(retry_score, METRIC_ALIASES[metric_name]):
+                    still_missing.append((index, row))
+            missing_selected = still_missing
 
     return scores_by_index
 
@@ -292,6 +328,10 @@ def _ragas_result_to_rows(result: Any) -> list[dict[str, Any]]:
     if hasattr(result, "scores"):
         return list(result.scores)
     return list(result)
+
+
+def _has_any_metric_score(row: dict[str, Any], aliases: tuple[str, ...]) -> bool:
+    return any(_is_number(row.get(alias)) for alias in aliases)
 
 
 def _missing_required_fields(artifact: dict[str, Any]) -> list[str]:
@@ -315,6 +355,47 @@ def _has_contexts(row: dict[str, Any]) -> bool:
 
 def _has_reference(row: dict[str, Any]) -> bool:
     return bool(str(row.get("reference") or "").strip())
+
+
+def _bounded_ragas_contexts(contexts: Any) -> list[str]:
+    if not isinstance(contexts, list):
+        return []
+    max_contexts = _positive_int_env("RAGAS_MAX_CONTEXTS", DEFAULT_RAGAS_MAX_CONTEXTS)
+    max_chars = _positive_int_env(
+        "RAGAS_MAX_CONTEXT_CHARS",
+        DEFAULT_RAGAS_MAX_CONTEXT_CHARS,
+    )
+    bounded: list[str] = []
+    for context in contexts:
+        text = _sanitize_ragas_text(context)
+        if not text:
+            continue
+        bounded.append(text[:max_chars])
+        if len(bounded) >= max_contexts:
+            break
+    return bounded
+
+
+def _sanitize_ragas_text(value: Any) -> str:
+    text = str(value or "")
+    cleaned = [
+        char
+        for char in text
+        if char in "\n\r\t" or unicodedata.category(char)[0] != "C"
+    ]
+    return "".join(cleaned).strip()
+
+
+def _ragas_timeout_seconds() -> int:
+    return _positive_int_env("RAGAS_TIMEOUT_SECONDS", DEFAULT_RAGAS_TIMEOUT_SECONDS)
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def _embedding_kwargs() -> dict[str, str]:

@@ -291,6 +291,7 @@ def _collect_one(
     question: str,
     scope_token: str,
     deep_search: bool,
+    kb_uid: str,
 ) -> tuple[dict[str, Any], int, int]:
     start = time.perf_counter()
     lines: list[str] = []
@@ -302,6 +303,7 @@ def _collect_one(
         json={
             "query": question,
             "history": [],
+            "topic_id": kb_uid,
             "deep_search_enabled": deep_search,
             "deep_search_depth": "standard",
             "rag_max_iterations": 5,
@@ -371,6 +373,7 @@ def main(argv: list[str] | None = None) -> None:
                         question=question,
                         scope_token=scope_token(),
                         deep_search=_is_deep_search_case(query),
+                        kb_uid=args.kb_uid,
                     )
                 except Exception as exc:
                     failures.append(

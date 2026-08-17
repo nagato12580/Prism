@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "artifacts": "evaluation\\runs\\answer\\2026-08-16_110806\\answer_artifacts.jsonl",
+    "run_at": "2026-08-16T12:28:57.981207+00:00",
+    "judge_model": "deepseek-v4-flash",
+    "metric_names": [
+      "faithfulness",
+      "response_relevancy",
+      "context_precision",
+      "context_recall"
+    ],
+    "thresholds": {
+      "faithfulness": 0.8,
+      "response_relevancy": 0.75,
+      "context_precision": 0.65,
+      "context_recall": 0.65
+    },
+    "total": 3,
+    "evaluated": 3,
+    "failed": 0
+  },
+  "aggregates": {
+    "faithfulness": {
+      "mean": 0.2442,
+      "median": 0.0182,
+      "min": 0.0,
+      "max": 0.7143
+    },
+    "response_relevancy": {
+      "mean": 0.4125,
+      "median": 0.3966,
+      "min": 0.0,
+      "max": 0.8408
+    },
+    "context_precision": {
+      "mean": 0.5667,
+      "median": 0.8333,
+      "min": 0.0,
+      "max": 0.8667
+    },
+    "context_recall": {
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    }
+  },
+  "by_type": {
+    "unknown": {
+      "faithfulness": {
+        "mean": 0.2442,
+        "median": 0.0182,
+        "min": 0.0,
+        "max": 0.7143
+      },
+      "response_relevancy": {
+        "mean": 0.4125,
+        "median": 0.3966,
+        "min": 0.0,
+        "max": 0.8408
+      },
+      "context_precision": {
+        "mean": 0.5667,
+        "median": 0.8333,
+        "min": 0.0,
+        "max": 0.8667
+      },
+      "context_recall": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    }
+  },
+  "bad_case_counts": {
+    "hallucination_risk": 2,
+    "noisy_context": 1,
+    "missing_context": 3,
+    "below_threshold:faithfulness": 3,
+    "below_threshold:context_precision": 1,
+    "below_threshold:context_recall": 3,
+    "off_topic": 2,
+    "below_threshold:response_relevancy": 2
+  },
+  "failures": []
+}
