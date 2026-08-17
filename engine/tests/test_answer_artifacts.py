@@ -15,6 +15,7 @@ from engine.eval.answer_artifacts import (
 )
 from engine.eval.collect_answer_artifacts import (
     CachedChunkTextLookup,
+    _collect_one,
     _load_active_index_generation_in_session,
     _lookup_chunk_text_in_session,
     build_artifact,
@@ -59,7 +60,10 @@ def test_parse_ndjson_events_handles_tokens_sources_done_and_error():
     parsed = parse_ndjson_events(lines)
 
     assert parsed["answer"] == "final answer"
-    assert parsed["sources"] == [{"chunk_uid": "c2", "text": "ctx2"}]
+    assert parsed["sources"] == [
+        {"chunk_uid": "c1", "text": "ctx"},
+        {"chunk_uid": "c2", "text": "ctx2"},
+    ]
     assert parsed["token_count"] == 2
     assert parsed["tool_calls"] == 1
     assert parsed["status"] == "error"
@@ -77,6 +81,39 @@ def test_parse_ndjson_events_preserves_error_status_after_later_done():
     assert parsed["answer"] == "partial final answer"
     assert parsed["status"] == "error"
     assert parsed["error"] == "endpoint failed"
+
+
+def test_parse_ndjson_events_uses_tool_result_evidence_items_as_sources():
+    lines = [
+        (
+            '{"type":"tool_result","data":{"tool":"query_kb",'
+            '"evidence_items":[{"chunk_id":"c1","excerpt":"ctx"}]}}\n'
+        ),
+        (
+            '{"type":"tool_result","data":{"tool":"open_kb_document",'
+            '"evidence_items":[{"chunk_id":"c2","excerpt":"ctx2"}]}}\n'
+        ),
+    ]
+
+    parsed = parse_ndjson_events(lines)
+
+    assert parsed["sources"] == [
+        {"chunk_id": "c1", "excerpt": "ctx"},
+        {"chunk_id": "c2", "excerpt": "ctx2"},
+    ]
+
+
+def test_parse_ndjson_events_reads_v2_sources_evidence_shape():
+    lines = [
+        (
+            '{"type":"sources","evidence":[{"chunk_id":"c1","excerpt":"ctx"}],'
+            '"retrieval_health":{"status":"ok"}}\n'
+        ),
+    ]
+
+    parsed = parse_ndjson_events(lines)
+
+    assert parsed["sources"] == [{"chunk_id": "c1", "excerpt": "ctx"}]
 
 
 def test_build_reference_from_gold_uses_inline_chunk_texts():
@@ -280,6 +317,43 @@ def test_build_artifact_maps_dataset_and_events():
     assert artifact.metadata["tool_calls"] == 1
     assert artifact.metadata["token_count"] == 5
     assert artifact.metadata["status"] == "done"
+
+
+def test_collect_one_sends_topic_id_for_scoped_kb():
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_lines(self):
+            return ['{"type":"done"}']
+
+    class Client:
+        def stream(self, method, url, *, json, headers):
+            captured["method"] = method
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return Response()
+
+    _collect_one(
+        Client(),
+        engine_url="http://engine",
+        question="q",
+        scope_token="scope-token",
+        deep_search=False,
+        kb_uid="kb-a",
+    )
+
+    assert captured["json"]["topic_id"] == "kb-a"
+    assert captured["headers"] == {"x-prism-knowledge-scope": "scope-token"}
 
 
 def test_build_artifact_can_lookup_missing_gold_and_context_text():

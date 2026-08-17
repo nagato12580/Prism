@@ -51,11 +51,21 @@ def parse_ndjson_events(lines: Iterable[str]) -> dict[str, Any]:
             elif isinstance(data, dict):
                 result["answer"] += str(data.get("token", ""))
         elif event_type == "sources":
-            sources = data.get("sources", data) if isinstance(data, dict) else data
+            if isinstance(data, dict):
+                sources = data.get("sources", data)
+            else:
+                sources = data
+            if not sources:
+                sources = event.get("evidence")
             if isinstance(sources, list):
-                result["sources"] = sources
+                _extend_sources(result["sources"], sources)
         elif event_type == "tool_call":
             result["tool_calls"] += 1
+        elif event_type == "tool_result":
+            if isinstance(data, dict):
+                evidence_items = data.get("evidence_items")
+                if isinstance(evidence_items, list):
+                    _extend_sources(result["sources"], evidence_items)
         elif event_type == "done":
             if result.get("status") != "error":
                 result["status"] = "done"
@@ -70,6 +80,26 @@ def parse_ndjson_events(lines: Iterable[str]) -> dict[str, Any]:
             )
 
     return result
+
+
+def _extend_sources(target: list[Any], sources: Iterable[Any]) -> None:
+    seen = {_source_key(source) for source in target}
+    for source in sources:
+        key = _source_key(source)
+        if key in seen:
+            continue
+        target.append(source)
+        seen.add(key)
+
+
+def _source_key(source: Any) -> str:
+    if not isinstance(source, dict):
+        return json.dumps(source, ensure_ascii=False, sort_keys=True)
+    for key in ("evidence_id", "chunk_uid", "chunk_id", "source_id"):
+        value = source.get(key)
+        if value:
+            return f"{key}:{value}"
+    return json.dumps(source, ensure_ascii=False, sort_keys=True)
 
 
 def build_reference_from_gold(

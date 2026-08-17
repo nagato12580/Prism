@@ -1,0 +1,21 @@
+{"type": "trace", "data": {"trace_id": "1e56dcfb-fdcd-4a0e-b8ab-9b07fd33584c"}}
+{"type": "agent_status", "data": {"label": "analyzing question"}}
+{"type": "tool_call", "data": {"tool": "list_kbs", "query": ""}}
+{"type": "tool_result", "data": {"tool": "list_kbs", "status": "success", "summary": "{'status': 'ok', 'data': {'items': [{'kb_uid': 'cc33d24a-d839-462c-b53d-b6d785f727c2', 'name': '论文', 'description': None, 'status': 'active'}]}, 'warnings': [], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "", "latency_ms": 4}}
+{"type": "tool_call", "data": {"tool": "memory_search", "query": "Skill管理 两阶段调用 第一阶段 检索 Skill 数量"}}
+{"type": "tool_result", "data": {"tool": "memory_search", "status": "success", "summary": "未找到匹配的长期记忆。", "query": "Skill管理 两阶段调用 第一阶段 检索 Skill 数量", "latency_ms": 317}}
+{"type": "tool_call", "data": {"tool": "query_kb", "query": ""}}
+{"type": "tool_result", "data": {"tool": "query_kb", "status": "success", "summary": "{'status': 'degraded', 'data': {'evidence': [], 'retrieval_health': {'agentic': {'status': 'insufficient', 'iterations': 3, 'depth': 'standard', 'graph_hops': 2}}, 'coverage': None}, 'warnings': [{'code': 'AGENTIC_RAG_INSUFFICIENT', 'message': 'agentic retrieval did not judge the evidence sufficient'}], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "", "latency_ms": 12056}}
+{"type": "tool_call", "data": {"tool": "get_mindmap", "query": ""}}
+{"type": "tool_result", "data": {"tool": "get_mindmap", "status": "success", "summary": "{'status': 'ok', 'data': {'kb_uid': 'cc33d24a-d839-462c-b53d-b6d785f727c2', 'mindmap': {'nodes': [], 'status': 'stale', 'version': 0, 'stale_reason': 'active_graph_generation_changed', 'input_revision': 4}, 'version': None, 'status': 'stale'}, 'warnings': [], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "", "latency_ms": 4}}
+{"type": "tool_call", "data": {"tool": "query_kb", "query": ""}}
+{"type": "tool_result", "data": {"tool": "query_kb", "status": "success", "summary": "{'status': 'no_hits', 'data': {'evidence': [], 'retrieval_health': {}, 'coverage': None}, 'warnings': [], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "", "latency_ms": 220}}
+{"type": "tool_call", "data": {"tool": "search_file", "query": "Skill"}}
+{"type": "tool_result", "data": {"tool": "search_file", "status": "success", "summary": "{'status': 'ok', 'data': {'items': [], 'next_cursor': None}, 'warnings': [], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "Skill", "latency_ms": 4}}
+{"type": "tool_call", "data": {"tool": "search_file", "query": "Agent"}}
+{"type": "tool_result", "data": {"tool": "search_file", "status": "success", "summary": "{'status': 'ok', 'data': {'items': [], 'next_cursor': None}, 'warnings': [], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "Agent", "latency_ms": 4}}
+{"type": "tool_call", "data": {"tool": "search_file", "query": ""}}
+{"type": "tool_result", "data": {"tool": "search_file", "status": "success", "summary": "{'status': 'ok', 'data': {'items': [{'file_uid': '443a223f-f8ff-4f75-bfa5-4344e95a1d21', 'kb_uid': 'cc33d24a-d839-462c-b53d-b6d785f727c2', 'title': None, 'original_filename': '19711-AAAI26.XuH-DM.pdf', 'media_type': 'document', 'mime_type': 'application/pdf', 'parse_status': 'succeeded', 'page_count': None}], 'next_cursor': None}, 'warnings': [], 'error': None, 'trace_id': 'debug-stream-q002'}", "query": "", "latency_ms": 14}}
+{"type": "agent_status", "data": {"label": "generating answer"}}
+{"type": "token", "data": "没有足够证据可以给出一个确定的数字。 Skill 管理的“两阶段调用”在不同系统中设计不同，第一阶段通常用于召回候选技能，常见做法是检索 3～5 个最相关的 Skill，也有些系统设为 5～10 个。具体应检索多少个，取决于你的系统配置、技能库规模、检索性能以及后续第二阶段的筛选逻辑，没有统一标准。建议查阅你所使用平台或框架的官方文档或默认配置来确认。"}
+{"type": "done"}

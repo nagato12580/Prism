@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "dataset": "evaluation\\datasets\\formal_docs_v1_first20.json",
+    "run_at": "2026-08-15T16:21:33.272459+00:00",
+    "total_artifacts": 3,
+    "failed": 0
+  },
+  "status_counts": {
+    "done": 3
+  },
+  "missing_context_count": 0,
+  "failures": []
+}

@@ -835,6 +835,8 @@ def answer_stream(
     intent = classify_intent(query, intent_history)
     tool_groups = intent.get("groups", [])
     kb_specs = intent.get("kb_specs", [])
+    if topic_id and knowledge_scope is not None and "knowledge" not in tool_groups:
+        tool_groups = [*tool_groups, "knowledge"]
     # If knowledge group is active but no scope was pre-signed by the backend
     # proxy, try to resolve scope from topic_id for backward compatibility.
     has_knowledge = "knowledge" in tool_groups

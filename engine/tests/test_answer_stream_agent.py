@@ -822,6 +822,35 @@ def test_answer_stream_injects_resources_for_authorized_knowledge_scope(monkeypa
     assert db.closed is True
 
 
+def test_answer_stream_forces_knowledge_group_for_scoped_topic(monkeypatch):
+    class Scope:
+        allowed_kb_uids = ("kb-a",)
+
+    class DB:
+        def close(self):
+            pass
+
+    captured = {}
+
+    monkeypatch.setattr(answer, "_Session", lambda: DB())
+    monkeypatch.setattr(
+        answer,
+        "classify_intent",
+        lambda query, history=None: {"groups": [], "kb_specs": [], "reasoning": "generic"},
+    )
+    monkeypatch.setattr(
+        answer,
+        "build_agent_runner",
+        lambda **kwargs: captured.update(kwargs) or FakeRunner(),
+    )
+    monkeypatch.setattr(answer.AgentTraceRecorder, "start", lambda self: None)
+
+    list(answer.answer_stream("generic RAG question", [], topic_id="kb-a", knowledge_scope=Scope()))
+
+    assert "knowledge" in captured["tool_groups"]
+    assert captured["knowledge_scope"].allowed_kb_uids == ("kb-a",)
+
+
 def test_answer_stream_forwards_explicit_rag_controls(monkeypatch):
     captured = {}
 

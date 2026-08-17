@@ -1,0 +1,9 @@
+{"type": "trace", "data": {"trace_id": "e0bc7b1f-7c9d-45c1-add6-1d2d40db388f"}}
+{"type": "agent_status", "data": {"label": "analyzing question"}}
+{"type": "tool_call", "data": {"tool": "clarify_user", "query": "你的问题似乎因为编码问题变成了乱码（我只能看到 \"RAG\" 几个字母）。你想了解关于 RAG（检索增强生成）的哪方面内容？"}}
+{"type": "tool_result", "data": {"tool": "clarify_user", "status": "success", "summary": "你的问题似乎因为编码问题变成了乱码（我只能看到 \"RAG\" 几个字母）。你想了解关于 RAG（检索增强生成）的哪方面内容？", "query": "你的问题似乎因为编码问题变成了乱码（我只能看到 \"RAG\" 几个字母）。你想了解关于 RAG（检索增强生成）的哪方面内容？", "latency_ms": 1}}
+{"type": "agent_status", "data": {"label": "generating answer"}}
+{"type": "token", "data": "你的问题似乎因为编码问题变成了乱码，我只能看到 \"RAG\" 几个字母。请通过上方选项告诉我你想了解的内容，或重新输入你的问题。"}
+{"type": "clarify", "data": {"question": "你的问题似乎因为编码问题变成了乱码（我只能看到 \"RAG\" 几个字母）。你想了解关于 RAG（检索增强生成）的哪方面内容？", "options": [{"A": "RAG 的基本概念和工作原理"}, {"B": "我的知识库/资料中关于 RAG 的内容（帮我检索）"}, {"C": "其他具体问题（请重新输入）"}]}}
+{"type": "title", "data": "乱码问题求助"}
+{"type": "done"}
