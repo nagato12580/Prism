@@ -10,7 +10,6 @@ import {
   MessageSquare,
   Moon,
   Network,
-  Search,
   ShieldCheck,
   Sun,
   Waypoints,
@@ -393,20 +392,6 @@ export function MainLayout() {
           >
             <Menu size={18} />
           </button>
-
-          <div className="relative hidden w-full max-w-[440px] lg:block">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              aria-label="全局搜索"
-              placeholder="搜索文档、知识、对话..."
-              className={cn(
-                'h-8 w-full rounded-md border px-9 text-xs outline-none transition',
-                isDark
-                  ? 'border-white/[0.08] bg-white/[0.07] text-slate-200 placeholder:text-slate-500 focus:border-blue-400/60 focus:bg-white/[0.1]'
-                  : 'border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:border-blue-300 focus:bg-white',
-              )}
-            />
-          </div>
 
           <div className="ml-auto flex items-center gap-3">
             <button

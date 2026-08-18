@@ -21,4 +21,6 @@ uploads_data/
 frontend/test-results/
 docs/
 .env.ecs-full
+engine.zip
+output/playwright/
 
