@@ -236,7 +236,7 @@ export function KnowledgeGraphPage({
         loader({
           view: nextView,
           q: nextQuery.trim() || undefined,
-          limit: 300,
+          limit: 120,
         }),
       {
         onStart: () => {

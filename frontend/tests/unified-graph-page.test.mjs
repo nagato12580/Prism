@@ -70,3 +70,14 @@ assert.match(hook, /type: 'click-select',[\s\S]*degree: 1/, 'G6 hook uses single
 assert.match(hook, /ENTITY_COLOR = '#155eef'/, 'G6 hook maps entity nodes to the blue accent.')
 assert.match(hook, /CHUNK_COLOR = '#0f766e'/, 'G6 hook maps chunk nodes to the teal accent.')
 assert.match(hook, /export function formatGraphData/, 'G6 hook exposes a pure data mapper from UnifiedGraph to G6 data.')
+
+// —— 性能优化：控制数据量、省去低价值标签渲染 ——
+assert.match(
+  hook,
+  /d\.data\.type === 'entity' \|\| d\.data\.degree >= 2/,
+  'G6 hook shows node labels only for entities or bridge chunks.',
+)
+assert.doesNotMatch(hook, /labelBackground/, 'G6 hook drops per-edge text labels to cut render cost.')
+assert.match(hook, /iterations: 60/, 'G6 hook lowers d3-force iterations for large graphs.')
+assert.match(hook, /type: node\.type/, 'G6 hook carries node type into G6 data for label gating.')
+assert.match(page, /limit: 120/, 'Knowledge graph page caps the backend entity limit.')

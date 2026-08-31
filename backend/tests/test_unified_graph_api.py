@@ -8,6 +8,26 @@ from backend.app.models import (
     KnowledgeTopic,
     PersonalAssetUnit,
 )
+from backend.app.api.unified_graph import _cap_per_entity
+
+
+def test_cap_per_entity_keeps_top_by_confidence_per_entity():
+    from types import SimpleNamespace
+
+    rows = [
+        SimpleNamespace(entity_id="a", confidence=0.5),
+        SimpleNamespace(entity_id="a", confidence=0.95),
+        SimpleNamespace(entity_id="a", confidence=0.7),
+        SimpleNamespace(entity_id="a", confidence=None),
+        SimpleNamespace(entity_id="b", confidence=0.4),
+    ]
+    capped = _cap_per_entity(rows, lambda row: row.entity_id, 2)
+
+    a_kept = [row.confidence for row in capped if row.entity_id == "a"]
+    b_kept = [row.confidence for row in capped if row.entity_id == "b"]
+    assert a_kept == [0.95, 0.7]
+    assert b_kept == [0.4]
+    assert len(capped) == 3
 
 
 def _seed_unified_entity_graph(db_session):

@@ -25,6 +25,8 @@ from ..services.graph_client import GraphClient
 
 router = APIRouter(prefix="/unified-graph", tags=["unified-graph"])
 DEFAULT_USER_ID = "default-user"
+MAX_SOURCES_PER_ENTITY = 8
+MAX_RELATIONS_PER_ENTITY = 8
 UnifiedGraphView = Literal["entity", "source"]
 
 
@@ -254,6 +256,18 @@ def _build_stats(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, An
     }
 
 
+def _cap_per_entity(rows, entity_id_of, limit):
+    """每个实体按置信度降序截断到 limit 条，避免高频实体把图撑爆。"""
+    buckets: dict[Any, list] = {}
+    for row in rows:
+        buckets.setdefault(entity_id_of(row), []).append(row)
+    capped: list = []
+    for group in buckets.values():
+        group.sort(key=lambda row: row.confidence or 0.0, reverse=True)
+        capped.extend(group[:limit])
+    return capped
+
+
 def _focused_entities(db: Session, actor: ActorContext, q: str | None, limit: int) -> list[KnowledgeEntity]:
     scopes = _active_graph_scopes(db, actor)
     if not scopes:
@@ -344,12 +358,14 @@ def get_unified_graph(
         .order_by(EntityMention.created_at.asc())
         .all()
     )
+    mentions = _cap_per_entity(mentions, lambda mention: mention.entity_id, MAX_SOURCES_PER_ENTITY)
     relations = (
         db.query(EntityRelation)
         .filter(EntityRelation.subject_entity_id.in_(entity_ids))
         .order_by(EntityRelation.created_at.asc())
         .all()
     )
+    relations = _cap_per_entity(relations, lambda relation: relation.subject_entity_id, MAX_RELATIONS_PER_ENTITY)
 
     chunk_by_id, item_by_id, file_by_uid, topic_by_uid, unit_by_id = _source_lookup(db, mentions, user_id=actor.actor_id)
     nodes: dict[str, dict[str, Any]] = {}

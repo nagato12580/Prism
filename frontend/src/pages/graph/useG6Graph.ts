@@ -60,6 +60,7 @@ export function formatGraphData(
       id: String(node.id),
       data: {
         label: node.label ?? String(node.id),
+        type: node.type,
         color: nodeColor(node.type),
         degree: degree.get(node.id) ?? 0,
         original: node,
@@ -89,7 +90,7 @@ const DEFAULT_LAYOUT = {
   alphaDecay: 0.1,
   alphaMin: 0.01,
   velocityDecay: 0.6,
-  iterations: 150,
+  iterations: 60,
   force: {
     center: { x: 0.5, y: 0.5, strength: 0.1 },
     charge: { strength: -400, distanceMax: 600 },
@@ -164,7 +165,10 @@ export function useG6Graph({ containerRef, data, onNodeClick, onCanvasClick }: U
         node: {
           type: 'circle',
           style: {
-            labelText: (d: any) => d.data.label,
+            // 实体始终显示标签；分块节点仅在连接多个实体（degree>=2）时显示，
+            // 否则图会因大量叶子分块标签而卡顿。
+            labelText: (d: any) =>
+              d.data.type === 'entity' || d.data.degree >= 2 ? d.data.label : '',
             labelFill: '#334155',
             labelWordWrap: true,
             labelMaxWidth: '300%',
@@ -178,10 +182,7 @@ export function useG6Graph({ containerRef, data, onNodeClick, onCanvasClick }: U
         edge: {
           type: 'quadratic',
           style: {
-            labelText: (d: any) => d.data.label,
-            labelFill: '#475569',
-            labelBackground: true,
-            labelBackgroundFill: '#f8fafc',
+            // 边标签几乎全是 mentioned_in / 来源证据 等噪音，关掉以降低渲染开销。
             stroke: (d: any) => d.data.color,
             opacity: 0.8,
             lineWidth: 1.2,
