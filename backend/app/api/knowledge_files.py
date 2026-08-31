@@ -7,6 +7,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
+from urllib.parse import quote
 from uuid import uuid4
 
 from backend.app.api.errors import ApiProblem
@@ -384,11 +385,20 @@ def download_file(
 ):
     file_row = _require_file(db, actor, kb_uid, file_uid, capability="read")
     content = _get_storage().read_bytes(file_row.storage_uri)
-    safe_name = file_row.original_filename.replace('"', "")
+    safe_name = (file_row.original_filename or "download").replace('"', "").replace("\\", "")
+    # RFC 6266/5987: emit an ASCII fallback `filename` plus a UTF-8
+    # percent-encoded `filename*` for non-ASCII names. A raw Chinese filename
+    # fails latin-1 header serialisation and makes the download return 500.
+    ascii_name = safe_name.encode("ascii", "ignore").decode("ascii").strip() or "download"
+    encoded_name = quote(safe_name)
     return Response(
         content=content,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+            ),
+        },
     )
 
 

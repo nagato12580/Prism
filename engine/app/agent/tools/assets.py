@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.models.asset import AssetRelation, PersonalAssetItem
 from engine.app.agent.tools.base import ToolContext, ToolSpec, register_tool
 from engine.app.config import settings
+from engine.app.observability import logger, quoted
 
 
 _engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
@@ -409,7 +410,15 @@ register_tool(
 
 
 class CaptureThoughtInput(BaseModel):
-    text: str = Field(..., description="The thought/idea/opinion content to record.")
+    text: str = Field(
+        ...,
+        description=(
+            "The content to record, copied VERBATIM from the user's message — word-for-word and "
+            "exactly as the user wrote it. Do NOT paraphrase, rewrite, summarize, translate, or "
+            "reformat the content. Only remove the explicit recording instruction itself "
+            "(e.g. '帮我记一下', '记下来', '收藏这个', '记录：')."
+        ),
+    )
     title: str | None = Field(None, description="Optional short title.")
 
 
@@ -431,8 +440,8 @@ def _normalize_capture_with_llm(text: str, title: str = "") -> dict[str, Any] | 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            timeout_seconds=8,
-            max_retries=0,
+            timeout_seconds=20,
+            max_retries=1,
         )
         if not raw:
             return None
@@ -458,7 +467,11 @@ def _normalize_capture_with_llm(text: str, title: str = "") -> dict[str, Any] | 
             },
             "rationale": "捕获内容已由 AI 规范化为 Markdown 草稿。",
         }
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[assets] capture_normalize_failed error=%s",
+            quoted(str(exc), limit=200),
+        )
         return None
 
 
@@ -507,7 +520,8 @@ def _build_capture_thought(ctx: ToolContext) -> StructuredTool:
         description=(
             "Record a thought, idea, opinion, snippet, to-do, or resource the user explicitly asks to save. "
             "Creates a pending item that the user confirms later in the review station. "
-            "Use when the user says things like '帮我记一下', '记下来', '收藏这个', '记录：...'."
+            "Use when the user says things like '帮我记一下', '记下来', '收藏这个', '记录：...'. "
+            "Copy the user's content into `text` VERBATIM (word-for-word); never paraphrase or rewrite it."
         ),
         args_schema=CaptureThoughtInput,
     )

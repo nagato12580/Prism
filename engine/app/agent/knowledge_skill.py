@@ -27,7 +27,7 @@ scope is verified server-side and cannot be overridden by arguments.
 - open_kb_document: open a bounded text window of a document by offset or line. Page forward with small windows instead of dumping whole files.
 - get_mindmap: get the mind-map structure of a knowledge base to understand its overall shape before querying.
 - memory_search: auxiliary long-term memory lookup for the user's preferences, goals, constraints, project background, and stable personal context. It is not a knowledge-base evidence source.
-- capture_thought: when the user explicitly asks to record/save a thought, idea, opinion, snippet, to-do, or resource ("帮我记一下…", "记下来", "收藏这个", "记录：…"). Creates a pending item that the user confirms later in the review station. It is a capture tool, not a knowledge-retrieval tool.
+- capture_thought: when the user explicitly asks to record/save a thought, idea, opinion, snippet, to-do, or resource ("帮我记一下…", "记下来", "收藏这个", "记录：…"). Pass the user's content into `text` VERBATIM (word-for-word, exactly as written); never paraphrase or rewrite it. Creates a pending item that the user confirms later in the review station. It is a capture tool, not a knowledge-retrieval tool.
 
 Policy:
 - For uploaded资料, 文档, papers, files, or knowledge-base questions, use query_kb first. Use memory_search only when the user's remembered preferences, goals, constraints, project background, or prior personal context are needed to interpret the answer.
@@ -49,7 +49,7 @@ _RECORD_SKILL_TEMPLATE = """\
 
 You have tools for recording thoughts and managing personal knowledge assets:
 
-- capture_thought: record a thought, idea, opinion, snippet, to-do, or resource. Use when the user explicitly asks to save ("帮我记一下", "记下来", "收藏这个", "记录：…"). Creates a pending item that the user confirms later in the review station.
+- capture_thought: record a thought, idea, opinion, snippet, to-do, or resource. Use when the user explicitly asks to save ("帮我记一下", "记下来", "收藏这个", "记录：…"). Pass the user's content into `text` VERBATIM (word-for-word, exactly as written); never paraphrase or rewrite it. Creates a pending item that the user confirms later in the review station.
 - asset_search: search confirmed personal knowledge assets by multi-term weighted matching (title, tags, category, summary, body).
 - asset_overview: summarize and group confirmed personal assets by category and tags. Use for questions about what the user has saved, recent collection themes, or asset distribution.
 - asset_related: find confirmed assets related to an idea, topic, or existing asset.

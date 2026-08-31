@@ -86,6 +86,7 @@ def test_capture_thought_normalizes_to_markdown(monkeypatch):
     assert payload["status"] == "ok"
     assert payload["llm_normalized"] is True
     row = Session().query(PersonalAssetItem).filter_by(id=payload["item_id"]).one()
+    assert row.raw_text == "下周一要给季度评审准备自动化测试复盘"
     assert row.title == "季度评审准备"
     assert row.asset_kind == "task"
     assert row.rewritten_content == "## 待办\n\n- [ ] 准备季度评审的自动化测试复盘"
@@ -98,3 +99,15 @@ def test_capture_thought_empty_text_returns_error(monkeypatch):
     payload = json.loads(_capture_tool().invoke({"text": "   ", "title": None}))
 
     assert payload["status"] == "error"
+
+
+def test_capture_thought_instructions_require_verbatim_text():
+    from engine.app.agent.knowledge_skill import render_knowledge_skill, render_record_skill
+
+    tool = _capture_tool()
+    field_desc = asset_tools.CaptureThoughtInput.model_fields["text"].description or ""
+
+    assert "VERBATIM" in tool.description
+    assert "VERBATIM" in field_desc
+    assert "VERBATIM" in render_record_skill()
+    assert "VERBATIM" in render_knowledge_skill()

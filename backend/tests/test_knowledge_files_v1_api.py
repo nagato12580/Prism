@@ -195,6 +195,28 @@ def test_preview_and_download_use_public_file_routes(client, file_headers):
     assert "attachment" in download.headers["content-disposition"]
 
 
+def test_download_handles_non_ascii_filename(client, file_headers):
+    created = client.post(
+        "/api/v1/knowledge-bases", headers=file_headers, json={"name": "Unicode KB"}
+    )
+    kb_uid = created.json()["kb_uid"]
+    upload = client.post(
+        f"/api/v1/knowledge-bases/{kb_uid}/files",
+        headers=file_headers,
+        files={"file": ("季度评审准备.md", "# 季度评审\n\n内容".encode("utf-8"), "text/markdown")},
+    )
+    file_uid = upload.json()["file"]["file_uid"]
+
+    download = client.get(
+        f"/api/v1/knowledge-bases/{kb_uid}/files/{file_uid}/download",
+        headers=file_headers,
+    )
+    assert download.status_code == 200
+    assert download.content.decode("utf-8") == "# 季度评审\n\n内容"
+    disposition = download.headers["content-disposition"]
+    assert "filename*=UTF-8''" in disposition
+
+
 def test_preview_prefers_parsed_text_for_binary_documents(client, db_session, file_headers):
     from backend.app.models import KnowledgeFile
 

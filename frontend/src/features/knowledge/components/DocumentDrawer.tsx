@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download, FileText, Loader2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { filesApi, type KnowledgeFile } from '@/features/knowledge/api/files'
 import { knowledgeBaseGraphApi } from '@/features/knowledge/api/graph'
 import { KnowledgeGraphPage as UnifiedGraphBrowser } from '@/pages/KnowledgeGraphPage'
@@ -150,9 +152,13 @@ export function DocumentDrawer({
                 {preview.content.length.toLocaleString()} 个字符。完整内容请下载原文件查看。
               </div>
             ) : null}
-            <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-700">
-              {preview?.content || '（空内容）'}
-            </pre>
+            <div className="markdown-body text-sm leading-relaxed">
+              {preview?.content ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.content}</ReactMarkdown>
+              ) : (
+                <span className="text-slate-400">（空内容）</span>
+              )}
+            </div>
           </div>
         )}
       </div>
