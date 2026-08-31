@@ -82,18 +82,18 @@ def test_extract_entities_for_chunk_llm_failure_preserves_deterministic_candidat
 from engine.app.extraction.stage_a import extract_stage_a_parallel
 
 
-@patch("engine.app.extraction.stage_a.extract_entities_for_chunk")
+@patch("engine.app.extraction.stage_a.LLMGraphExtractor.extract")
 def test_extract_stage_a_parallel_collects_all_chunks(mock_extract):
-    mock_extract.side_effect = lambda text, chunk_id: [EntityCandidate(kind="entity", entity_type="concept", surface_text=chunk_id, confidence=1.0)]
+    mock_extract.side_effect = lambda text, chunk_id="": [EntityCandidate(kind="entity", entity_type="concept", surface_text=chunk_id, confidence=1.0)]
     chunks = [(f"chunk-{i}", f"text {i}") for i in range(5)]
     result = extract_stage_a_parallel(chunks, max_workers=3)
     assert set(result.keys()) == {f"chunk-{i}" for i in range(5)}
     assert mock_extract.call_count == 5
 
 
-@patch("engine.app.extraction.stage_a.extract_entities_for_chunk")
+@patch("engine.app.extraction.stage_a.LLMGraphExtractor.extract")
 def test_extract_stage_a_parallel_isolates_chunk_failure(mock_extract):
-    def fake(text, chunk_id):
+    def fake(text, chunk_id=""):
         if chunk_id == "bad":
             raise RuntimeError("boom")
         return [EntityCandidate(kind="entity", entity_type="concept", surface_text=chunk_id, confidence=1.0)]
@@ -365,3 +365,54 @@ def test_project_item_entities_projects_relation_as_related_to():
         assert ("ScopedEntity", "e1", "RELATED_TO", "ScopedEntity", "e2") in fake.relations
     finally:
         db.close()
+
+
+# --- Step 1/2 additions: prompt split + json_repair + normalize ---
+
+from engine.app.extraction.prompts import ENTITY_TYPE_SCHEMA, build_prompt
+from engine.app.extraction.stage_a import normalize_extraction_result
+
+
+def test_build_prompt_contains_skeleton_and_schema():
+    prompt = build_prompt("some text")
+    for token in ["entity_type", "surface", "tier", "score", "evidence", "EXTRACTED", "INFERRED", "AMBIGUOUS"]:
+        assert token in prompt
+    assert "concept/term/method" in prompt  # schema enum is inlined
+    assert "some text" in prompt
+
+
+def test_parse_stage_a_json_tolerates_trailing_comma():
+    raw = '{"entities":[{"entity_type":"concept","surface":"混合检索","tier":"EXTRACTED","score":1.0,"evidence":"e"},]}'
+    result = parse_stage_a_json(raw)
+    assert len(result) == 1
+    assert result[0]["surface"] == "混合检索"
+
+
+def test_normalize_extraction_result_dedups_entities_and_keeps_max_confidence():
+    entities = [
+        {"entity_type": "concept", "surface": "混合检索", "tier": "INFERRED", "score": 0.85, "evidence": "a"},
+        {"entity_type": "concept", "surface": "混合检索", "tier": "EXTRACTED", "score": 1.0, "evidence": "b"},
+    ]
+    candidates = normalize_extraction_result(entities, [])
+    entity_candidates = [c for c in candidates if c.kind == "entity"]
+    assert len(entity_candidates) == 1
+    assert entity_candidates[0].confidence == 1.0
+    assert "a" in entity_candidates[0].evidence_span
+    assert "b" in entity_candidates[0].evidence_span
+
+
+def test_normalize_extraction_result_dedups_relations():
+    relations = [
+        {"subject": "a", "predicate": "uses", "object": "b", "tier": "INFERRED", "score": 0.85},
+        {"subject": "a", "predicate": "uses", "object": "b", "tier": "INFERRED", "score": 0.75},
+    ]
+    candidates = normalize_extraction_result([], relations)
+    relation_candidates = [c for c in candidates if c.kind == "relation"]
+    assert len(relation_candidates) == 1
+
+
+@patch("engine.app.extraction.stage_a.chat")
+def test_extract_entities_for_chunk_empty_text_returns_empty(mock_chat):
+    assert extract_entities_for_chunk("") == []
+    assert extract_entities_for_chunk("   ") == []
+    assert not mock_chat.called
