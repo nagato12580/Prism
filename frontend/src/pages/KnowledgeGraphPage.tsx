@@ -1,4 +1,4 @@
-import React, { type PointerEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronUp,
@@ -30,33 +30,9 @@ import {
 } from '@/app/graphrag'
 import { createLatestRequestRunner } from '@/app/latestRequest'
 import { cn } from '@/lib/utils'
+import { formatGraphData, useG6Graph } from './graph/useG6Graph'
 
-type PositionedNode = UnifiedGraphNode & { x: number; y: number }
-type PositionMap = Record<string, { x: number; y: number }>
-type PinnedState = Record<string, boolean>
-type DragState = { id: string; dx: number; dy: number; originX: number; originY: number; moved: boolean } | null
-type PanState = { startX: number; startY: number; originPanX: number; originPanY: number } | null
-type DistanceTier = 'focus' | 'near' | 'mid' | 'far' | 'dim'
-
-const minGraphWidth = 1180
-const minGraphHeight = 720
-const graphNodeClampPadding = 44
-const maxNodeVisualExtent = 33
-const minGraphZoom = 0.55
-const maxGraphZoom = 1.8
-const graphZoomStep = 0.15
-const scatterPaddingX = graphNodeClampPadding
-const scatterPaddingY = graphNodeClampPadding
-const scatterMinSpacing = 180
-const scatterIdealEdgeLength = 228
-const scatterRepelStrength = 18
-const scatterAttractStrength = 0.018
-const scatterRelaxationPasses = 60
-const dragThreshold = 3
 const maxExplorerDepth = 3
-const defaultVisibleSeedLimit = 4
-const defaultVisibleSeedNeighborDepth = 1
-const defaultVisibleSeedMinNodeCount = 12
 const inspectorTitleMaxLength = 72
 const floatingSurfaceMotionClass = 'transition-[transform,opacity,box-shadow] duration-200 ease-out'
 const graphControlFocusClass =
@@ -115,18 +91,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function positionKey(view: UnifiedGraphView, nodeId: string) {
-  return `${view}:${nodeId}`
-}
-
-function clampScatterPoint(point: { x: number; y: number }, width: number, height: number) {
-  const pad = scatterPaddingX + maxNodeVisualExtent
-  return {
-    x: clamp(point.x, pad, width - pad),
-    y: clamp(point.y, pad, height - pad),
-  }
-}
-
 function compareNodeIdentity(a: UnifiedGraphNode, b: UnifiedGraphNode) {
   const labelOrder = (a.label || '').localeCompare(b.label || '', 'zh-Hans-CN')
   if (labelOrder !== 0) return labelOrder
@@ -172,323 +136,8 @@ function buildFocusDistanceMap(nodes: UnifiedGraphNode[], edges: UnifiedGraphEdg
   return distances
 }
 
-function buildSeedDistanceMap(nodes: UnifiedGraphNode[], edges: UnifiedGraphEdge[], rootIds: string[]) {
-  const distances = new Map<string, number>()
-  if (!rootIds.length) return distances
-
-  const adjacency = buildAdjacency(nodes, edges)
-  const queue: string[] = []
-
-  rootIds.forEach((rootId) => {
-    if (!adjacency.has(rootId) || distances.has(rootId)) return
-    distances.set(rootId, 0)
-    queue.push(rootId)
-  })
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const currentId = queue[index]
-    const currentDistance = distances.get(currentId)
-    if (typeof currentDistance !== 'number') continue
-
-    ;(adjacency.get(currentId) ?? []).forEach((neighborId) => {
-      const nextDistance = currentDistance + 1
-      const seenDistance = distances.get(neighborId)
-      if (typeof seenDistance === 'number' && seenDistance <= nextDistance) return
-      distances.set(neighborId, nextDistance)
-      queue.push(neighborId)
-    })
-  }
-
-  return distances
-}
-
-function selectDefaultVisibleNodeIds(
-  nodes: UnifiedGraphNode[],
-  edges: UnifiedGraphEdge[],
-  {
-    seedLimit = defaultVisibleSeedLimit,
-    neighborDepth = defaultVisibleSeedNeighborDepth,
-    minNodeCount = defaultVisibleSeedMinNodeCount,
-  }: {
-    seedLimit?: number
-    neighborDepth?: number
-    minNodeCount?: number
-  } = {},
-) {
-  const allIds = new Set(nodes.map((node) => node.id))
-  if (nodes.length <= minNodeCount) return allIds
-
-  const adjacency = buildAdjacency(nodes, edges)
-  const rankedSeeds = nodes
-    .slice()
-    .sort((a, b) => {
-      const degreeOrder = (adjacency.get(b.id)?.length ?? 0) - (adjacency.get(a.id)?.length ?? 0)
-      if (degreeOrder !== 0) return degreeOrder
-      if (a.type === 'entity' && b.type !== 'entity') return -1
-      if (a.type !== 'entity' && b.type === 'entity') return 1
-      return compareNodeIdentity(a, b)
-    })
-    .slice(0, seedLimit)
-
-  const visible = new Set<string>(rankedSeeds.map((node) => node.id))
-  const queue = rankedSeeds.map((node) => ({ id: node.id, depth: 0 }))
-  const seen = new Set<string>(visible)
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const current = queue[index]
-    if (current.depth >= neighborDepth) continue
-    ;(adjacency.get(current.id) ?? []).forEach((neighborId) => {
-      if (seen.has(neighborId)) return
-      seen.add(neighborId)
-      visible.add(neighborId)
-      queue.push({ id: neighborId, depth: current.depth + 1 })
-    })
-  }
-
-  return visible.size ? visible : allIds
-}
-
-function distanceTier(distance: number | undefined, focusDepth: number): DistanceTier {
-  if (distance === 0) return 'focus'
-  if (distance === 1) return 'near'
-  if (typeof distance !== 'number') return 'dim'
-  if (distance <= focusDepth) return 'mid'
-  if (distance === focusDepth + 1) return 'far'
-  return 'dim'
-}
-
-function edgeDistanceTier(
-  sourceDistance: number | undefined,
-  targetDistance: number | undefined,
-  focusDepth: number,
-): DistanceTier {
-  if (typeof sourceDistance !== 'number' && typeof targetDistance !== 'number') return 'dim'
-
-  const nearest = Math.min(sourceDistance ?? Number.POSITIVE_INFINITY, targetDistance ?? Number.POSITIVE_INFINITY)
-  const farthest = Math.max(sourceDistance ?? Number.POSITIVE_INFINITY, targetDistance ?? Number.POSITIVE_INFINITY)
-
-  if (nearest === 0 && farthest <= 1) return 'focus'
-  if (farthest <= 1) return 'near'
-  if (farthest <= focusDepth) return 'mid'
-  if (nearest <= focusDepth && farthest === focusDepth + 1) return 'far'
-  return 'dim'
-}
-
-function tierOpacity(tier: DistanceTier) {
-  switch (tier) {
-    case 'focus':
-      return 1
-    case 'near':
-      return 0.98
-    case 'mid':
-      return 0.88
-    case 'far':
-      return 0.62
-    default:
-      return 0.3
-  }
-}
-
-function tierWeight(tier: DistanceTier) {
-  switch (tier) {
-    case 'focus':
-      return 5
-    case 'near':
-      return 4
-    case 'mid':
-      return 3
-    case 'far':
-      return 2
-    default:
-      return 1
-  }
-}
-
 function distanceLabel(distance: number) {
   return distance === 1 ? '1 跳' : `${distance} 跳`
-}
-
-function seededScatterPoint(index: number, count: number, width: number, height: number) {
-  if (count <= 1) {
-    return { x: width / 2, y: height / 2 }
-  }
-
-  const angle = index * 2.399963229728653
-  const radius = Math.sqrt((index + 0.5) / Math.max(1, count))
-  const usableWidth = width - scatterPaddingX * 2
-  const usableHeight = height - scatterPaddingY * 2
-
-  return clampScatterPoint({
-    x: width / 2 + Math.cos(angle) * radius * (usableWidth / 2),
-    y: height / 2 + Math.sin(angle) * radius * (usableHeight / 2),
-  }, width, height)
-}
-
-function relaxScatterLayout(
-  points: Array<{ id: string; x: number; y: number; pinned: boolean }>,
-  edges: UnifiedGraphEdge[],
-  width: number,
-  height: number,
-) {
-  const relaxed = points.map((point) => ({ ...clampScatterPoint(point, width, height), pinned: point.pinned, id: point.id }))
-  const indexById = new Map(relaxed.map((point, index) => [point.id, index]))
-
-  for (let pass = 0; pass < scatterRelaxationPasses; pass += 1) {
-    for (let sourceIndex = 0; sourceIndex < relaxed.length; sourceIndex += 1) {
-      for (let targetIndex = sourceIndex + 1; targetIndex < relaxed.length; targetIndex += 1) {
-        const source = relaxed[sourceIndex]
-        const target = relaxed[targetIndex]
-        let dx = target.x - source.x
-        let dy = target.y - source.y
-        let distanceSquared = dx * dx + dy * dy
-
-        if (distanceSquared >= scatterMinSpacing * scatterMinSpacing) continue
-
-        if (distanceSquared < 1) {
-          const angle = (sourceIndex + 1) * 1.618 + (targetIndex + 1) * 0.618
-          dx = Math.cos(angle)
-          dy = Math.sin(angle)
-          distanceSquared = dx * dx + dy * dy
-        }
-
-        const distance = Math.sqrt(distanceSquared)
-        const overlap = (scatterMinSpacing - distance) / scatterMinSpacing
-        const pushX = (dx / distance) * overlap * scatterRepelStrength
-        const pushY = (dy / distance) * overlap * scatterRepelStrength
-
-        if (!source.pinned && !target.pinned) {
-          source.x -= pushX / 2
-          source.y -= pushY / 2
-          target.x += pushX / 2
-          target.y += pushY / 2
-        } else if (source.pinned && !target.pinned) {
-          target.x += pushX
-          target.y += pushY
-        } else if (!source.pinned && target.pinned) {
-          source.x -= pushX
-          source.y -= pushY
-        }
-      }
-    }
-
-    edges.forEach((edge) => {
-      const sourceIndex = indexById.get(edge.source)
-      const targetIndex = indexById.get(edge.target)
-      if (sourceIndex === undefined || targetIndex === undefined) return
-
-      const source = relaxed[sourceIndex]
-      const target = relaxed[targetIndex]
-      const dx = target.x - source.x
-      const dy = target.y - source.y
-      const distance = Math.max(1, Math.hypot(dx, dy))
-      if (distance <= scatterIdealEdgeLength) return
-
-      const pull = Math.min(10, (distance - scatterIdealEdgeLength) * scatterAttractStrength)
-      const pullX = (dx / distance) * pull
-      const pullY = (dy / distance) * pull
-
-      if (!source.pinned && !target.pinned) {
-        source.x += pullX / 2
-        source.y += pullY / 2
-        target.x -= pullX / 2
-        target.y -= pullY / 2
-      } else if (source.pinned && !target.pinned) {
-        target.x -= pullX
-        target.y -= pullY
-      } else if (!source.pinned && target.pinned) {
-        source.x += pullX
-        source.y += pullY
-      }
-    })
-
-    relaxed.forEach((point) => {
-      if (!point.pinned) {
-        point.x += (width / 2 - point.x) * 0.012
-        point.y += (height / 2 - point.y) * 0.012
-      }
-      const clamped = clampScatterPoint(point, width, height)
-      point.x = clamped.x
-      point.y = clamped.y
-    })
-  }
-
-  return relaxed
-}
-
-function solveFreeScatterLayout(
-  nodes: UnifiedGraphNode[],
-  edges: UnifiedGraphEdge[],
-  view: UnifiedGraphView,
-  pinned: PinnedState,
-  current: PositionMap,
-  width: number,
-  height: number,
-): PositionMap {
-  const adjacency = buildAdjacency(nodes, edges)
-  const ordered = nodes.slice().sort((a, b) => {
-    const degreeOrder = (adjacency.get(b.id)?.length ?? 0) - (adjacency.get(a.id)?.length ?? 0)
-    if (degreeOrder !== 0) return degreeOrder
-    return compareNodeIdentity(a, b)
-  })
-
-  const floatingNodes = ordered.filter((node) => {
-    const key = positionKey(view, node.id)
-    return !(pinned[key] && current[key])
-  })
-  const seededById = new Map(
-    floatingNodes.map((node, index) => [node.id, seededScatterPoint(index, floatingNodes.length, width, height)] as const),
-  )
-  const relaxed = relaxScatterLayout(
-    ordered.map((node) => {
-      const key = positionKey(view, node.id)
-      const pinnedPoint = pinned[key] ? current[key] : undefined
-      const seededPoint = seededById.get(node.id) ?? { x: width / 2, y: height / 2 }
-      const point = pinnedPoint ? clampScatterPoint(pinnedPoint, width, height) : seededPoint
-      return {
-        id: node.id,
-        x: point.x,
-        y: point.y,
-        pinned: Boolean(pinnedPoint),
-      }
-    }),
-    edges,
-    width,
-    height,
-  )
-
-  return relaxed.reduce((acc, point) => {
-    acc[positionKey(view, point.id)] = { x: point.x, y: point.y }
-    return acc
-  }, {} as PositionMap)
-}
-
-function mergeSolvedPositions(
-  nodes: UnifiedGraphNode[],
-  edges: UnifiedGraphEdge[],
-  current: PositionMap,
-  pinned: PinnedState,
-  view: UnifiedGraphView,
-  width: number,
-  height: number,
-): PositionMap {
-  const solved = solveFreeScatterLayout(nodes, edges, view, pinned, current, width, height)
-  return nodes.reduce((acc, node) => {
-    const key = positionKey(view, node.id)
-    acc[key] = solved[key] ?? current[key] ?? { x: width / 2, y: height / 2 }
-    return acc
-  }, {} as PositionMap)
-}
-
-function pickLayoutDimensions(nodes: UnifiedGraphNode[], positions: PositionMap, view: UnifiedGraphView) {
-  const positioned = nodes
-    .map((n) => positions[positionKey(view, n.id)])
-    .filter((p): p is { x: number; y: number } => Boolean(p))
-  return computeNodesBounds(positioned, scatterPaddingX)
-}
-
-function omitViewEntries<T>(record: Record<string, T>, view: UnifiedGraphView) {
-  const prefix = `${view}:`
-  return Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith(prefix))) as Record<string, T>
 }
 
 function nodeContent(node: UnifiedGraphNode) {
@@ -539,175 +188,12 @@ function edgeDescription(edge: UnifiedGraphEdge) {
   }
 }
 
-function edgeStyle(edge: UnifiedGraphEdge, tier: DistanceTier) {
-  const focused = tier === 'focus'
-  const strong = tier === 'near'
-  const medium = tier === 'mid'
-  const faded = tier === 'far'
-
-  if (edge.type === 'related_to' || edge.type === 'co_occurs_with') {
-    return {
-      stroke: focused ? '#5776a5' : strong ? '#708ab5' : medium ? '#9fb5d0' : faded ? '#d5dfeb' : '#e9eff6',
-      strokeWidth: focused ? 2.1 : strong ? 1.7 : medium ? 1.2 : faded ? 0.95 : 0.78,
-      strokeDasharray: undefined,
-      opacity: focused ? 0.74 : strong ? 0.56 : medium ? 0.28 : faded ? 0.14 : 0.08,
-    }
-  }
-
-  if (edge.type === 'shares_entity_with') {
-    return {
-      stroke: focused ? '#9b5c7e' : strong ? '#b27798' : medium ? '#cfacc1' : faded ? '#ead7e1' : '#f5edf1',
-      strokeWidth: focused ? 1.95 : strong ? 1.55 : medium ? 1.15 : faded ? 0.92 : 0.78,
-      strokeDasharray: '7 6',
-      opacity: focused ? 0.7 : strong ? 0.5 : medium ? 0.24 : faded ? 0.12 : 0.07,
-    }
-  }
-
-  return {
-    stroke: focused ? '#4f847f' : strong ? '#699893' : medium ? '#9ec0bb' : faded ? '#d8e7e4' : '#edf4f2',
-    strokeWidth: focused ? 1.9 : strong ? 1.5 : medium ? 1.1 : faded ? 0.9 : 0.76,
-    strokeDasharray: undefined,
-    opacity: focused ? 0.7 : strong ? 0.5 : medium ? 0.24 : faded ? 0.12 : 0.07,
-  }
-}
-
-function nodeScale(tier: DistanceTier, active: boolean, focusRoot: boolean) {
-  if (active) return 1.08
-  if (focusRoot) return 1.05
-  switch (tier) {
-    case 'near':
-      return 1.01
-    case 'mid':
-      return 0.98
-    case 'far':
-      return 0.95
-    case 'dim':
-      return 0.93
-    default:
-      return 1
-  }
-}
-
-function nodeVisualRadiusForTier(tier: DistanceTier, active: boolean, focusRoot: boolean) {
-  if (active || focusRoot) return 26
-  if (tier === 'near') return 22
-  if (tier === 'mid') return 19
-  if (tier === 'far') return 17
-  return 15
-}
-
-function edgeAnchorRadius(tier: DistanceTier, active: boolean, focusRoot: boolean) {
-  return nodeVisualRadiusForTier(tier, active, focusRoot) * nodeScale(tier, active, focusRoot)
-}
-
-function nodeDetachedLabelHitArea({
-  nodeHitRadius,
-  primaryLabelLength,
-  showPrimaryLabel,
-  showMetaLabel,
-  primaryLabelY,
-  metaLabelY,
-}: {
-  nodeHitRadius: number
-  primaryLabelLength: number
-  showPrimaryLabel: boolean
-  showMetaLabel: boolean
-  primaryLabelY: number
-  metaLabelY: number
-}) {
-  if (!showPrimaryLabel && !showMetaLabel) {
-    return {
-      enabled: false,
-      x: -nodeHitRadius,
-      y: -nodeHitRadius,
-      width: nodeHitRadius * 2,
-      height: nodeHitRadius * 2,
-    }
-  }
-
-  const primaryFontSize = showMetaLabel ? 10 : 11
-  const metaFontSize = 8
-  const primaryHorizontalPadding = showMetaLabel ? 26 : 22
-  const primaryLabelWidth = showPrimaryLabel ? primaryLabelLength * primaryFontSize + primaryHorizontalPadding : 0
-  const metaLabelWidth = showMetaLabel ? metaFontSize * 8 + 20 : 0
-  const labelWidth = Math.max(primaryLabelWidth, metaLabelWidth)
-  const width = Math.max(nodeHitRadius * 2, labelWidth)
-  const labelTop = showPrimaryLabel ? primaryLabelY - primaryFontSize : metaLabelY - metaFontSize
-  const labelBottom = showMetaLabel ? metaLabelY + 10 : primaryLabelY + 10
-  const top = Math.min(-nodeHitRadius, labelTop - 12)
-  const bottom = Math.max(nodeHitRadius, labelBottom)
-
-  return {
-    enabled: true,
-    x: -width / 2,
-    y: top,
-    width,
-    height: bottom - top,
-  }
-}
-
-function nodeShadow(tier: DistanceTier, active: boolean, focusRoot: boolean) {
-  if (active) return 'drop-shadow(0 10px 20px rgb(148 163 184 / 0.18))'
-  if (focusRoot) return 'drop-shadow(0 8px 16px rgb(148 163 184 / 0.14))'
-  if (tier === 'near') return 'drop-shadow(0 6px 12px rgb(148 163 184 / 0.12))'
-  if (tier === 'mid') return 'drop-shadow(0 4px 8px rgb(148 163 184 / 0.08))'
-  return undefined
-}
-
-function svgPoint(svg: SVGSVGElement, event: PointerEvent<SVGSVGElement>) {
-  const point = svg.createSVGPoint()
-  point.x = event.clientX
-  point.y = event.clientY
-  return point.matrixTransform(svg.getScreenCTM()?.inverse())
-}
-
 function formatConfidence(value?: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '-'
 }
 
 function countFor(payload: UnifiedGraphPayload | null, type: UnifiedGraphNodeType) {
   return payload?.stats.node_counts[type] ?? 0
-}
-
-function graphNodeAriaLabel(node: UnifiedGraphNode, metaLabel: string, active: boolean, focusRoot: boolean) {
-  const states = [metaLabel]
-  if (focusRoot) states.push('当前焦点')
-  if (active) states.push('当前选中')
-  return `图节点 ${node.label}，状态：${states.join('、')}`
-}
-
-function computeNodesBounds(nodes: Array<{ x: number; y: number }>, padding: number) {
-  if (!nodes.length) {
-    return { minX: 0, minY: 0, maxX: minGraphWidth, maxY: minGraphHeight, width: minGraphWidth, height: minGraphHeight }
-  }
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  nodes.forEach((n) => {
-    if (n.x < minX) minX = n.x
-    if (n.y < minY) minY = n.y
-    if (n.x > maxX) maxX = n.x
-    if (n.y > maxY) maxY = n.y
-  })
-  const padX = padding + maxNodeVisualExtent + 60
-  const padY = padding + maxNodeVisualExtent + 80
-  const rawW = maxX - minX + padX * 2
-  const rawH = maxY - minY + padY * 2
-  const width = Math.max(minGraphWidth, rawW)
-  const height = Math.max(minGraphHeight, rawH)
-  const cx = (minX + maxX) / 2
-  const cy = (minY + maxY) / 2
-  const halfW = width / 2
-  const halfH = height / 2
-  return {
-    minX: cx - halfW,
-    minY: cy - halfH,
-    maxX: cx + halfW,
-    maxY: cy + halfH,
-    width,
-    height,
-  }
 }
 
 type KnowledgeGraphPageProps = {
@@ -728,86 +214,21 @@ export function KnowledgeGraphPage({
   loader = unifiedGraphApi.get,
   className,
 }: KnowledgeGraphPageProps) {
-  const initialView = initialGraphView(initialPayload)
-  const svgRef = useRef<SVGSVGElement | null>(null)
-  const graphContainerRef = useRef<HTMLDivElement | null>(null)
-  const [graphContainerWidth, setGraphContainerWidth] = useState(minGraphWidth)
-  const [graphContainerHeight, setGraphContainerHeight] = useState(minGraphHeight)
-  const didDragRef = useRef(false)
-  const hasEverFittedRef = useRef(false)
-  const justDraggedRef = useRef(false)
-  const justDraggedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pinnedRef = useRef<PinnedState>({})
+  const canvasRef = useRef<HTMLDivElement | null>(null)
   const skipInitialLoadRef = useRef(Boolean(initialPayload))
   const loadRunnerRef = useRef(createLatestRequestRunner())
   const [payload, setPayload] = useState<UnifiedGraphPayload | null>(initialPayload)
-  const [positions, setPositions] = useState<PositionMap>(() =>
-    initialPayload
-      ? mergeSolvedPositions(
-          initialPayload.nodes,
-          initialPayload.edges,
-          {},
-          {},
-          initialView,
-          Math.max(minGraphWidth, graphContainerWidth || minGraphWidth),
-          Math.max(minGraphHeight, graphContainerHeight || minGraphHeight),
-        )
-      : {},
-  )
-  const [pinned, setPinned] = useState<PinnedState>({})
   const [query, setQuery] = useState(() => initialPayload?.focus?.query ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
   const [focusRootId, setFocusRootId] = useState<string | null>(initialSelectedId)
   const [focusDepth, setFocusDepth] = useState(1)
-  const [view, setView] = useState<UnifiedGraphView>(() => initialPayload?.focus?.view ?? initialPayload?.view ?? 'entity')
-  const [graphZoom, setGraphZoom] = useState(1)
-  const [dragging, setDragging] = useState<DragState>(null)
-  const [panning, setPanning] = useState<PanState>(null)
-  const [panX, setPanX] = useState(0)
-  const [panY, setPanY] = useState(0)
-  const draggingRef = useRef<DragState>(null)
-  const panningRef = useRef<PanState>(null)
-  const panXRef = useRef(0)
-  const panYRef = useRef(0)
-
-  useEffect(() => { draggingRef.current = dragging }, [dragging])
-  useEffect(() => { panningRef.current = panning }, [panning])
-  useEffect(() => { panXRef.current = panX }, [panX])
-  useEffect(() => { panYRef.current = panY }, [panY])
+  const [view, setView] = useState<UnifiedGraphView>(() => initialGraphView(initialPayload))
   const [typeFilter, setTypeFilter] = useState<Set<UnifiedGraphNodeType>>(
     () => new Set<UnifiedGraphNodeType>(['entity', 'document_chunk']),
   )
   const [showFilterMenu, setShowFilterMenu] = useState(false)
-
-  useEffect(() => {
-    pinnedRef.current = pinned
-  }, [pinned])
-
-  useEffect(() => {
-    return () => {
-      if (justDraggedTimerRef.current) {
-        clearTimeout(justDraggedTimerRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    const el = graphContainerRef.current
-    if (!el) return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) {
-        setGraphContainerWidth(entry.contentRect.width)
-        setGraphContainerHeight(entry.contentRect.height)
-      }
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
-  const layoutWidth = Math.max(minGraphWidth, graphContainerWidth)
-  const layoutHeight = Math.max(minGraphHeight, graphContainerHeight)
 
   const loadGraph = async (nextView: UnifiedGraphView = view, nextQuery: string = query) => {
     await loadRunnerRef.current.run(
@@ -824,23 +245,6 @@ export function KnowledgeGraphPage({
         },
         onSuccess: (data) => {
           setPayload(data)
-          setPositions((current) => {
-            const dims = pickLayoutDimensions(data.nodes, current, nextView)
-            const w = Math.max(dims.width, graphContainerWidth, minGraphWidth)
-            const h = Math.max(dims.height, graphContainerHeight, minGraphHeight)
-            return {
-              ...current,
-              ...mergeSolvedPositions(
-                data.nodes,
-                data.edges,
-                current,
-                pinnedRef.current,
-                nextView,
-                w,
-                h,
-              ),
-            }
-          })
           setSelectedId((current) => {
             if (current && data.nodes.some((node) => node.id === current)) return current
             return null
@@ -865,14 +269,7 @@ export function KnowledgeGraphPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view])
 
-  const nodes = useMemo<PositionedNode[]>(
-    () =>
-      (payload?.nodes ?? []).map((node) => ({
-        ...node,
-        ...(positions[positionKey(view, node.id)] ?? { x: layoutWidth / 2, y: layoutHeight / 2 }),
-      })),
-    [payload?.nodes, positions, view, layoutWidth, layoutHeight],
-  )
+  const nodes = useMemo<UnifiedGraphNode[]>(() => payload?.nodes ?? [], [payload?.nodes])
 
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node] as const)), [nodes])
   const selected = selectedId ? nodeById.get(selectedId) ?? null : null
@@ -929,19 +326,6 @@ export function KnowledgeGraphPage({
     () => buildFocusDistanceMap(payload?.nodes ?? [], payload?.edges ?? [], focusRoot?.id ?? null),
     [focusRoot?.id, payload?.edges, payload?.nodes],
   )
-  const defaultVisibleNodeIds = useMemo(
-    () => selectDefaultVisibleNodeIds(payload?.nodes ?? [], payload?.edges ?? []),
-    [payload?.edges, payload?.nodes],
-  )
-  const defaultSeedDistances = useMemo(
-    () => buildSeedDistanceMap(payload?.nodes ?? [], payload?.edges ?? [], Array.from(defaultVisibleNodeIds)),
-    [defaultVisibleNodeIds, payload?.edges, payload?.nodes],
-  )
-  const visibleNodeIds = useMemo(() => {
-    if (focusRoot?.id || selected?.id) return null
-    return defaultVisibleNodeIds
-  }, [defaultVisibleNodeIds, focusRoot?.id, selected?.id])
-  const activeDistances = focusRoot?.id ? focusDistances : defaultSeedDistances
   const maxFocusDistance = useMemo(
     () => Array.from(focusDistances.values()).reduce((max, distance) => Math.max(max, distance), 1),
     [focusDistances],
@@ -964,53 +348,13 @@ export function KnowledgeGraphPage({
         }),
     [focusDepth, focusDistances, nodes],
   )
-  const nodeTiers = useMemo(
-    () => new Map(nodes.map((node) => [node.id, distanceTier(activeDistances.get(node.id), focusDepth)] as const)),
-    [activeDistances, focusDepth, nodes],
-  )
-  const renderedNodes = useMemo(
-    () =>
-      nodes
-        .filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id))
-        .filter((node) => typeFilter.has(node.type))
-        .slice()
-        .sort((a, b) => {
-          const tierOrder = tierWeight(nodeTiers.get(a.id) ?? 'dim') - tierWeight(nodeTiers.get(b.id) ?? 'dim')
-          if (tierOrder !== 0) return tierOrder
-          if (selected?.id === a.id) return 1
-          if (selected?.id === b.id) return -1
-          if (focusRoot?.id === a.id) return 1
-          if (focusRoot?.id === b.id) return -1
-          return compareNodeIdentity(a, b)
-        }),
-    [focusRoot?.id, nodeTiers, nodes, selected?.id, visibleNodeIds, typeFilter],
-  )
-  const renderedEdges = useMemo(
-    () =>
-      (payload?.edges ?? [])
-        .filter((edge) => !visibleNodeIds || (visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)))
-        .filter((edge) => {
-          const source = nodeById.get(edge.source)
-          const target = nodeById.get(edge.target)
-          return source && target && typeFilter.has(source.type) && typeFilter.has(target.type)
-        })
-        .map((edge) => {
-          let tier = edgeDistanceTier(activeDistances.get(edge.source), activeDistances.get(edge.target), focusDepth)
-          if (tier === 'dim' && selected?.id && (selected.id === edge.source || selected.id === edge.target)) {
-            tier = 'far'
-          }
-          return { edge, tier }
-        })
-        .sort((a, b) => tierWeight(a.tier) - tierWeight(b.tier)),
-    [activeDistances, focusDepth, payload?.edges, selected?.id, visibleNodeIds, typeFilter, nodeById],
-  )
   const selectedEdges = useMemo(
     () => (payload?.edges ?? []).filter((edge) => edge.source === selected?.id || edge.target === selected?.id),
     [payload?.edges, selected?.id],
   )
   const relatedNodes = useMemo(
     () => {
-      const deduped = new Map<string, PositionedNode>()
+      const deduped = new Map<string, UnifiedGraphNode>()
       selectedEdges.forEach((edge) => {
         const otherId = edge.source === selected?.id ? edge.target : edge.source
         const otherNode = nodeById.get(otherId)
@@ -1022,14 +366,16 @@ export function KnowledgeGraphPage({
     [nodeById, selected?.id, selectedEdges],
   )
 
-  const graphBounds = useMemo(
-    () => computeNodesBounds(renderedNodes, scatterPaddingX),
-    [renderedNodes],
+  const graphData = useMemo(
+    () => formatGraphData(payload?.nodes ?? [], payload?.edges ?? [], typeFilter),
+    [payload?.edges, payload?.nodes, typeFilter],
   )
-  const graphWidth = graphBounds.width
-  const graphHeight = graphBounds.height
-  const graphViewMinX = graphBounds.minX
-  const graphViewMinY = graphBounds.minY
+  const { fitView, zoomIn, zoomOut, relayout } = useG6Graph({
+    containerRef: canvasRef,
+    data: graphData,
+    onNodeClick: inspectNode,
+    onCanvasClick: closeInspector,
+  })
 
   const toggleTypeFilter = (type: UnifiedGraphNodeType) => {
     setTypeFilter((prev) => {
@@ -1043,194 +389,6 @@ export function KnowledgeGraphPage({
     })
   }
 
-  const setZoom = (nextZoom: number) => {
-    setGraphZoom(clamp(Number(nextZoom.toFixed(2)), minGraphZoom, maxGraphZoom))
-  }
-
-  const zoomIn = () => setZoom(graphZoom + graphZoomStep)
-  const zoomOut = () => setZoom(graphZoom - graphZoomStep)
-  const applyFitToContainer = (bounds: { width: number; height: number; minX: number; minY: number }) => {
-    const cw = graphContainerWidth
-    const ch = graphContainerHeight
-    if (bounds.width <= 0 || bounds.height <= 0 || cw <= 0 || ch <= 0) {
-      setGraphZoom(1)
-      panXRef.current = 0
-      panYRef.current = 0
-      setPanX(0)
-      setPanY(0)
-      return
-    }
-    const pad = 64
-    const scaleX = (cw - pad * 2) / bounds.width
-    const scaleY = (ch - pad * 2) / bounds.height
-    const fitZoom = clamp(Math.min(scaleX, scaleY), minGraphZoom, maxGraphZoom)
-    const contentCenterX = bounds.minX + bounds.width / 2
-    const contentCenterY = bounds.minY + bounds.height / 2
-    const fitPanX = contentCenterX * (1 - fitZoom)
-    const fitPanY = contentCenterY * (1 - fitZoom)
-    setGraphZoom(fitZoom)
-    panXRef.current = fitPanX
-    panYRef.current = fitPanY
-    setPanX(fitPanX)
-    setPanY(fitPanY)
-  }
-
-  const fitGraph = () => {
-    if (!renderedNodes.length) {
-      setGraphZoom(1)
-      panXRef.current = 0
-      panYRef.current = 0
-      setPanX(0)
-      setPanY(0)
-      return
-    }
-    applyFitToContainer(graphBounds)
-  }
-  const resetScatterLayout = () => {
-    if (!payload) return
-
-    const nextPinned = omitViewEntries(pinnedRef.current, view)
-    pinnedRef.current = nextPinned
-    setPinned(nextPinned)
-    const w = Math.max(graphContainerWidth, minGraphWidth)
-    const h = Math.max(graphContainerHeight, minGraphHeight)
-    setPositions((current) => {
-      const nextPositions = omitViewEntries(current, view)
-      return {
-        ...nextPositions,
-        ...mergeSolvedPositions(payload.nodes, payload.edges, nextPositions, nextPinned, view, w, h),
-      }
-    })
-    setGraphZoom(1)
-    panXRef.current = 0
-    panYRef.current = 0
-    setPanX(0)
-    setPanY(0)
-    hasEverFittedRef.current = false
-  }
-
-  const applyFitToContainerRef = useRef(applyFitToContainer)
-  applyFitToContainerRef.current = applyFitToContainer
-
-  useEffect(() => {
-    if (!payload || !renderedNodes.length) return
-    const cw = graphContainerWidth
-    const ch = graphContainerHeight
-    if (cw <= 0 || ch <= 0) return
-    if (hasEverFittedRef.current) return
-
-    hasEverFittedRef.current = true
-    const raf = requestAnimationFrame(() => {
-      applyFitToContainerRef.current(graphBounds)
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [payload, renderedNodes.length, graphContainerWidth, graphContainerHeight, graphBounds])
-
-  const handlePointerDown = (event: PointerEvent<SVGGElement>, node: PositionedNode) => {
-    const svg = svgRef.current
-    if (!svg) return
-    didDragRef.current = false
-    justDraggedRef.current = false
-    if (justDraggedTimerRef.current) {
-      clearTimeout(justDraggedTimerRef.current)
-      justDraggedTimerRef.current = null
-    }
-    const point = svgPoint(svg, event as unknown as PointerEvent<SVGSVGElement>)
-    const dragState: DragState = {
-      id: node.id,
-      dx: point.x - node.x,
-      dy: point.y - node.y,
-      originX: node.x,
-      originY: node.y,
-      moved: false,
-    }
-    draggingRef.current = dragState
-    setDragging(dragState)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  const handleSvgPointerDown = (event: PointerEvent<SVGSVGElement>) => {
-    const target = event.target as SVGElement
-    if (target.closest('[role="button"]')) return
-
-    const svg = svgRef.current
-    if (!svg) return
-    const point = svgPoint(svg, event)
-    const panState: PanState = { startX: point.x, startY: point.y, originPanX: panXRef.current, originPanY: panYRef.current }
-    panningRef.current = panState
-    setPanning(panState)
-    svg.setPointerCapture(event.pointerId)
-  }
-
-  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
-    const currentDrag = draggingRef.current
-    if (currentDrag && svgRef.current) {
-      const bounds = graphBounds
-      const dragPad = graphNodeClampPadding + maxNodeVisualExtent
-      const point = svgPoint(svgRef.current, event)
-      const x = clamp(point.x - currentDrag.dx, bounds.minX + dragPad, bounds.maxX - dragPad)
-      const y = clamp(point.y - currentDrag.dy, bounds.minY + dragPad, bounds.maxY - dragPad)
-      const moved =
-        currentDrag.moved || Math.abs(x - currentDrag.originX) >= dragThreshold || Math.abs(y - currentDrag.originY) >= dragThreshold
-      if (!moved) return
-
-      didDragRef.current = true
-      const key = positionKey(view, currentDrag.id)
-      setPositions((current) => ({ ...current, [key]: { x, y } }))
-      setPinned((current) => {
-        if (current[key]) return current
-        const next = { ...current, [key]: true }
-        pinnedRef.current = next
-        return next
-      })
-      const updatedDrag = { ...currentDrag, moved: true }
-      draggingRef.current = updatedDrag
-      setDragging(updatedDrag)
-      return
-    }
-
-    const currentPan = panningRef.current
-    if (currentPan && svgRef.current) {
-      const point = svgPoint(svgRef.current, event)
-      const dx = point.x - currentPan.startX
-      const dy = point.y - currentPan.startY
-      const nextPanX = currentPan.originPanX + dx
-      const nextPanY = currentPan.originPanY + dy
-      panXRef.current = nextPanX
-      panYRef.current = nextPanY
-      setPanX(nextPanX)
-      setPanY(nextPanY)
-      return
-    }
-  }
-
-  const stopInteraction = () => {
-    const currentDrag = draggingRef.current
-    if (didDragRef.current || currentDrag?.moved) {
-      justDraggedRef.current = true
-      if (justDraggedTimerRef.current) {
-        clearTimeout(justDraggedTimerRef.current)
-      }
-      justDraggedTimerRef.current = setTimeout(() => {
-        justDraggedRef.current = false
-        justDraggedTimerRef.current = null
-      }, 0)
-    }
-    didDragRef.current = false
-    draggingRef.current = null
-    panningRef.current = null
-    setDragging(null)
-    setPanning(null)
-  }
-
-  const handleNodeSelect = (nodeId: string) => {
-    if (justDraggedRef.current) {
-      justDraggedRef.current = false
-      return
-    }
-    inspectNode(nodeId)
-  }
-
   const handleRefocus = () => {
     if (!selected) return
     selectFocusNode(selected.id)
@@ -1241,24 +399,6 @@ export function KnowledgeGraphPage({
     if (!nextRootId) return
     if (focusRootId !== nextRootId) setFocusRootId(nextRootId)
     setFocusDepth((current) => clamp(current + 1, 1, Math.min(maxExplorerDepth, maxFocusDistance)))
-  }
-
-  const handleGraphWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return
-    event.preventDefault()
-    const svg = svgRef.current
-    if (!svg) return
-    const point = svgPoint(svg, event as unknown as PointerEvent<SVGSVGElement>)
-    const oldZoom = graphZoom
-    const newZoom = clamp(oldZoom + (event.deltaY > 0 ? -graphZoomStep : graphZoomStep), minGraphZoom, maxGraphZoom)
-    const scale = newZoom / oldZoom
-    const newPanX = point.x - scale * (point.x - panXRef.current)
-    const newPanY = point.y - scale * (point.y - panYRef.current)
-    setZoom(newZoom)
-    panXRef.current = newPanX
-    panYRef.current = newPanY
-    setPanX(newPanX)
-    setPanY(newPanY)
   }
 
   const totalNodeCount = payload?.stats.node_count ?? 0
@@ -1438,7 +578,6 @@ export function KnowledgeGraphPage({
           >
             <ZoomIn size={15} />
           </button>
-          <div className="min-w-14 text-center text-xs font-medium text-slate-500">{Math.round(graphZoom * 100)}%</div>
           <button
             type="button"
             onClick={zoomOut}
@@ -1453,7 +592,7 @@ export function KnowledgeGraphPage({
           </button>
           <button
             type="button"
-            onClick={resetScatterLayout}
+            onClick={relayout}
             disabled={!nodes.length}
             className={cn(
               'inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-700',
@@ -1468,7 +607,7 @@ export function KnowledgeGraphPage({
           </button>
           <button
             type="button"
-            onClick={fitGraph}
+            onClick={fitView}
             className={cn(
               'inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50',
               graphControlTransitionClass,
@@ -1481,160 +620,18 @@ export function KnowledgeGraphPage({
         </div>
 
         <div className="relative h-full min-h-0 p-4 pt-28">
-          <div
-            ref={graphContainerRef}
-            className="relative min-h-0 h-full overflow-auto rounded-[24px] border border-white/70 bg-[radial-gradient(circle_at_50%_42%,_rgba(255,255,255,0.72),_rgba(255,255,255,0.08)_58%,_rgba(219,231,244,0.16)_100%),linear-gradient(135deg,_#fffefb_0%,_#f8f8f4_52%,_#eff4fb_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]"
-            onWheel={handleGraphWheel}
-          >
+          <div className="relative min-h-0 h-full overflow-hidden rounded-[24px] border border-white/70 bg-[radial-gradient(circle_at_50%_42%,_rgba(255,255,255,0.72),_rgba(255,255,255,0.08)_58%,_rgba(219,231,244,0.16)_100%),linear-gradient(135deg,_#fffefb_0%,_#f8f8f4_52%,_#eff4fb_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]">
+            <div ref={canvasRef} className="absolute inset-0" />
             {!nodes.length ? (
-              <div className="flex min-h-full items-center justify-center px-6 py-10">
+              <div className="relative flex min-h-full items-center justify-center px-6 py-10">
                 <GraphCanvasGuidance hasGraphData={false} />
               </div>
-            ) : (
-              <>
-                <svg
-                  ref={svgRef}
-                  viewBox={`${graphViewMinX} ${graphViewMinY} ${graphWidth} ${graphHeight}`}
-                  preserveAspectRatio="xMidYMid meet"
-                  className="block h-full w-full touch-none select-none"
-                  role="group"
-                  aria-label={view === 'entity' ? '实体图谱浏览器' : '来源图谱浏览器'}
-                  aria-roledescription="交互式知识图谱"
-                  onPointerDown={handleSvgPointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={stopInteraction}
-                  onPointerLeave={stopInteraction}
-                  onPointerCancel={stopInteraction}
-                >
-                  <title>{view === 'entity' ? '实体图谱浏览器' : '来源图谱浏览器'}</title>
-                  <desc>
-                    交互式图谱，展示实体、文档分块及其关联证据与关系。
-                  </desc>
-                  <defs>
-                    <linearGradient id="graph-drift" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#fffefb" />
-                      <stop offset="52%" stopColor="#f8f8f4" />
-                      <stop offset="100%" stopColor="#eff4fb" />
-                    </linearGradient>
-                    <radialGradient id="graph-haze" cx="50%" cy="50%" r="70%">
-                      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.66" />
-                      <stop offset="68%" stopColor="#ffffff" stopOpacity="0.1" />
-                      <stop offset="100%" stopColor="#dbe7f4" stopOpacity="0.12" />
-                    </radialGradient>
-                    <linearGradient id="node-sheen" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.52" />
-                      <stop offset="45%" stopColor="#ffffff" stopOpacity="0.12" />
-                      <stop offset="100%" stopColor="#ffffff" stopOpacity="0.02" />
-                    </linearGradient>
-                    {(['focus', 'near', 'mid', 'far', 'dim'] as DistanceTier[]).map((tier) => {
-                      const markerColor =
-                        tier === 'focus'
-                          ? '#68778b'
-                          : tier === 'near'
-                            ? '#8692a2'
-                            : tier === 'mid'
-                              ? '#b0b8c4'
-                              : tier === 'far'
-                                ? '#d1d7de'
-                                : '#e8ecf0'
-                      return (
-                        <marker
-                          key={`graph-arrow-${tier}`}
-                          id={`graph-arrow-${tier}`}
-                          markerWidth="8"
-                          markerHeight="8"
-                          refX="7"
-                          refY="3"
-                          orient="auto"
-                        >
-                          <path d="M0,0 L7,3 L0,6 Z" fill={markerColor} />
-                        </marker>
-                      )
-                    })}
-                  </defs>
-                  <rect
-                    x={graphViewMinX}
-                    y={graphViewMinY}
-                    width={graphWidth}
-                    height={graphHeight}
-                    fill="url(#graph-drift)"
-                    pointerEvents="none"
-                  />
-                  <rect
-                    x={graphViewMinX}
-                    y={graphViewMinY}
-                    width={graphWidth}
-                    height={graphHeight}
-                    fill="url(#graph-haze)"
-                    opacity="0.9"
-                    pointerEvents="none"
-                  />
-                  <g transform={`translate(${panX}, ${panY}) scale(${graphZoom})`}>
-                    {renderedEdges.map(({ edge, tier }) => {
-                      const source = nodeById.get(edge.source)
-                      const target = nodeById.get(edge.target)
-                      if (!source || !target) return null
-                      const sourceTier = nodeTiers.get(source.id) ?? 'dim'
-                      const targetTier = nodeTiers.get(target.id) ?? 'dim'
-                      const sourceActive = selected?.id === source.id
-                      const targetActive = selected?.id === target.id
-                      const sourceFocusRoot = focusRoot?.id === source.id
-                      const targetFocusRoot = focusRoot?.id === target.id
-                      const dx = target.x - source.x
-                      const dy = target.y - source.y
-                      const distance = Math.max(1, Math.hypot(dx, dy))
-                      const sourceRadius = edgeAnchorRadius(sourceTier, sourceActive, sourceFocusRoot)
-                      const targetRadius = edgeAnchorRadius(targetTier, targetActive, targetFocusRoot)
-                      const sx = source.x + (dx / distance) * sourceRadius
-                      const sy = source.y + (dy / distance) * sourceRadius
-                      const tx = target.x - (dx / distance) * targetRadius
-                      const ty = target.y - (dy / distance) * targetRadius
-                      const curve = Math.min(96, distance * 0.35)
-                      const cx1 = sx + (dx / distance) * curve
-                      const cy1 = sy + (dy / distance) * curve
-                      const cx2 = tx - (dx / distance) * curve
-                      const cy2 = ty - (dy / distance) * curve
-                      const style = edgeStyle(edge, tier)
-                      return (
-                        <path
-                          key={edge.id}
-                          d={`M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${tx} ${ty}`}
-                          fill="none"
-                          stroke={style.stroke}
-                          strokeWidth={style.strokeWidth}
-                          strokeDasharray={style.strokeDasharray}
-                          opacity={style.opacity}
-                          markerEnd={`url(#graph-arrow-${tier})`}
-                          pointerEvents="none"
-                        />
-                      )
-                    })}
-                  </g>
-                  <g transform={`translate(${panX}, ${panY}) scale(${graphZoom})`}>
-                    {renderedNodes.map((node) => (
-                      <GraphNode
-                        key={node.id}
-                        node={node}
-                        active={selected?.id === node.id}
-                        focusRoot={focusRoot?.id === node.id}
-                        tier={nodeTiers.get(node.id) ?? 'dim'}
-                        dragging={dragging?.id === node.id}
-                        onPointerDown={(event) => handlePointerDown(event, node)}
-                        onSelect={() => {
-                          if (dragging?.moved) return
-                          handleNodeSelect(node.id)
-                        }}
-                      />
-                    ))}
-                  </g>
-                </svg>
-                {!selected ? (
-                  <div className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex justify-start">
-                    <GraphCanvasGuidance hasGraphData />
-                  </div>
-                ) : null}
-              </>
-            )}
+            ) : null}
+            {!selected ? (
+              <div className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex justify-start">
+                <GraphCanvasGuidance hasGraphData />
+              </div>
+            ) : null}
           </div>
 
           <div
@@ -1681,164 +678,6 @@ export function KnowledgeGraphPage({
   )
 }
 
-function GraphNode({
-  node,
-  active,
-  focusRoot,
-  tier,
-  dragging,
-  onPointerDown,
-  onSelect,
-}: {
-  node: PositionedNode
-  active: boolean
-  focusRoot: boolean
-  tier: DistanceTier
-  dragging: boolean
-  onPointerDown: (event: PointerEvent<SVGGElement>) => void
-  onSelect: () => void
-}) {
-  const meta = getNodeMeta(node.type)
-  const scale = nodeScale(tier, active, focusRoot)
-  const shadow = nodeShadow(tier, active, focusRoot)
-  const showPrimaryLabel = active || focusRoot || tier === 'near' || (node.type === 'entity' && tier === 'mid')
-  const showMetaLabel = active || focusRoot || tier === 'near'
-  const nodeVisualRadius = nodeVisualRadiusForTier(tier, active, focusRoot)
-  const nodeHitRadius = Math.max(nodeVisualRadius + 10, 24)
-  const nodeHaloRadius = nodeVisualRadius + (active || focusRoot ? 7 : tier === 'near' ? 5 : 4)
-  const strokeWidth = active ? 2.2 : focusRoot ? 1.8 : tier === 'near' ? 1.25 : tier === 'mid' ? 1.1 : 0.95
-  const bodyFill = active || focusRoot ? '#ffffff' : tier === 'dim' ? '#f8fafc' : '#fcfdff'
-  const stroke =
-    active || focusRoot ? meta.color : tier === 'near' ? '#b8c3cf' : tier === 'mid' ? '#ccd6e2' : '#dbe3ec'
-  const tintOpacity = active || focusRoot ? 0.2 : tier === 'near' ? 0.18 : tier === 'mid' ? 0.15 : tier === 'far' ? 0.11 : 0.08
-  const primaryLabelY = nodeVisualRadius + 18
-  const primaryLabelSize = showMetaLabel ? 'text-[10px]' : 'text-[11px]'
-  const primaryLabelLength = showMetaLabel ? 12 : 14
-  const metaLabelY = nodeVisualRadius + 31
-  const nodeLabelHitArea = nodeDetachedLabelHitArea({
-    nodeHitRadius,
-    primaryLabelLength,
-    showPrimaryLabel,
-    showMetaLabel,
-    primaryLabelY,
-    metaLabelY,
-  })
-  const nodeHitX = nodeLabelHitArea.x
-  const nodeHitWidth = nodeLabelHitArea.width
-  const nodeHitHeight = nodeLabelHitArea.height
-  const nodeHitY = nodeLabelHitArea.y
-  const handleKeyDown = (event: React.KeyboardEvent<SVGGElement>) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    onSelect()
-  }
-  return (
-    <g
-      transform={`translate(${node.x} ${node.y}) scale(${scale})`}
-      onPointerDown={onPointerDown}
-      onClick={onSelect}
-      onKeyDown={handleKeyDown}
-      className={cn('cursor-grab', dragging && 'cursor-grabbing')}
-      opacity={active ? 1 : tierOpacity(tier)}
-      role="button"
-      tabIndex={0}
-      aria-pressed={active}
-      aria-label={graphNodeAriaLabel(node, meta.label, active, focusRoot)}
-    >
-      {!showPrimaryLabel && !showMetaLabel ? (
-        <title>{node.label}</title>
-      ) : null}
-      {nodeLabelHitArea.enabled ? (
-        <rect
-          x={nodeHitX}
-          y={nodeHitY}
-          width={nodeHitWidth}
-          height={nodeHitHeight}
-          rx={Math.min(nodeHitHeight / 2, nodeHitRadius)}
-          fill="transparent"
-          pointerEvents="all"
-        />
-      ) : null}
-      <circle
-        cx="0"
-        cy="0"
-        r={nodeHitRadius}
-        fill="transparent"
-        pointerEvents="all"
-      />
-      <circle
-        cx="0"
-        cy="0"
-        r={nodeHaloRadius}
-        fill={meta.fill}
-        opacity={active || focusRoot ? 0.42 : tier === 'near' ? 0.3 : tier === 'mid' ? 0.24 : tier === 'far' ? 0.18 : 0.14}
-        pointerEvents="none"
-      />
-      <circle
-        cx="0"
-        cy="0"
-        r={nodeVisualRadius}
-        fill={bodyFill}
-        stroke={stroke}
-        strokeWidth={strokeWidth}
-        filter={shadow}
-        pointerEvents="none"
-      />
-      <circle
-        cx="0"
-        cy="0"
-        r={Math.max(0, nodeVisualRadius - 1.5)}
-        fill={meta.fill}
-        opacity={tintOpacity}
-        pointerEvents="none"
-      />
-      {!active && !focusRoot ? (
-        <circle
-          cx="0"
-          cy="0"
-          r={Math.max(0, nodeVisualRadius - 1.5)}
-          fill="url(#node-sheen)"
-          opacity={tier === 'near' ? 0.22 : tier === 'mid' ? 0.16 : 0.1}
-          pointerEvents="none"
-        />
-      ) : null}
-      <circle
-        cx="0"
-        cy="0"
-        r="5.5"
-        fill={meta.color}
-        opacity={active || focusRoot ? 0.96 : tier === 'dim' ? 0.46 : tier === 'far' ? 0.62 : 0.72}
-        pointerEvents="none"
-      />
-      {showPrimaryLabel ? (
-        <text
-          x="0"
-          y={primaryLabelY}
-          textAnchor="middle"
-          className={cn('fill-slate-900 font-medium', primaryLabelSize)}
-          pointerEvents="none"
-        >
-          {truncate(node.label, primaryLabelLength)}
-        </text>
-      ) : null}
-      {showMetaLabel ? (
-        <text
-          x="0"
-          y={metaLabelY}
-          textAnchor="middle"
-          className={cn(
-            'text-[8px] font-medium',
-            tier === 'dim' ? 'fill-slate-400' : focusRoot || active ? 'fill-slate-600' : 'fill-slate-500',
-          )}
-          pointerEvents="none"
-        >
-          {meta.label}
-        </text>
-      ) : null}
-    </g>
-  )
-}
-
 function GraphInspector({
   node,
   view,
@@ -1855,14 +694,14 @@ function GraphInspector({
   onRefocus,
   onExpandMore,
 }: {
-  node: PositionedNode | null
+  node: UnifiedGraphNode | null
   view: UnifiedGraphView
   edges: UnifiedGraphEdge[]
-  nodes: Map<string, PositionedNode>
-  relatedNodes: PositionedNode[]
-  focusRoot: PositionedNode | null
+  nodes: Map<string, UnifiedGraphNode>
+  relatedNodes: UnifiedGraphNode[]
+  focusRoot: UnifiedGraphNode | null
   focusDepth: number
-  explorerNodes: PositionedNode[]
+  explorerNodes: UnifiedGraphNode[]
   focusDistances: Map<string, number>
   canExpandExplorer: boolean
   onSelectNode: (nodeId: string) => void
