@@ -114,3 +114,21 @@ def test_admin_create_and_list_provider(client, db_session):
     listed = client.get("/api/v1/model-providers/providers", headers=auth_headers("admin"))
     assert listed.status_code == 200
     assert [p["provider_id"] for p in listed.json()["items"]] == ["deepseek"]
+
+
+from backend.app.services.model_providers import seed_model_providers
+
+
+def test_seed_creates_default_provider_and_model(db_session, monkeypatch):
+    from backend.app import services  # noqa
+    import backend.app.services.model_providers as mp
+
+    monkeypatch.setattr(mp.settings, "LLM_API_BASE", "https://api.deepseek.com/v1")
+    monkeypatch.setattr(mp.settings, "LLM_MODEL", "deepseek-chat")
+    # 让 seed 用传入的 session 而非自开 SessionLocal
+    mp._seed_into(db_session)
+
+    providers = db_session.query(ModelProvider).all()
+    assert [p.provider_id for p in providers] == ["default"]
+    assert providers[0].enabled_models == ["deepseek-chat"]
+    assert mp.get_default_chat_model(db_session) == "default:deepseek-chat"

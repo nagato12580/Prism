@@ -132,6 +132,10 @@ def auto_migrate(Base, engine) -> None:
     if _is_application_engine(engine):
         ensure_personal_inbox_backfill()
 
+        from backend.app.services.model_providers import seed_model_providers
+
+        seed_model_providers()
+
 
 def ensure_personal_inbox_backfill() -> None:
     """Create personal inbox KBs and sync existing confirmed personal asset units.

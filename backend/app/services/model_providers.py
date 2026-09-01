@@ -1,6 +1,7 @@
 # prism/backend/app/services/model_providers.py
 from sqlalchemy.orm import Session
 
+from backend.app.config import settings
 from backend.app.models import ModelProvider, SystemConfig
 from backend.app.utils.time import local_now
 from backend.app.services.model_cache import (
@@ -139,3 +140,33 @@ def test_connection(spec: str) -> dict:
         return {"status": "available"}
     except Exception as exc:
         return {"status": "error", "reason": str(exc)}
+
+
+def _seed_into(db: Session) -> None:
+    if db.query(ModelProvider).count() > 0:
+        return
+    model = settings.LLM_MODEL or "qwen-plus"
+    db.add(ModelProvider(
+        provider_id="default",
+        display_name="默认（来自 .env）",
+        provider_type="openai",
+        base_url=settings.LLM_API_BASE or "",
+        api_key_env="LLM_API_KEY",
+        capabilities={"chat": True, "embedding": False, "rerank": False},
+        enabled_models=[model],
+        is_enabled=True,
+        is_builtin=True,
+    ))
+    db.add(SystemConfig(key=DEFAULT_CHAT_KEY, value=f"default:{model}"))
+    db.commit()
+    refresh_model_cache(db)
+
+
+def seed_model_providers() -> None:
+    from backend.app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        _seed_into(db)
+    finally:
+        db.close()
