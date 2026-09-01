@@ -21,6 +21,7 @@ from .knowledge_enrichment import router as knowledge_enrichment_router
 from .agent_chat_proxy import router as agent_chat_proxy_router
 from .team_admin import router as team_admin_router
 from .auth import router as auth_router
+from .model_providers import router as model_providers_router
 
 
 def register_routers(app):
@@ -45,4 +46,5 @@ def register_routers(app):
     api_prefix.include_router(agent_chat_proxy_router)
     api_prefix.include_router(team_admin_router)
     api_prefix.include_router(auth_router)
+    api_prefix.include_router(model_providers_router)
     app.include_router(api_prefix)

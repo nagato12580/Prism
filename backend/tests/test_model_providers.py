@@ -74,3 +74,43 @@ def test_disable_provider_in_use_raises(db_session):
     _seed_default(db_session, "deepseek:deepseek-chat")
     with pytest.raises(ProviderInUse):
         update_provider(db_session, provider_id="deepseek", is_enabled=False)
+
+
+from backend.app.models import TeamMember, TeamRole
+
+
+def auth_headers(user, roles=""):
+    h = {"X-Prism-Actor": user, "X-Prism-Tenant": "tenant-a"}
+    if roles:
+        h["X-Prism-Roles"] = roles
+    return h
+
+
+def test_model_provider_endpoints_require_admin(client, db_session):
+    for method, path, kw in [
+        ("get", "/api/v1/model-providers/providers", {}),
+        ("post", "/api/v1/model-providers/providers", {"json": {"provider_id": "x", "display_name": "X", "base_url": "https://x"}}),
+        ("get", "/api/v1/model-providers/config/default", {}),
+    ]:
+        r = getattr(client, method)(path, headers=auth_headers("bob"), **kw)
+        assert r.status_code == 403, f"{method.upper()} {path}"
+
+
+def test_admin_create_and_list_provider(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+    created = client.post(
+        "/api/v1/model-providers/providers",
+        json={"provider_id": "deepseek", "display_name": "DeepSeek", "provider_type": "openai",
+              "base_url": "https://api.deepseek.com/v1", "api_key": "sk-abc", "enabled_models": ["deepseek-chat"]},
+        headers=auth_headers("admin"),
+    )
+    assert created.status_code == 200
+    body = created.json()
+    assert body["provider_id"] == "deepseek"
+    assert body["has_api_key"] is True
+    assert "sk-abc" not in str(body)  # 明文 key 不回传
+
+    listed = client.get("/api/v1/model-providers/providers", headers=auth_headers("admin"))
+    assert listed.status_code == 200
+    assert [p["provider_id"] for p in listed.json()["items"]] == ["deepseek"]

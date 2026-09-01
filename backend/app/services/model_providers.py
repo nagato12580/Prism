@@ -123,3 +123,19 @@ def set_default_chat_model(db: Session, spec: str) -> None:
         row.updated_at = local_now()
     db.commit()
     refresh_model_cache(db)
+
+
+def test_connection(spec: str) -> dict:
+    from backend.app.services.model_cache import load_model_cache
+
+    entry = load_model_cache().get("models", {}).get(spec)
+    if entry is None:
+        return {"status": "unavailable", "reason": "spec not found"}
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(base_url=entry["base_url"], api_key=entry["api_key"] or "none")
+        client.models.list()
+        return {"status": "available"}
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
