@@ -45,6 +45,7 @@ from .graph_outbox import (
     KnowledgeGraphGeneration,
 )
 from .knowledge_evaluation import EvaluationDataset, EvaluationDatasetItem, EvaluationRun, EvaluationRunItem
+from .model_provider import ModelProvider, SystemConfig
 
 __all__ = [
     "User",
@@ -110,4 +111,6 @@ __all__ = [
     "KnowledgeGovernanceStatus",
     "TeamMember",
     "TeamRole",
+    "ModelProvider",
+    "SystemConfig",
 ]
