@@ -95,6 +95,8 @@ def update_provider(provider_id: str, body: ProviderUpdate, actor: ActorContext 
         row = svc.update_provider(db, provider_id=provider_id, **body.model_dump(exclude_unset=True))
     except svc.ProviderNotFound as e:
         raise ApiProblem(404, "PROVIDER_NOT_FOUND", str(e))
+    except svc.ProviderInUse as e:
+        raise ApiProblem(409, "PROVIDER_IN_USE", str(e))
     return _dto(row)
 
 

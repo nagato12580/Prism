@@ -141,6 +141,19 @@ def test_admin_create_and_list_provider(client, db_session):
     assert [p["provider_id"] for p in listed.json()["items"]] == ["deepseek"]
 
 
+def test_update_disable_default_provider_returns_409(client, db_session):
+    db_session.add(TeamMember(tenant_id="tenant-a", user_id="admin", role=TeamRole.ADMIN.value, status="active"))
+    db_session.commit()
+    create_provider(db_session, provider_id="deepseek", display_name="D", provider_type="openai", base_url="https://x", enabled_models=["deepseek-chat"])
+    set_default_chat_model(db_session, "deepseek:deepseek-chat")
+    r = client.put(
+        "/api/v1/model-providers/providers/deepseek",
+        json={"is_enabled": False},
+        headers=auth_headers("admin"),
+    )
+    assert r.status_code == 409
+
+
 from backend.app.services.model_providers import seed_model_providers
 
 
