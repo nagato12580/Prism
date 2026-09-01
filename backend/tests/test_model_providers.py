@@ -23,6 +23,7 @@ from backend.app.services.model_providers import (
     delete_provider,
     get_default_chat_model,
     set_default_chat_model,
+    update_provider,
 )
 
 
@@ -63,3 +64,13 @@ def test_set_and_get_default(db_session):
 def test_delete_missing_provider_raises_not_found(db_session):
     with pytest.raises(ProviderNotFound):
         delete_provider(db_session, provider_id="ghost")
+
+
+def test_disable_provider_in_use_raises(db_session):
+    create_provider(
+        db_session, provider_id="deepseek", display_name="D",
+        provider_type="openai", base_url="https://x", enabled_models=["deepseek-chat"],
+    )
+    _seed_default(db_session, "deepseek:deepseek-chat")
+    with pytest.raises(ProviderInUse):
+        update_provider(db_session, provider_id="deepseek", is_enabled=False)

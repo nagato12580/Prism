@@ -84,6 +84,8 @@ def create_provider(
 
 def update_provider(db: Session, *, provider_id: str, **fields) -> ModelProvider:
     row = _load(db, provider_id)
+    if fields.get("is_enabled") is False:
+        _assert_not_default(db, provider_id)
     if "api_key" in fields:
         if fields["api_key"]:  # blank = keep existing
             row.api_key = encrypt_secret(fields["api_key"])
