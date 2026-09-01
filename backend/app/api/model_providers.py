@@ -142,7 +142,10 @@ def get_default(actor: ActorContext = Depends(get_actor_context), db: Session = 
 def set_default(body: DefaultModelBody, actor: ActorContext = Depends(get_actor_context), db: Session = Depends(get_db)):
     policy = KnowledgeAccessPolicy(db)
     _require_admin(policy, actor)
-    svc.set_default_chat_model(db, body.spec)
+    try:
+        svc.set_default_chat_model(db, body.spec)
+    except svc.ProviderValidationError as e:
+        raise ApiProblem(422, "INVALID_DEFAULT_MODEL", str(e))
     return {"spec": body.spec}
 
 

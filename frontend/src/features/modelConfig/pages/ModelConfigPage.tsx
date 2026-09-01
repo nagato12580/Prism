@@ -85,6 +85,9 @@ export function ModelConfigPage() {
                 <div className="truncate text-xs text-slate-500">{p.base_url} · {p.enabled_models.join(', ')}</div>
                 <div className="text-xs text-slate-400">凭证：{p.has_api_key ? p.api_key_masked ?? p.api_key_env ?? '已配置' : '未配置'}</div>
               </div>
+              <Button variant="ghost" size="sm" onClick={() => { modelConfigApi.updateProvider(p.provider_id, { is_enabled: !p.is_enabled }).then(reload).catch(setError) }}>
+                {p.is_enabled ? '停用' : '启用'}
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => setEditing(p)}>编辑</Button>
               <Button variant="ghost" size="sm" onClick={() => { modelConfigApi.deleteProvider(p.provider_id).then(reload).catch(setError) }}>删除</Button>
             </div>
@@ -114,6 +117,8 @@ function ProviderForm({ initial, onDone }: { initial: ModelProvider | null; onDo
   const [displayName, setDisplayName] = useState(initial?.display_name ?? '')
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '')
   const [apiKey, setApiKey] = useState('')
+  const [apiKeyEnv, setApiKeyEnv] = useState(initial?.api_key_env ?? '')
+  const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true)
   const [enabledModels, setEnabledModels] = useState(initial?.enabled_models.join(', ') ?? '')
 
   return (
@@ -126,9 +131,17 @@ function ProviderForm({ initial, onDone }: { initial: ModelProvider | null; onDo
         名称
         <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
       </label>
+      <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+        <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />
+        启用
+      </label>
       <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
         Base URL
         <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+      </label>
+      <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+        API Key 环境变量名（可选，优先级高于内联 Key）
+        <Input value={apiKeyEnv} onChange={(e) => setApiKeyEnv(e.target.value)} />
       </label>
       <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
         API Key（留空 = 不修改）
@@ -141,7 +154,8 @@ function ProviderForm({ initial, onDone }: { initial: ModelProvider | null; onDo
       <div className="flex justify-end gap-2">
         <Button variant="primary" size="sm" onClick={() => onDone({
           provider_id: providerId, display_name: displayName, base_url: baseUrl,
-          api_key: apiKey || undefined, enabled_models: enabledModels.split(',').map(s => s.trim()).filter(Boolean),
+          api_key: apiKey || undefined, api_key_env: apiKeyEnv || undefined, is_enabled: isEnabled,
+          enabled_models: enabledModels.split(',').map(s => s.trim()).filter(Boolean),
         })}>保存</Button>
       </div>
     </div>

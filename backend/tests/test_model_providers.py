@@ -19,6 +19,7 @@ from backend.app.services.model_providers import (
     ProviderConflict,
     ProviderInUse,
     ProviderNotFound,
+    ProviderValidationError,
     create_provider,
     delete_provider,
     get_default_chat_model,
@@ -55,10 +56,34 @@ def test_delete_provider_in_use_raises(db_session):
 
 
 def test_set_and_get_default(db_session):
+    create_provider(db_session, provider_id="deepseek", display_name="D", provider_type="openai", base_url="https://x", enabled_models=["deepseek-chat"])
+    create_provider(db_session, provider_id="openai", display_name="O", provider_type="openai", base_url="https://x", enabled_models=["gpt-4o"])
     set_default_chat_model(db_session, "deepseek:deepseek-chat")
     assert get_default_chat_model(db_session) == "deepseek:deepseek-chat"
     set_default_chat_model(db_session, "openai:gpt-4o")
     assert get_default_chat_model(db_session) == "openai:gpt-4o"
+
+
+def test_set_default_invalid_spec_raises(db_session):
+    with pytest.raises(ProviderValidationError):
+        set_default_chat_model(db_session, "no-colon")
+
+
+def test_set_default_unknown_provider_raises(db_session):
+    with pytest.raises(ProviderValidationError):
+        set_default_chat_model(db_session, "ghost:model")
+
+
+def test_set_default_disabled_provider_raises(db_session):
+    create_provider(db_session, provider_id="deepseek", display_name="D", provider_type="openai", base_url="https://x", enabled_models=["deepseek-chat"], is_enabled=False)
+    with pytest.raises(ProviderValidationError):
+        set_default_chat_model(db_session, "deepseek:deepseek-chat")
+
+
+def test_set_default_model_not_enabled_raises(db_session):
+    create_provider(db_session, provider_id="deepseek", display_name="D", provider_type="openai", base_url="https://x", enabled_models=["deepseek-chat"])
+    with pytest.raises(ProviderValidationError):
+        set_default_chat_model(db_session, "deepseek:other-model")
 
 
 def test_delete_missing_provider_raises_not_found(db_session):

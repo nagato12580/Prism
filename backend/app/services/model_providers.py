@@ -114,7 +114,23 @@ def get_default_chat_model(db: Session) -> str | None:
     return row.value if row else None
 
 
+def _validate_spec(db: Session, spec: str) -> None:
+    if ":" not in spec:
+        raise ProviderValidationError(f"invalid model spec (expected provider_id:model_id): {spec}")
+    provider_id, model_id = spec.split(":", 1)
+    if not provider_id or not model_id:
+        raise ProviderValidationError(f"invalid model spec: {spec}")
+    provider = db.query(ModelProvider).filter_by(provider_id=provider_id).one_or_none()
+    if provider is None:
+        raise ProviderValidationError(f"provider not found: {provider_id}")
+    if not provider.is_enabled:
+        raise ProviderValidationError(f"provider is disabled: {provider_id}")
+    if model_id not in (provider.enabled_models or []):
+        raise ProviderValidationError(f"model not enabled on provider: {spec}")
+
+
 def set_default_chat_model(db: Session, spec: str) -> None:
+    _validate_spec(db, spec)
     row = db.query(SystemConfig).filter_by(key=DEFAULT_CHAT_KEY).one_or_none()
     if row is None:
         row = SystemConfig(key=DEFAULT_CHAT_KEY, value=spec)
@@ -135,7 +151,7 @@ def test_connection(spec: str) -> dict:
     try:
         from openai import OpenAI
 
-        client = OpenAI(base_url=entry["base_url"], api_key=entry["api_key"] or "none")
+        client = OpenAI(base_url=entry["base_url"], api_key=entry["api_key"] or "none", timeout=10.0, max_retries=1)
         client.models.list()
         return {"status": "available"}
     except Exception as exc:
