@@ -1,4 +1,5 @@
 # backend/app/api/knowledge_bases.py
+import logging
 from collections import Counter
 from datetime import datetime
 
@@ -9,8 +10,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.models import (
+    EntityMention,
+    EntityRelation,
     EvaluationRun,
     KnowledgeBaseMembership,
+    KnowledgeChunk,
+    KnowledgeEntity,
+    KnowledgeFile,
+    KnowledgeItem,
     KnowledgeJob,
     KnowledgeTopic,
 )
@@ -36,6 +43,7 @@ from backend.app.api.errors import ApiProblem
 from backend.app.utils.time import local_now
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeBaseCreate(BaseModel):
@@ -157,6 +165,184 @@ def _build_graph_stats(nodes: list[dict], edges: list[dict]) -> dict:
         "source_count": sum(count for node_type, count in node_counts.items() if node_type != "entity"),
         "node_counts": dict(node_counts),
         "edge_counts": dict(edge_counts),
+    }
+
+
+def _mysql_entity_graph_fallback(
+    db: Session,
+    *,
+    tenant_id: str,
+    kb_uid: str,
+    graph_generation: str,
+    view: str,
+    file_uids: tuple[str, ...],
+    limit: int,
+) -> dict:
+    """Rebuild a per-file subgraph from MySQL facts when the Neo4j scoped
+    projection is still empty.
+
+    Neo4j projection is asynchronous (outbox -> Neo4jOutboxProjector), so
+    ``scoped_subgraph`` can return no nodes right after ingestion even though
+    ``GraphFactWriter`` already wrote EntityMention/EntityRelation synchronously.
+    This fallback produces the same node/edge shape as ``scoped_subgraph`` so
+    the document graph tab renders immediately.
+    """
+    if not file_uids:
+        return {"nodes": [], "edges": []}
+
+    mentions = (
+        db.query(EntityMention)
+        .filter(
+            EntityMention.tenant_id == tenant_id,
+            EntityMention.kb_uid == kb_uid,
+            EntityMention.graph_generation == graph_generation,
+            EntityMention.file_uid.in_(file_uids),
+            EntityMention.active == "true",
+            EntityMention.source_kind == "document_chunk",
+        )
+        .order_by(EntityMention.created_at.asc())
+        .limit(max(limit * 6, 200))
+        .all()
+    )
+    if not mentions:
+        return {"nodes": [], "edges": []}
+
+    entity_ids = {mention.entity_id for mention in mentions if mention.entity_id}
+    source_ids = {mention.source_id for mention in mentions if mention.source_id}
+
+    entities = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.id.in_(entity_ids),
+            KnowledgeEntity.tenant_id == tenant_id,
+            KnowledgeEntity.kb_uid == kb_uid,
+            KnowledgeEntity.graph_generation == graph_generation,
+        )
+        .all()
+    )
+    entity_by_id = {entity.id: entity for entity in entities}
+
+    chunks = (
+        db.query(KnowledgeChunk)
+        .filter(or_(KnowledgeChunk.id.in_(source_ids), KnowledgeChunk.chunk_uid.in_(source_ids)))
+        .all()
+    )
+    chunk_by_id = {chunk.id: chunk for chunk in chunks}
+    chunk_by_id.update({chunk.chunk_uid: chunk for chunk in chunks})
+
+    item_ids = {chunk.item_id for chunk in chunks if chunk.item_id}
+    items = (
+        db.query(KnowledgeItem).filter(KnowledgeItem.id.in_(item_ids)).all()
+        if item_ids
+        else []
+    )
+    item_by_id = {item.id: item for item in items}
+
+    file_ids = {chunk.file_uid for chunk in chunks if chunk.file_uid}
+    files = (
+        db.query(KnowledgeFile).filter(KnowledgeFile.file_uid.in_(file_ids)).all()
+        if file_ids
+        else []
+    )
+    file_by_uid = {file_row.file_uid: file_row for file_row in files}
+
+    nodes: dict[str, dict] = {}
+    edges: dict[str, dict] = {}
+
+    for entity in entities:
+        node_id = f"entity:{entity.id}"
+        nodes[node_id] = {
+            "id": node_id,
+            "type": "entity",
+            "label": str(entity.canonical_name or entity.normalized_key or entity.id),
+            "ref_id": entity.id,
+            "entity_type": entity.entity_type,
+            "normalized_key": entity.normalized_key,
+            "confidence": entity.confidence,
+            "status": entity.status,
+        }
+
+    for mention in mentions:
+        chunk = chunk_by_id.get(mention.source_id)
+        item = item_by_id.get(chunk.item_id) if chunk and chunk.item_id else None
+        file_row = file_by_uid.get(mention.file_uid) or (
+            file_by_uid.get(chunk.file_uid) if chunk and chunk.file_uid else None
+        )
+
+        source_node_id = f"chunk:{mention.source_kind}:{mention.source_id}"
+        if file_row:
+            label = file_row.title or file_row.original_filename or mention.source_id
+        elif item and item.title:
+            label = item.title
+        else:
+            label = mention.source_id
+        nodes[source_node_id] = {
+            "id": source_node_id,
+            "type": "document_chunk",
+            "label": str(label),
+            "ref_id": mention.source_id,
+            "file_uid": mention.file_uid,
+            "chunk_uid": mention.chunk_uid,
+            "source_kind": mention.source_kind or "document_chunk",
+            "source_id": mention.source_id,
+            "item_id": mention.item_id,
+        }
+
+        entity_node_id = f"entity:{mention.entity_id}"
+        if view == "source":
+            edge_id = mention.id or f"edge:mention:{mention.entity_id}:{mention.source_id}"
+            edges[edge_id] = {
+                "id": edge_id,
+                "source": source_node_id,
+                "target": entity_node_id,
+                "type": "mentions_entity",
+                "label": "mentions_entity",
+                "confidence": mention.confidence,
+            }
+        else:
+            edge_id = mention.id or f"edge:mention:{mention.entity_id}:{mention.source_id}"
+            edges[edge_id] = {
+                "id": edge_id,
+                "source": entity_node_id,
+                "target": source_node_id,
+                "type": "mentioned_in",
+                "label": "mentioned_in",
+                "confidence": mention.confidence,
+            }
+
+    if entity_ids:
+        relations = (
+            db.query(EntityRelation)
+            .filter(
+                EntityRelation.tenant_id == tenant_id,
+                EntityRelation.kb_uid == kb_uid,
+                EntityRelation.graph_generation == graph_generation,
+                EntityRelation.file_uid.in_(file_uids),
+                EntityRelation.active == "true",
+                EntityRelation.subject_entity_id.in_(entity_ids),
+            )
+            .order_by(EntityRelation.created_at.asc())
+            .limit(max(limit * 6, 200))
+            .all()
+        )
+        for relation in relations:
+            if not relation.object_entity_id or relation.object_entity_id not in entity_ids:
+                continue
+            edge_id = relation.id or (
+                f"edge:related:{relation.subject_entity_id}:{relation.object_entity_id}:{relation.predicate}"
+            )
+            edges[edge_id] = {
+                "id": edge_id,
+                "source": f"entity:{relation.subject_entity_id}",
+                "target": f"entity:{relation.object_entity_id}",
+                "type": "related_to",
+                "label": str(relation.predicate or "related_to"),
+                "confidence": relation.confidence,
+            }
+
+    return {
+        "nodes": sorted(nodes.values(), key=lambda node: (node["type"], node["label"], node["id"])),
+        "edges": sorted(edges.values(), key=lambda edge: (edge["type"], edge["source"], edge["target"], edge["id"])),
     }
 
 
@@ -337,6 +523,21 @@ def get_knowledge_base_graph(
         )
     finally:
         graph.close()
+
+    if not payload["nodes"] and scoped_file_uids:
+        try:
+            payload = _mysql_entity_graph_fallback(
+                db,
+                tenant_id=topic.tenant_id,
+                kb_uid=topic.kb_uid,
+                graph_generation=topic.active_graph_generation,
+                view=view,
+                file_uids=scoped_file_uids,
+                limit=limit,
+            )
+        except Exception:
+            logger.exception("MySQL entity graph fallback failed for kb=%s", kb_uid)
+            payload = {"nodes": [], "edges": []}
 
     return {
         "view": view,

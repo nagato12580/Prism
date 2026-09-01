@@ -13,8 +13,6 @@ assert.match(page, /实体视图/, 'Knowledge graph page keeps the entity-view t
 assert.match(page, /来源视图/, 'Knowledge graph page keeps the source-view toggle readable.')
 assert.match(page, /刷新图谱/, 'Knowledge graph page keeps the refresh action readable.')
 assert.match(page, /类型过滤/, 'Knowledge graph page keeps the type filter control readable.')
-assert.match(page, /countFor\(payload, 'entity'\)/, 'Knowledge graph page derives the entity count from declared node counts.')
-assert.match(page, /countFor\(payload, 'document_chunk'\)/, 'Knowledge graph page derives the chunk count from declared node counts.')
 
 // —— 画布交给 G6，取代手写 SVG ——
 assert.match(page, /from '\.\/graph\/useG6Graph'/, 'Knowledge graph page imports the G6 hook and data mapper.')

@@ -33,6 +33,7 @@ from ..services.asset_items import (
 )
 from ..services.memory_context import recall_preference_context
 from ..services.memory_entity import extract_and_link_entities
+from ..services.memory_extraction import _check_semantic_duplicate
 from ..services.memory_vectors import upsert_entry_vector
 from ..services.personal_inbox import sync_personal_asset_unit_to_kb
 from ..utils.time import local_now
@@ -729,19 +730,22 @@ def confirm_asset_item(
 
     memory_entry = None
     if payload.create_memory:
-        memory_entry = MemoryEntry(
-            user_id=actor.actor_id,
-            title=item.title,
-            content=item.summary or item.raw_text,
-            memory_type=_memory_type_from_kind(item.asset_kind),
-            category=item.category,
-            tags=item.tags or [],
-            importance=max(0.6, float((item.confidence or {}).get("overall", 0.6) or 0.6)),
-            source_raw_item_id=item.id,
-            source_review_id=item.id,
-        )
-        db.add(memory_entry)
-        db.flush()
+        entry_content = (item.summary or item.raw_text or "").strip()
+        is_duplicate, _ = _check_semantic_duplicate(db, entry_content, user_id=actor.actor_id)
+        if not is_duplicate:
+            memory_entry = MemoryEntry(
+                user_id=actor.actor_id,
+                title=item.title,
+                content=item.summary or item.raw_text,
+                memory_type=_memory_type_from_kind(item.asset_kind),
+                category=item.category,
+                tags=item.tags or [],
+                importance=max(0.6, float((item.confidence or {}).get("overall", 0.6) or 0.6)),
+                source_raw_item_id=item.id,
+                source_review_id=item.id,
+            )
+            db.add(memory_entry)
+            db.flush()
 
     item.status = "confirmed"
     item.reviewed_at = reviewed_at

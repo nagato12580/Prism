@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.models.chat import ChatMessage, ChatSession
-from backend.app.models.memory import MemoryDraft, MemorySource, MemoryStatement, MemoryStatus
+from backend.app.models.memory import MemoryDraft, MemoryEntry, MemorySource, MemoryStatement, MemoryStatus
 from backend.app.prompts.memory_extraction import build_memory_extraction_messages
 from backend.app.services.memory_vectors import search_memory_vectors, upsert_statement_vector
 from backend.app.utils.time import local_now
@@ -296,6 +296,12 @@ def _existing_memory_contents(db: Session, user_id: str = DEFAULT_USER_ID) -> se
         payload = row[0] or {}
         if isinstance(payload, dict) and isinstance(payload.get("content"), str):
             contents.add(_normalize_content(payload["content"]))
+    entries = db.query(MemoryEntry.title, MemoryEntry.content).filter(MemoryEntry.user_id == user_id).all()
+    for title, content in entries:
+        if content:
+            contents.add(_normalize_content(content))
+        if title:
+            contents.add(_normalize_content(title))
     return contents
 
 
@@ -327,7 +333,7 @@ def _check_semantic_duplicate(
     # Slow path: embedding semantic similarity (only if exact miss)
     similar = _search_similar_statements(content, top_k=5, user_id=user_id)
     for hit in similar:
-        if hit.get("kind") != "statement":
+        if hit.get("kind") not in ("statement", "entry"):
             continue
         hit_score = float(hit.get("score", 0))
         if hit_score >= DUPLICATION_SIMILARITY:

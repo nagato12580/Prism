@@ -192,10 +192,6 @@ function formatConfidence(value?: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '-'
 }
 
-function countFor(payload: UnifiedGraphPayload | null, type: UnifiedGraphNodeType) {
-  return payload?.stats.node_counts[type] ?? 0
-}
-
 type KnowledgeGraphPageProps = {
   initialPayload?: UnifiedGraphPayload | null
   initialSelectedId?: string | null
@@ -401,9 +397,6 @@ export function KnowledgeGraphPage({
     setFocusDepth((current) => clamp(current + 1, 1, Math.min(maxExplorerDepth, maxFocusDistance)))
   }
 
-  const totalNodeCount = payload?.stats.node_count ?? 0
-  const totalEdgeCount = payload?.stats.edge_count ?? 0
-
   return (
     <div
       className={cn('flex h-[calc(100vh-9rem)] min-h-0 flex-col overflow-hidden', className)}
@@ -543,25 +536,6 @@ export function KnowledgeGraphPage({
 
         <div
           className={cn(
-            'absolute bottom-5 left-5 z-20 rounded-[20px] border border-slate-200/70 bg-white/88 px-4 py-3 text-sm shadow-[0_12px_30px_rgba(15,23,42,0.08)] backdrop-blur',
-            floatingSurfaceMotionClass,
-          )}
-        >
-          <div className="flex items-center gap-3 text-slate-700">
-            <span className="font-medium">节点 {totalNodeCount}</span>
-            <span className="text-slate-300">|</span>
-            <span className="font-medium">边 {totalEdgeCount}</span>
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-            <Sparkles size={13} className="text-blue-600" />
-            <span>实体 {countFor(payload, 'entity')}</span>
-            <FileText size={13} className="ml-1 text-emerald-700" />
-            <span>文档分块 {countFor(payload, 'document_chunk')}</span>
-          </div>
-        </div>
-
-        <div
-          className={cn(
             'absolute bottom-5 right-5 z-20 flex flex-col items-center gap-2 rounded-[20px] border border-slate-200/70 bg-white/90 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)] backdrop-blur',
             floatingSurfaceMotionClass,
           )}
@@ -625,11 +599,6 @@ export function KnowledgeGraphPage({
             {!nodes.length ? (
               <div className="relative flex min-h-full items-center justify-center px-6 py-10">
                 <GraphCanvasGuidance hasGraphData={false} />
-              </div>
-            ) : null}
-            {!selected ? (
-              <div className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex justify-start">
-                <GraphCanvasGuidance hasGraphData />
               </div>
             ) : null}
           </div>
