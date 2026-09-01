@@ -27,4 +27,4 @@ def decrypt_secret(token: str | None) -> str | None:
 def mask_secret(plain: str | None) -> str | None:
     if not plain:
         return None
-    return f"••••{plain[-3:]}"
+    return f"••••{plain[-4:]}"

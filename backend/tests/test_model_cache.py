@@ -17,5 +17,5 @@ def test_encrypt_none_returns_none():
 
 
 def test_mask_secret():
-    assert mask_secret("sk-abcdefgh") == "••••fgh"
+    assert mask_secret("sk-abcdefgh") == "••••efgh"
     assert mask_secret(None) is None
