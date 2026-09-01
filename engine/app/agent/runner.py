@@ -33,6 +33,7 @@ from .continuation import (
 from .prompts import AGENT_SYSTEM_PROMPT
 from .active_recall import recall_memory_context
 from ..graph.insights import graph_insights_context
+from backend.app.services.model_cache import resolve_default_chat_model
 from ..config import settings
 from ..llm.client import chat
 from ..observability import logger, quoted
@@ -160,13 +161,14 @@ FORCED_ITERATION_LIMIT_NO_EVIDENCE_ANSWER = (
 )
 
 
-def create_chat_model(settings):
+def create_chat_model():
     if ChatOpenAI is None:
         raise RuntimeError("langchain_openai is not installed")
+    spec = resolve_default_chat_model()
     return ChatOpenAI(
-        model=settings.LLM_MODEL,
-        base_url=settings.LLM_API_BASE,
-        api_key=settings.LLM_API_KEY,
+        model=spec.model,
+        base_url=spec.base_url,
+        api_key=spec.api_key,
     )
 
 

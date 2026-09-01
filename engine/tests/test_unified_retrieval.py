@@ -137,7 +137,7 @@ def test_build_agent_runner_uses_unified_search_with_mode(monkeypatch):
     # avoid real model/tools
     monkeypatch.setattr(ans, "AgenticRagRunner", lambda **kw: type("R", (), {"run": lambda self, q: None})())
     monkeypatch.setattr(ans, "build_enabled_tools", lambda ctx, overrides=None: [])
-    monkeypatch.setattr(ans, "create_chat_model", lambda s: object())
+    monkeypatch.setattr(ans, "create_chat_model", lambda: object())
 
     ans.build_agent_runner(topic_id=None, source_types=None, deep_search_enabled=False, clarify_depth=0)
     assert captured["mode"] == "fast"

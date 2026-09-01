@@ -566,7 +566,7 @@ def build_agent_runner(
     """
     tool_groups = tool_groups or []
     has_knowledge = "knowledge" in tool_groups
-    model = create_chat_model(settings)
+    model = create_chat_model()
 
     # --- Build ToolContext ---------------------------------------------------
     ctx_kwargs: dict[str, Any] = dict(

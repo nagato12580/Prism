@@ -1001,7 +1001,7 @@ def test_build_agent_runner_enables_deep_search_tool_when_requested(monkeypatch)
 
     monkeypatch.setattr(answer, "_resolve_search_scope", lambda topic_id, source_types=None: None)
     monkeypatch.setattr(answer, "build_enabled_tools", fake_build_enabled_tools)
-    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+    monkeypatch.setattr(answer, "create_chat_model", lambda: FakeModel())
 
     runner = answer.build_agent_runner(deep_search_enabled=True, deep_search_depth="deep")
 
@@ -1015,7 +1015,7 @@ def test_build_agent_runner_does_not_advertise_deep_search_when_disabled(monkeyp
 
     monkeypatch.setattr(answer, "_resolve_search_scope", lambda topic_id, source_types=None: None)
     monkeypatch.setattr(answer, "build_enabled_tools", lambda ctx, overrides=None: [])
-    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+    monkeypatch.setattr(answer, "create_chat_model", lambda: FakeModel())
 
     runner = answer.build_agent_runner(deep_search_enabled=False)
 
@@ -1032,7 +1032,7 @@ def test_build_agent_runner_places_chat_controls_on_rag_runner(monkeypatch):
     monkeypatch.setattr(answer, "_resolve_search_scope", lambda *args: None)
     monkeypatch.setattr(answer, "AgenticRagRunner", fake_rag_runner)
     monkeypatch.setattr(answer, "build_enabled_tools", lambda ctx, overrides=None: [])
-    monkeypatch.setattr(answer, "create_chat_model", lambda settings: object())
+    monkeypatch.setattr(answer, "create_chat_model", lambda: object())
 
     answer.build_agent_runner(
         deep_search_enabled=True,
@@ -1061,7 +1061,7 @@ def test_build_agent_runner_adds_memory_search_to_authorized_knowledge_scope(mon
             self.name = name
 
     monkeypatch.setattr(answer, "_resolve_search_scope", lambda *args: None)
-    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+    monkeypatch.setattr(answer, "create_chat_model", lambda: FakeModel())
     monkeypatch.setattr(
         answer,
         "build_knowledge_tools",
@@ -1108,7 +1108,7 @@ def test_build_agent_runner_applies_iteration_limit_to_authorized_knowledge_scop
         pass
 
     monkeypatch.setattr(answer, "_resolve_search_scope", lambda *args: None)
-    monkeypatch.setattr(answer, "create_chat_model", lambda settings: FakeModel())
+    monkeypatch.setattr(answer, "create_chat_model", lambda: FakeModel())
     monkeypatch.setattr(answer, "build_knowledge_tools", lambda ctx: {})
 
     runner = answer.build_agent_runner(
