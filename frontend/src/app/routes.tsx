@@ -26,6 +26,7 @@ import { KnowledgeMindmapPage } from '@/features/knowledge/pages/KnowledgeMindma
 import { KnowledgeEvaluationPage } from '@/features/knowledge/pages/KnowledgeEvaluationPage'
 import { KnowledgeSettingsPage } from '@/features/knowledge/pages/KnowledgeSettingsPage'
 import { TeamAdminPage } from '@/features/team/pages/TeamAdminPage'
+import { ModelConfigPage } from '@/features/modelConfig/pages/ModelConfigPage'
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
           },
           { path: 'wiki', element: <WikiPage /> },
           { path: 'team/admin', element: <TeamAdminPage /> },
+          { path: 'settings/models', element: <ModelConfigPage /> },
           { path: 'memory/inbox', element: <MemoryInboxPage /> },
           { path: 'memory/profile', element: <UserProfilePage /> },
           { path: 'memory/graph', element: <MemoryGraphPage /> },

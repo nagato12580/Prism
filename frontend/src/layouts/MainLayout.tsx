@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Moon,
   Network,
+  Settings,
   ShieldCheck,
   Sun,
   Waypoints,
@@ -49,7 +50,10 @@ const navSections = [
   },
   {
     label: '管理',
-    items: [{ to: '/team/admin', label: '团队管理', icon: ShieldCheck }],
+    items: [
+      { to: '/team/admin', label: '团队管理', icon: ShieldCheck },
+      { to: '/settings/models', label: '模型配置', icon: Settings },
+    ],
   },
 ]
 
@@ -179,6 +183,14 @@ function NavList({ onNavigate, isDark = false, draftCount = 0 }: { onNavigate?: 
           label="团队管理"
           icon={ShieldCheck}
           active={location.pathname === '/team/admin' || location.pathname.startsWith('/team/admin/')}
+          isDark={isDark}
+          onNavigate={onNavigate}
+        />
+        <NavItem
+          to="/settings/models"
+          label="模型配置"
+          icon={Settings}
+          active={location.pathname === '/settings/models' || location.pathname.startsWith('/settings/models/')}
           isDark={isDark}
           onNavigate={onNavigate}
         />
